@@ -1,3 +1,5 @@
+cmake_minimum_required(VERSION 3.28)
+
 # Exercise the real executable without a display, using isolated output files.
 file(MAKE_DIRECTORY "${WORK_DIR}")
 file(REMOVE "${WORK_DIR}/signal.csv" "${WORK_DIR}/signal.csv.json"

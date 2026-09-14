@@ -1,5 +1,7 @@
 # Siggen
 
+[![CI](https://github.com/ronnymilleo/siggen/actions/workflows/ci.yml/badge.svg)](https://github.com/ronnymilleo/siggen/actions/workflows/ci.yml)
+
 A C++23 signal generator with a command-line interface and optional ImGui/ImPlot
 GUI. Generate reproducible complex I/Q samples for BPSK, QPSK, Gray-coded 8-PSK,
 Gray-coded square 16-QAM, Gray-coded square 64-QAM, and complex white Gaussian
