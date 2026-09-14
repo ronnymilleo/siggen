@@ -1,0 +1,311 @@
+{
+  "version": 6,
+  "cmakeMinimumRequired": {
+    "major": 3,
+    "minor": 28,
+    "patch": 0
+  },
+  "configurePresets": [
+    {
+      "name": "base",
+      "hidden": true,
+      "generator": "Ninja",
+      "binaryDir": "${sourceDir}/build/${presetName}",
+      "cacheVariables": {
+        "CMAKE_BUILD_TYPE": "Debug",
+        "CMAKE_EXPORT_COMPILE_COMMANDS": "ON",
+        "SIGGEN_BUILD_GUI": "ON",
+        "SIGGEN_BUILD_TESTS": "ON",
+        "SIGGEN_ENABLE_WARNINGS": "ON",
+        "SIGGEN_SANITIZER": "none",
+        "SIGGEN_BUILD_APP": "ON"
+      }
+    },
+    {
+      "name": "dev",
+      "inherits": "base"
+    },
+    {
+      "name": "release",
+      "inherits": "base",
+      "cacheVariables": {
+        "CMAKE_BUILD_TYPE": "Release"
+      }
+    },
+    {
+      "name": "headless",
+      "inherits": "base",
+      "cacheVariables": {
+        "SIGGEN_BUILD_GUI": "OFF"
+      }
+    },
+    {
+      "name": "headless-release",
+      "inherits": "headless",
+      "cacheVariables": {
+        "CMAKE_BUILD_TYPE": "Release"
+      }
+    },
+    {
+      "name": "clang-headless",
+      "inherits": "headless",
+      "cacheVariables": {
+        "CMAKE_CXX_COMPILER": "clang++"
+      },
+      "condition": {
+        "type": "equals",
+        "lhs": "${hostSystemName}",
+        "rhs": "Linux"
+      }
+    },
+    {
+      "name": "asan",
+      "inherits": "headless",
+      "cacheVariables": {
+        "CMAKE_CXX_COMPILER": "g++",
+        "SIGGEN_SANITIZER": "address-undefined"
+      },
+      "condition": {
+        "type": "equals",
+        "lhs": "${hostSystemName}",
+        "rhs": "Linux"
+      }
+    },
+    {
+      "name": "tsan",
+      "inherits": "headless",
+      "cacheVariables": {
+        "CMAKE_CXX_COMPILER": "g++",
+        "SIGGEN_SANITIZER": "thread"
+      },
+      "condition": {
+        "type": "equals",
+        "lhs": "${hostSystemName}",
+        "rhs": "Linux"
+      }
+    }
+  ],
+  "buildPresets": [
+    {
+      "name": "dev",
+      "configurePreset": "dev"
+    },
+    {
+      "name": "release",
+      "configurePreset": "release"
+    },
+    {
+      "name": "headless",
+      "configurePreset": "headless"
+    },
+    {
+      "name": "headless-release",
+      "configurePreset": "headless-release"
+    },
+    {
+      "name": "clang-headless",
+      "configurePreset": "clang-headless"
+    },
+    {
+      "name": "asan",
+      "configurePreset": "asan"
+    },
+    {
+      "name": "tsan",
+      "configurePreset": "tsan"
+    }
+  ],
+  "testPresets": [
+    {
+      "name": "dev",
+      "configurePreset": "dev",
+      "output": {
+        "outputOnFailure": true
+      },
+      "execution": {
+        "noTestsAction": "error"
+      }
+    },
+    {
+      "name": "release",
+      "configurePreset": "release",
+      "output": {
+        "outputOnFailure": true
+      },
+      "execution": {
+        "noTestsAction": "error"
+      }
+    },
+    {
+      "name": "headless",
+      "configurePreset": "headless",
+      "output": {
+        "outputOnFailure": true
+      },
+      "execution": {
+        "noTestsAction": "error"
+      }
+    },
+    {
+      "name": "headless-release",
+      "configurePreset": "headless-release",
+      "output": {
+        "outputOnFailure": true
+      },
+      "execution": {
+        "noTestsAction": "error"
+      }
+    },
+    {
+      "name": "clang-headless",
+      "configurePreset": "clang-headless",
+      "output": {
+        "outputOnFailure": true
+      },
+      "execution": {
+        "noTestsAction": "error"
+      }
+    },
+    {
+      "name": "asan",
+      "configurePreset": "asan",
+      "output": {
+        "outputOnFailure": true
+      },
+      "execution": {
+        "noTestsAction": "error"
+      }
+    },
+    {
+      "name": "tsan",
+      "configurePreset": "tsan",
+      "output": {
+        "outputOnFailure": true
+      },
+      "execution": {
+        "noTestsAction": "error"
+      }
+    }
+  ],
+  "workflowPresets": [
+    {
+      "name": "dev",
+      "steps": [
+        {
+          "type": "configure",
+          "name": "dev"
+        },
+        {
+          "type": "build",
+          "name": "dev"
+        },
+        {
+          "type": "test",
+          "name": "dev"
+        }
+      ]
+    },
+    {
+      "name": "release",
+      "steps": [
+        {
+          "type": "configure",
+          "name": "release"
+        },
+        {
+          "type": "build",
+          "name": "release"
+        },
+        {
+          "type": "test",
+          "name": "release"
+        }
+      ]
+    },
+    {
+      "name": "headless",
+      "steps": [
+        {
+          "type": "configure",
+          "name": "headless"
+        },
+        {
+          "type": "build",
+          "name": "headless"
+        },
+        {
+          "type": "test",
+          "name": "headless"
+        }
+      ]
+    },
+    {
+      "name": "headless-release",
+      "steps": [
+        {
+          "type": "configure",
+          "name": "headless-release"
+        },
+        {
+          "type": "build",
+          "name": "headless-release"
+        },
+        {
+          "type": "test",
+          "name": "headless-release"
+        }
+      ]
+    },
+    {
+      "name": "clang-headless",
+      "steps": [
+        {
+          "type": "configure",
+          "name": "clang-headless"
+        },
+        {
+          "type": "build",
+          "name": "clang-headless"
+        },
+        {
+          "type": "test",
+          "name": "clang-headless"
+        }
+      ]
+    },
+    {
+      "name": "asan",
+      "steps": [
+        {
+          "type": "configure",
+          "name": "asan"
+        },
+        {
+          "type": "build",
+          "name": "asan"
+        },
+        {
+          "type": "test",
+          "name": "asan"
+        }
+      ]
+    },
+    {
+      "name": "tsan",
+      "steps": [
+        {
+          "type": "configure",
+          "name": "tsan"
+        },
+        {
+          "type": "build",
+          "name": "tsan"
+        },
+        {
+          "type": "test",
+          "name": "tsan"
+        }
+      ]
+    }
+  ]
+}

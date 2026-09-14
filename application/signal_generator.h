@@ -1,0 +1,38 @@
+#pragma once
+#include "generation_job.h"
+#include "imgui_window_layer.h"
+#include "iq_export.h"
+#include "plot_data.h"
+#include <string>
+
+class SignalGenerator : public ImGuiWindowLayer
+{
+public:
+    explicit SignalGenerator(iq::GenerationConfig config = {});
+    ~SignalGenerator() override = default;
+
+protected:
+    void DrawContents() override;
+
+private:
+    friend struct SignalGeneratorTestAccess;
+    iq::GenerationConfig                       config_;
+    std::vector<char>                          bit_input_;
+    GenerationJob                              job_;
+    std::string                                error_;
+    PlotData                                   plots_;
+    iq::Spectrum                               spectrum_;
+    std::vector<double>                        spectrum_db_;
+    bool                                       waveform_fit_       = true;
+    bool                                       spectrum_fit_       = true;
+    char                                       preset_path_[1024]  = "default.preset";
+    int                                        constellation_view_ = 0;
+    void                                       DrawPlots();
+    void                                       DrawExportDialog();
+    void                                       Export(bool overwrite);
+    char                                       export_path_[1024] = "signal.csv";
+    int                                        export_format_     = 0;
+    std::shared_ptr<const iq::GeneratedSignal> export_result_;
+    std::string                                export_status_;
+    bool                                       confirm_overwrite_ = false;
+};

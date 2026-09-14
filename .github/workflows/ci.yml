@@ -1,0 +1,26 @@
+name: CI
+
+on:
+  push:
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  linux-headless:
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Check out the repository
+        uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      - name: Install build tools
+        run: sudo apt-get update && sudo apt-get install --yes cmake ninja-build g++ clang
+
+      - name: Validate GCC
+        run: cmake --workflow --preset headless
+
+      - name: Validate Clang
+        run: cmake --workflow --preset clang-headless
