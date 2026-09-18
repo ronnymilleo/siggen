@@ -10,6 +10,17 @@ constellations and a two-sided spectrum; save presets; export single signals; an
 generate swept fixed-length frame datasets (`siggen batch`) for classifier
 training. This application generates complex baseband, not an RF carrier.
 
+<div align="center">
+  <img width="952" height="1040" alt="image" src="https://github.com/user-attachments/assets/e3b1460e-60e9-4812-90b6-55bfb21fdd97" />
+  <p align="center"><em>Waveform - Captured in Arch Linux with Hyprland</em></p>
+
+  <img width="954" height="372" alt="image" src="https://github.com/user-attachments/assets/edb93423-c40b-4376-a4ec-829189cd89ae" />
+  <p align="center"><em>Constellation - Captured in Arch Linux with Hyprland</em></p>
+
+  <img width="955" height="365" alt="image" src="https://github.com/user-attachments/assets/21a40add-c82b-4d7e-8faa-69fd4e968864" />
+  <p align="center"><em>Spectrum - Captured in Arch Linux with Hyprland</em></p>
+</div>
+
 ## Build and test
 
 Requirements: CMake 3.28+, a C++23 compiler and standard library (including
