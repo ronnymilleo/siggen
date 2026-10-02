@@ -112,7 +112,7 @@ void SignalGenerator::DrawContents()
         validation = e.what();
     }
     if (!validation.empty())
-        ImGui::TextWrapped("Invalid settings: %s", validation.c_str());
+        ImGui::TextColored(ImVec4(.96f, .45f, .40f, 1.f), "Invalid settings: %s", validation.c_str());
     ImGui::Separator();
     ImGui::BeginDisabled(job_.busy() || !validation.empty());
     if (ImGui::Button("Generate Signal"))
@@ -148,7 +148,7 @@ void SignalGenerator::DrawContents()
         ImGui::TextUnformatted("Generating...");
     }
     if (!error_.empty())
-        ImGui::TextWrapped("Operation failed: %s", error_.c_str());
+        ImGui::TextColored(ImVec4(.96f, .45f, .40f, 1.f), "Operation failed: %s", error_.c_str());
     if (ImGui::CollapsingHeader("Presets"))
     {
         ImGui::InputText("Preset path", preset_path_, sizeof preset_path_);
@@ -189,7 +189,7 @@ void SignalGenerator::DrawContents()
     if (const auto& r = job_.result())
     {
         if (r->config != config_)
-            ImGui::TextUnformatted("Settings changed. Generate to update the displayed result.");
+            ImGui::TextColored(ImVec4(.95f, .75f, .30f, 1.f), "Settings changed. Generate to update the displayed result.");
         if (r->family == iq::Family::Noise)
         {
             double total = 0;
@@ -218,7 +218,7 @@ void SignalGenerator::DrawContents()
         DrawPlots();
     }
     else
-        ImGui::TextUnformatted("No signal generated yet. Choose settings and select Generate Signal.");
+        ImGui::TextDisabled("No signal generated yet. Choose settings and select Generate Signal.");
 }
 
 void SignalGenerator::DrawPlots()
