@@ -2,6 +2,18 @@
 #include "implot_internal.h"
 #include "signal_generator.h"
 #include <gtest/gtest.h>
+// The tab bar lives inside a layout table cell, whose ID scope differs from the window's; find it by its tab names.
+static ImGuiTabBar* find_signal_views()
+{
+    auto* ctx = ImGui::GetCurrentContext();
+    for (int i = 0; i < ctx->TabBars.GetMapSize(); ++i)
+        if (auto* bar = ctx->TabBars.TryGetMapData(i))
+            for (auto& tab : bar->Tabs)
+                if (std::string(ImGui::TabBarGetTabName(bar, &tab)) == "Waveform")
+                    return bar;
+    return nullptr;
+}
+
 TEST(UI, InitialInvalidAndResizedFrames)
 {
     ImGui::CreateContext();
@@ -165,7 +177,7 @@ TEST(UI, GeneratedViewsAndPendingClosure)
             frame(window);
             auto* gui_window = ImGui::FindWindowByName("Signal Generator");
             ASSERT_NE(gui_window, nullptr);
-            auto* bar = ImGui::GetCurrentContext()->TabBars.GetByKey(ImHashStr("Signal views", 0, gui_window->ID));
+            auto* bar = find_signal_views();
             ASSERT_NE(bar, nullptr);
             const bool matched = std::string(view) == "Matched";
             SignalGeneratorTestAccess::matched(window, matched);
@@ -275,7 +287,7 @@ TEST(UI, NoiseSourceRendersWithoutConstellation)
         EXPECT_GT(ImGui::GetDrawData()->TotalVtxCount, 0);
         auto* gui_window = ImGui::FindWindowByName("Signal Generator");
         ASSERT_NE(gui_window, nullptr);
-        auto* bar = ImGui::GetCurrentContext()->TabBars.GetByKey(ImHashStr("Signal views", 0, gui_window->ID));
+        auto* bar = find_signal_views();
         ASSERT_NE(bar, nullptr);
         bool saw_waveform = false, saw_spectrum = false;
         for (auto& tab : bar->Tabs)

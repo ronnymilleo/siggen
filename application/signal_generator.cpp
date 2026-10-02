@@ -4,7 +4,27 @@
 #include "preset.h"
 #include <algorithm>
 #include <cmath>
+#include <cstdio>
 #include <spdlog/spdlog.h>
+
+namespace
+{
+void Metric(const char* label, const std::string& value, bool first = false)
+{
+    if (!first)
+        ImGui::SameLine(0, 28);
+    ImGui::BeginGroup();
+    ImGui::TextDisabled("%s", label);
+    ImGui::TextUnformatted(value.c_str());
+    ImGui::EndGroup();
+}
+std::string num(const char* f, double v)
+{
+    char buf[48];
+    std::snprintf(buf, sizeof buf, f, v);
+    return buf;
+}
+} // namespace
 
 SignalGenerator::SignalGenerator(iq::GenerationConfig config)
     : ImGuiWindowLayer("Signal Generator"), config_(std::move(config)), bit_input_(iq::MAX_EXPLICIT_BITS + 1, 0)
@@ -43,6 +63,16 @@ void SignalGenerator::DrawContents()
         spdlog::error("Generation or analysis failed: {}", e.what());
         error_ = e.what();
     }
+    const bool two_pane = ImGui::BeginTable("layout", 2, ImGuiTableFlags_Resizable | ImGuiTableFlags_BordersInnerV |
+                                                             ImGuiTableFlags_SizingStretchProp);
+    if (two_pane)
+    {
+        ImGui::TableSetupColumn("controls", ImGuiTableColumnFlags_WidthStretch, .36f);
+        ImGui::TableSetupColumn("results", ImGuiTableColumnFlags_WidthStretch, .64f);
+        ImGui::TableNextRow();
+        ImGui::TableNextColumn();
+    }
+    ImGui::PushItemWidth(std::clamp(ImGui::GetContentRegionAvail().x * .5f, 150.f, 360.f));
     ImGui::SeparatorText("Signal Setup");
     if (ImGui::BeginCombo("Modulation", iq::modulation_name(config_.modulation))) {
         for (const auto& waveform : iq::waveforms()) {
@@ -113,6 +143,7 @@ void SignalGenerator::DrawContents()
     }
     if (!validation.empty())
         ImGui::TextColored(ImVec4(.96f, .45f, .40f, 1.f), "Invalid settings: %s", validation.c_str());
+    ImGui::PopItemWidth();
     ImGui::Separator();
     ImGui::BeginDisabled(job_.busy() || !validation.empty());
     if (ImGui::Button("Generate Signal"))
@@ -185,6 +216,8 @@ void SignalGenerator::DrawContents()
             }
         }
     }
+    if (two_pane)
+        ImGui::TableNextColumn();
     ImGui::SeparatorText("Signal Summary");
     if (const auto& r = job_.result())
     {
@@ -195,21 +228,24 @@ void SignalGenerator::DrawContents()
             double total = 0;
             for (const auto& sample : r->samples) total += std::norm(sample);
             const auto mean_power = r->samples.empty() ? 0 : total / static_cast<double>(r->samples.size());
-            ImGui::Text("%s | %zu complex samples", iq::modulation_name(r->config.modulation), r->samples.size());
-            ImGui::Text("Sample rate: %.6g Hz | Duration: %.6g s", r->sample_rate_hz,
-                        r->samples.size() / r->sample_rate_hz);
-            ImGui::Text("Configured noise power: %.6g | Measured mean power: %.6g | Gain: %.6g",
-                        r->config.noise_source.noise_power, mean_power, r->config.amplitude_gain);
-            ImGui::Text("Noise seed: %u", r->noise.noise_seed);
+            Metric("Signal", std::string(iq::modulation_name(r->config.modulation)), true);
+            Metric("Samples", std::to_string(r->samples.size()));
+            Metric("Sample rate", num("%.6g Hz", r->sample_rate_hz));
+            Metric("Duration", num("%.6g s", r->samples.size() / r->sample_rate_hz));
+            Metric("Noise power (set)", num("%.6g", r->config.noise_source.noise_power), true);
+            Metric("Mean power (measured)", num("%.6g", mean_power));
+            Metric("Gain", num("%.6g", r->config.amplitude_gain));
+            Metric("Noise seed", std::to_string(r->noise.noise_seed));
         }
         else
         {
-            ImGui::Text("%s | %zu symbols | %zu complex samples", iq::modulation_name(r->config.modulation),
-                        r->symbols.size(), r->samples.size());
-            ImGui::Text("Sample rate: %.6g Hz | Buffer duration: %.6g s", r->sample_rate_hz,
-                        r->samples.size() / r->sample_rate_hz);
-            ImGui::Text("Filter delay: %zu samples (%.6g s) | Gain: %.6g", r->filter_delay_samples,
-                        r->filter_delay_samples / r->sample_rate_hz, r->config.amplitude_gain);
+            Metric("Signal", std::string(iq::modulation_name(r->config.modulation)), true);
+            Metric("Symbols", std::to_string(r->symbols.size()));
+            Metric("Samples", std::to_string(r->samples.size()));
+            Metric("Sample rate", num("%.6g Hz", r->sample_rate_hz));
+            Metric("Duration", num("%.6g s", r->samples.size() / r->sample_rate_hz));
+            Metric("Filter delay", std::to_string(r->filter_delay_samples) + " samples", true);
+            Metric("Gain", num("%.6g", r->config.amplitude_gain));
             if (r->noise.awgn_applied)
                 ImGui::Text("AWGN: requested %.6g dB | reference power %.6g over [%zu,%zu) | added noise power %.6g | noise seed %u",
                             r->noise.requested_snr_db, r->noise.reference_power, r->noise.reference_begin,
@@ -219,6 +255,8 @@ void SignalGenerator::DrawContents()
     }
     else
         ImGui::TextDisabled("No signal generated yet. Choose settings and select Generate Signal.");
+    if (two_pane)
+        ImGui::EndTable();
 }
 
 void SignalGenerator::DrawPlots()
@@ -231,7 +269,7 @@ void SignalGenerator::DrawPlots()
         ImGui::Text("I: blue | Q: orange | %zu plotted points (min/max reduction)", plots_.time.size());
         if (waveform_fit_)
             ImPlot::SetNextAxesToFit();
-        if (ImPlot::BeginPlot("Complex baseband", ImVec2(-1, 280)))
+        if (ImPlot::BeginPlot("Complex baseband", ImVec2(-1, -1)))
         {
             waveform_fit_ = false;
             ImPlot::SetupAxes("Time (s)", "Amplitude");
@@ -254,7 +292,7 @@ void SignalGenerator::DrawPlots()
         const auto& data = constellation_view_ == 0 ? plots_.mapped : plots_.matched;
         if (data.x.empty())
             ImGui::TextWrapped("No steady-state symbols: increase symbol count beyond twice the RRC span.");
-        if (ImPlot::BeginPlot("I/Q constellation", ImVec2(-1, 320), ImPlotFlags_Equal))
+        if (ImPlot::BeginPlot("I/Q constellation", ImVec2(-1, -1), ImPlotFlags_Equal))
         {
             ImPlot::SetupAxes("In-phase (I)", "Quadrature (Q)", ImPlotAxisFlags_AutoFit, ImPlotAxisFlags_AutoFit);
             ImPlot::SetNextMarkerStyle(ImPlotMarker_Circle, 3, ImVec4(.2f, .6f, 1.f, 1.f));
@@ -274,7 +312,7 @@ void SignalGenerator::DrawPlots()
         {
             if (spectrum_fit_)
                 ImPlot::SetNextAxesToFit();
-            if (ImPlot::BeginPlot("Baseband PSD", ImVec2(-1, 300)))
+            if (ImPlot::BeginPlot("Baseband PSD", ImVec2(-1, -1)))
             {
                 spectrum_fit_ = false;
                 ImPlot::SetupAxes("Frequency (Hz)", "PSD (dB re 1 amplitude^2/Hz)");

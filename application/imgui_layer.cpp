@@ -15,6 +15,7 @@
 #include "imgui_impl_glfw.h"
 #include "imgui_impl_opengl3.h"
 #include "implot.h"
+#include <filesystem>
 
 /***********************************************************************************************************************
  * METHOD DEFINITIONS
@@ -128,9 +129,24 @@ void ImGuiLayer::Init(GLFWwindow* window)
     ApplyTheme();
     ImGui_ImplGlfw_InitForOpenGL(window, true);
     ImGui_ImplOpenGL3_Init("#version 330");
+    // Prefer a system UI font; fall back to the built-in one when none is installed.
+    constexpr const char* font_candidates[] = {
 #ifdef _WIN32
-    io.Fonts->AddFontFromFileTTF(R"(C:\Windows\Fonts\segoeui.ttf)", 18.0f);
+        R"(C:\Windows\Fonts\segoeui.ttf)",
+#elif defined(__APPLE__)
+        "/System/Library/Fonts/Helvetica.ttc",
+#else
+        "/usr/share/fonts/truetype/inter/Inter-Regular.ttf",
+        "/usr/share/fonts/truetype/noto/NotoSans-Regular.ttf",
+        "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf",
+        "/usr/share/fonts/truetype/liberation/LiberationSans-Regular.ttf",
 #endif
+    };
+    for (const char* path : font_candidates)
+    {
+        if (std::filesystem::exists(path) && io.Fonts->AddFontFromFileTTF(path, 17.0f))
+            break;
+    }
 }
 
 void ImGuiLayer::Terminate()
