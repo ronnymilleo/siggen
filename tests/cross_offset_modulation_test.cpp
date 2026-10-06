@@ -215,6 +215,56 @@ TEST(Oqpsk, NoiseExportAndBatchFrames) {
     }
 }
 
+TEST(Dpsk8, GrayPhaseIncrements) {
+    const auto s = map_symbols(Modulation::DPSK8, "000" "001" "011" "010" "100");
+    // Steps 0, 1, 2, 3, 7 of pi/4 accumulate to phases 0, 1, 3, 6, 5 (units of pi/4).
+    const int expected_phase[5] = {0, 1, 3, 6, 5};
+    for (std::size_t k = 0; k < 5; ++k) {
+        EXPECT_NEAR(std::abs(s[k]), 1, 1e-6);
+        const auto angle = static_cast<float>(expected_phase[k]) * std::numbers::pi_v<float> / 4;
+        EXPECT_LT(std::abs(s[k] - std::polar(1.f, angle)), 1e-5f) << k;
+    }
+    GenerationConfig c;
+    c.modulation = Modulation::DPSK8;
+    c.symbol_count = 200;
+    const auto symbols = generate(c).symbols;
+    const auto rotation = std::polar(1.f, 0.3f); // Less than half a step: a constant rotation must not change the data.
+    std::set<int> seen;
+    for (std::size_t k = 1; k < symbols.size(); ++k) {
+        const auto index = [](float angle) { return (static_cast<int>(std::lround(angle / (std::numbers::pi / 4))) + 8) % 8; };
+        const auto step = index(std::arg(symbols[k] * std::conj(symbols[k - 1])));
+        EXPECT_EQ(step, index(std::arg(symbols[k] * rotation * std::conj(symbols[k - 1] * rotation))));
+        seen.insert(step);
+    }
+    EXPECT_EQ(seen.size(), 8u); // Every increment occurs in a long random sequence.
+}
+
+TEST(Ask4, UnipolarGrayLevels) {
+    const auto points = constellation(Modulation::ASK4);
+    const float s = 1 / std::sqrt(3.5f);
+    // Labels 00, 01, 11, 10 ascend 0, 1, 2, 3.
+    EXPECT_NEAR(points[0].real(), 0 * s, 1e-6);
+    EXPECT_NEAR(points[1].real(), 1 * s, 1e-6);
+    EXPECT_NEAR(points[3].real(), 2 * s, 1e-6);
+    EXPECT_NEAR(points[2].real(), 3 * s, 1e-6);
+    double energy = 0, mean = 0;
+    for (auto p : points) {
+        EXPECT_EQ(p.imag(), 0);
+        EXPECT_GE(p.real(), 0);
+        energy += std::norm(p);
+        mean += p.real();
+    }
+    EXPECT_NEAR(energy / 4, 1, 1e-6);
+    EXPECT_GT(mean, 0); // Non-zero mean: the spectrum has a carrier line, like OOK.
+    GenerationConfig c;
+    c.modulation = Modulation::ASK4;
+    c.symbol_count = 256;
+    const auto r = generate(c);
+    const auto accuracy = symbol_accuracy(r);
+    ASSERT_TRUE(accuracy);
+    EXPECT_LT(accuracy->evm_rms, .02);
+}
+
 TEST(NewModulations, NamesPresetsAndIdentifiers) {
     Modulation parsed{};
     ASSERT_TRUE(parse_modulation("32-qam", parsed));
@@ -227,10 +277,16 @@ TEST(NewModulations, NamesPresetsAndIdentifiers) {
     EXPECT_EQ(waveform_id(Modulation::QAM32), 14);
     EXPECT_EQ(waveform_id(Modulation::OQPSK), 15);
     EXPECT_EQ(waveform_id(Modulation::PI4DQPSK), 16);
+    EXPECT_EQ(waveform_id(Modulation::DPSK8), 17);
+    EXPECT_EQ(waveform_id(Modulation::ASK4), 18);
+    ASSERT_TRUE(parse_modulation("8-dpsk", parsed));
+    EXPECT_EQ(parsed, Modulation::DPSK8);
+    ASSERT_TRUE(parse_modulation("4-ask", parsed));
+    EXPECT_EQ(parsed, Modulation::ASK4);
     std::set<int> ids;
     for (const auto& entry : waveforms()) ids.insert(entry.stable_id);
     EXPECT_EQ(ids.size(), waveforms().size());
-    for (auto m : {Modulation::QAM32, Modulation::OQPSK, Modulation::PI4DQPSK}) {
+    for (auto m : {Modulation::QAM32, Modulation::OQPSK, Modulation::PI4DQPSK, Modulation::DPSK8, Modulation::ASK4}) {
         GenerationConfig c;
         c.modulation = m;
         c.data_source = DataSource::Explicit;

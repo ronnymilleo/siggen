@@ -5,7 +5,7 @@
 
 namespace iq {
 // Canonical waveform set. WGN is a noise source, not a symbol modulation.
-enum class Modulation { BPSK, QPSK, PSK8, QAM16, QAM64, WGN, OOK, PAM4, DBPSK, DQPSK, QAM256, FSK2, FSK4, MSK, QAM32, OQPSK, PI4DQPSK };
+enum class Modulation { BPSK, QPSK, PSK8, QAM16, QAM64, WGN, OOK, PAM4, DBPSK, DQPSK, QAM256, FSK2, FSK4, MSK, QAM32, OQPSK, PI4DQPSK, DPSK8, ASK4 };
 enum class Pulse { RRC, Rectangular };
 enum class DataSource { Random, Explicit };
 // Linear: mapped symbols convolved with a pulse. Noise: seeded complex WGN.

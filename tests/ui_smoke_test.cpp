@@ -157,7 +157,7 @@ TEST(UI, GeneratedViewsAndPendingClosure)
     for (auto modulation : {iq::Modulation::BPSK, iq::Modulation::QPSK, iq::Modulation::PSK8,
                             iq::Modulation::QAM16, iq::Modulation::QAM64, iq::Modulation::QAM256,
                             iq::Modulation::OOK, iq::Modulation::PAM4, iq::Modulation::DBPSK,
-                            iq::Modulation::DQPSK, iq::Modulation::QAM32, iq::Modulation::OQPSK, iq::Modulation::PI4DQPSK, iq::Modulation::FSK2, iq::Modulation::FSK4,
+                            iq::Modulation::DQPSK, iq::Modulation::QAM32, iq::Modulation::OQPSK, iq::Modulation::PI4DQPSK, iq::Modulation::DPSK8, iq::Modulation::ASK4, iq::Modulation::FSK2, iq::Modulation::FSK4,
                             iq::Modulation::MSK})
     {
         iq::GenerationConfig c;
@@ -224,12 +224,13 @@ TEST(UI, GeneratedViewsAndPendingClosure)
                     {
                         EXPECT_NEAR(plot.XAxis(0).GetAspect(), plot.YAxis(0).GetAspect(), 1e-12);
                         const bool real_axis = modulation == iq::Modulation::BPSK || modulation == iq::Modulation::DBPSK ||
-                                               modulation == iq::Modulation::OOK || modulation == iq::Modulation::PAM4;
+                                               modulation == iq::Modulation::OOK || modulation == iq::Modulation::PAM4 ||
+                                               modulation == iq::Modulation::ASK4;
                         if (!real_axis)
                         {
                             const double outer = modulation == iq::Modulation::QPSK || modulation == iq::Modulation::DQPSK || modulation == iq::Modulation::OQPSK
                                                      ? 1 / std::sqrt(2.)
-                                                 : modulation == iq::Modulation::PSK8 || modulation == iq::Modulation::PI4DQPSK ? 1.
+                                                 : modulation == iq::Modulation::PSK8 || modulation == iq::Modulation::PI4DQPSK || modulation == iq::Modulation::DPSK8 ? 1.
                                                  : modulation == iq::Modulation::QAM16  ? 3 / std::sqrt(10.)
                                                  : modulation == iq::Modulation::QAM256 ? 15 / std::sqrt(170.)
                                                  : modulation == iq::Modulation::QAM32  ? 5 / std::sqrt(20.)

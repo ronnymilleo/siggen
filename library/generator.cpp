@@ -180,7 +180,7 @@ std::vector<std::complex<float>> map_symbols(Modulation modulation, const std::s
     symbols.reserve(bits.size() / bps);
     const float a = 1.f / std::sqrt(2.f);
     // Differential schemes carry state: the phase accumulates the data increments.
-    int dbpsk_state = 0, dqpsk_state = 0, pi4_state = 0; // pi4_state counts pi/4 steps modulo 8.
+    int dbpsk_state = 0, dqpsk_state = 0, pi4_state = 0, dpsk8_state = 0; // States count pi/4 steps modulo 8.
     for (std::size_t i = 0; i < bits.size(); i += bps) {
         const float real = bits[i] == '0' ? 1.f : -1.f;
         if (modulation == Modulation::BPSK) symbols.emplace_back(real, 0);
@@ -221,6 +221,15 @@ std::vector<std::complex<float>> map_symbols(Modulation modulation, const std::s
             static constexpr float sign_i[4] = {1.f, -1.f, -1.f, 1.f}, sign_q[4] = {1.f, 1.f, -1.f, -1.f};
             symbols.emplace_back(sign_i[dqpsk_state] * a, sign_q[dqpsk_state] * a);
         }
+        else if (modulation == Modulation::DPSK8) {
+            // Gray phase increments: labels 000, 001, 011, 010, 110, 111, 101, 100 turn the phase by 0..7 steps of pi/4.
+            dpsk8_state = (dpsk8_state + psk8_phase_index[bits_value(bits, i, 3)]) % 8;
+            const auto angle = static_cast<double>(dpsk8_state) * std::numbers::pi / 4;
+            symbols.emplace_back(static_cast<float>(std::cos(angle)), static_cast<float>(std::sin(angle)));
+        }
+        else if (modulation == Modulation::ASK4)
+            // Unipolar levels 0..3 by Gray label 00, 01, 11, 10; mean energy (0+1+4+9)/4 = 3.5.
+            symbols.emplace_back(static_cast<float>(gray_index(bits_value(bits, i, 2))) / std::sqrt(3.5f), 0);
         else if (modulation == Modulation::PI4DQPSK) {
             // Gray phase increments 00 -> +45, 01 -> +135, 11 -> -135, 10 -> -45 degrees (units of pi/4).
             constexpr int increment[4] = {1, 3, 7, 5}; // Indexed by the label value 00,01,10,11.

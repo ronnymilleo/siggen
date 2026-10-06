@@ -9,7 +9,7 @@
 
 namespace iq {
 namespace {
-constexpr std::array<WaveformDescriptor, 17> descriptors{{
+constexpr std::array<WaveformDescriptor, 19> descriptors{{
     {Modulation::BPSK, "BPSK", Family::Linear, 1, true, true, true, 0},
     {Modulation::QPSK, "QPSK", Family::Linear, 2, true, true, true, 1},
     {Modulation::PSK8, "8-PSK", Family::Linear, 3, true, true, true, 2},
@@ -27,6 +27,8 @@ constexpr std::array<WaveformDescriptor, 17> descriptors{{
     {Modulation::QAM32, "32-QAM", Family::Linear, 5, true, true, true, 14},
     {Modulation::OQPSK, "OQPSK", Family::Linear, 2, true, true, true, 15},
     {Modulation::PI4DQPSK, "pi/4-DQPSK", Family::Linear, 2, true, true, true, 16},
+    {Modulation::DPSK8, "8-DPSK", Family::Linear, 3, true, true, true, 17},
+    {Modulation::ASK4, "4-ASK", Family::Linear, 2, true, true, true, 18},
 }};
 std::string ascii_lower(std::string_view text) {
     std::string lowered(text);

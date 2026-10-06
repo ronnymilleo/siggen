@@ -141,7 +141,7 @@ Configuration resolves as **defaults → loaded preset → explicitly supplied C
 options**, then validates through the shared library; options that were not
 supplied never replace preset values. Modulation names (`BPSK`, `QPSK`, `8-PSK`,
 `16-QAM`, `32-QAM`, `64-QAM`, `256-QAM`, `OOK`, `4-PAM`, `DBPSK`, `DQPSK`,
-`pi/4-DQPSK`, `OQPSK`, `2-FSK`, `4-FSK`, `MSK`, `WGN`) are accepted case-insensitively; pulse names are
+`pi/4-DQPSK`, `8-DPSK`, `OQPSK`, `4-ASK`, `2-FSK`, `4-FSK`, `MSK`, `WGN`) are accepted case-insensitively; pulse names are
 `rrc` and `rectangular`. Signal options are `--preset`, `--modulation`,
 `--symbols`, `--symbol-rate`, `--sps`, `--pulse`, `--roll-off`, `--span`,
 `--tone-spacing-hz` (2-FSK and 4-FSK only), `--gain`, `--seed`,
@@ -326,7 +326,7 @@ Hamming, Blackman or Rectangular. Hann output is unchanged from earlier releases
 preset header are notes: parsers ignore them and the GUI shows them after
 **Load Preset**, so a lesson can say what to look at (for example
 `presets/02-qpsk-snr-8db.preset`). Lessons 11–16 cover 2-FSK, MSK, DQPSK under a
-carrier offset, 4-PAM, 256-QAM and OOK; lessons 17–19 cover OQPSK, pi/4-DQPSK and 32-QAM. Controls also have hover tooltips.
+carrier offset, 4-PAM, 256-QAM and OOK; lessons 17–21 cover OQPSK, pi/4-DQPSK, 32-QAM, 8-DPSK and 4-ASK. Controls also have hover tooltips.
 
 ## Mapping and reproducibility
 
@@ -445,6 +445,18 @@ degrees for bit pairs `00`, `01`, `11`, `10`. The reference phase before the fir
 symbol is 0. Every step is an odd multiple of 45 degrees, so the symbols alternate
 between two QPSK sets (offset by 45 degrees), never change phase by 180 degrees, and
 the envelope never passes through the origin. Symbols have unit energy.
+
+**8-DPSK** carries three bits per symbol as a phase change of `0` to `7` steps of
+45 degrees, using the same Gray label order as 8-PSK (`000, 001, 011, 010, 110,
+111, 101, 100` turn the phase by `0, 1, 2, 3, 4, 5, 6, 7` steps). The reference
+phase before the first symbol is 0, so a first label of `000` starts at phase 0.
+The symbol is `exp(j*phi[k])` with unit energy, and like DQPSK the data is
+recovered from `s[k] * conj(s[k-1])`, which a constant channel phase does not change.
+
+**4-ASK** is unipolar amplitude shift keying: Gray labels `00, 01, 11, 10` select
+the amplitudes `0, 1, 2, 3`, divided by `sqrt(3.5)` for unit mean energy (the energies
+`0, 1, 4, 9` average 3.5). Q is zero. Unlike the bipolar 4-PAM, the symbols have a non-zero
+mean, so the spectrum has a strong 0 Hz line, as with OOK (which is 2-ASK).
 
 ## Frequency modulation: 2-FSK, 4-FSK and MSK
 
@@ -654,7 +666,7 @@ fields listed in "Channel impairments". Version 4 is written for 2-FSK, 4-FSK an
 MSK: it adds `ToneSpacingHz` and always includes the impairment fields, and FSK
 waveforms are rejected in older versions. Version 1 only knows BPSK, QPSK and
 16-QAM. Modulation accepts `BPSK`, `QPSK`, `8-PSK`, `16-QAM`, `32-QAM`, `64-QAM`, `256-QAM`,
-`OOK`, `4-PAM`, `DBPSK`, `DQPSK`, `pi/4-DQPSK`, `OQPSK`, `2-FSK`, `4-FSK`, `MSK`, `WGN` case-insensitively; pulse accepts `RRC`,
+`OOK`, `4-PAM`, `DBPSK`, `DQPSK`, `pi/4-DQPSK`, `8-DPSK`, `OQPSK`, `4-ASK`, `2-FSK`, `4-FSK`, `MSK`, `WGN` case-insensitively; pulse accepts `RRC`,
 `Rectangular`; source accepts `Random`, `Explicit`; booleans accept `true`,
 `false`. Numbers use a locale-independent decimal point.
 Unknown/duplicate fields, unsupported versions, non-finite numbers, and trailing

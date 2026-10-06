@@ -1,0 +1,29 @@
+[IQ Generator Preset]
+# Lesson 20: differential 8-PSK.
+# 8-DPSK sends three bits as a phase change of 0 to 315 degrees in steps of 45, so the matched-filter constellation shows eight points on a circle. With a 3 Hz carrier offset the circle spins, but each step between symbols stays near a multiple of 45 degrees, so a differential receiver still decodes. Compared with coherent 8-PSK it pays a noise penalty, and with eight points the margin between neighbours is only 22.5 degrees. Set CFO to 0 and compare.
+Version=3
+Modulation=8-DPSK
+NumberOfSymbols=1024
+SymbolRateBaud=1000
+SamplesPerSymbol=8
+Pulse=RRC
+RRCBeta=0.2
+SpanSymbols=10
+AmplitudeGain=1
+DataSource=Random
+Seed=5489
+Bits=
+NoiseSampleCount=2048
+NoiseSampleRateHz=8000
+NoisePower=1
+AwgnEnabled=true
+AwgnSnrDb=28
+NoiseSeed=5490
+CfoHz=3
+PhaseNoiseLinewidthHz=0
+IqGainDb=0
+IqPhaseDeg=0
+DcOffsetI=0
+DcOffsetQ=0
+AdcBits=0
+ImpairmentSeed=5491
