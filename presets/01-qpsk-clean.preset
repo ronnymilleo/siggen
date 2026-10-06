@@ -1,7 +1,6 @@
 [IQ Generator Preset]
 # Lesson 1: a clean QPSK signal.
-# Generate, then open Constellation > Matched filter: four tight points,
-# EVM close to 0 and an open eye. This is the reference for every other lesson.
+# Generate, then open Constellation > Matched filter: four tight points, EVM close to 0 and an open eye. This is the reference for every other lesson.
 Version=2
 Modulation=QPSK
 NumberOfSymbols=256

@@ -1,9 +1,6 @@
 [IQ Generator Preset]
 # Lesson 2: noise closes the eye.
-# Same QPSK at 8 dB SNR. The matched-filter points spread into clouds,
-# EVM rises and the eye diagram shows noisy, overlapping traces.
-# Compare the measured SNR after the matched filter with the requested value:
-# they differ by 10*log10(SPS) because filtering averages the noise.
+# Same QPSK at 8 dB SNR. The matched-filter points spread into clouds, EVM rises and the eye diagram shows noisy, overlapping traces. Compare the measured SNR after the matched filter with the requested value: they differ by 10*log10(SPS) because filtering averages the noise.
 Version=2
 Modulation=QPSK
 NumberOfSymbols=256

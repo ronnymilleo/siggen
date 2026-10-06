@@ -1,7 +1,6 @@
 [IQ Generator Preset]
 # Lesson 5: peak-to-average power ratio.
-# 64-QAM with RRC pulses has a high PAPR; compare the value in Signal Summary
-# with the BPSK rectangular preset in lesson 4 (PAPR 0 dB: constant envelope).
+# 64-QAM with RRC pulses has a high PAPR; compare the value in Signal Summary with the BPSK rectangular preset in lesson 4 (PAPR 0 dB: constant envelope).
 Version=2
 Modulation=64-QAM
 NumberOfSymbols=1024

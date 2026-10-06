@@ -1,8 +1,6 @@
 [IQ Generator Preset]
 # Lesson 4: rectangular pulses.
-# No shaping filter: the eye opens fully at the decision instant, but the
-# spectrum has slowly decaying sinc sidelobes. Try the Rectangular and Blackman
-# windows to see how window choice changes the visible sidelobe floor.
+# No shaping filter: the eye opens fully at the decision instant, but the spectrum has slowly decaying sinc sidelobes. Try the Rectangular and Blackman windows to see how window choice changes the visible sidelobe floor.
 Version=2
 Modulation=BPSK
 NumberOfSymbols=256

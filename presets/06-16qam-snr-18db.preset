@@ -1,7 +1,6 @@
 [IQ Generator Preset]
 # Lesson 6: how much SNR does 16-QAM need?
-# At 18 dB the 16 clouds are separate. Lower the SNR in steps of 3 dB and
-# note where neighbouring clouds touch; that is where symbol errors begin.
+# At 18 dB the 16 clouds are separate. Lower the SNR in steps of 3 dB and note where neighbouring clouds touch; that is where symbol errors begin.
 Version=2
 Modulation=16-QAM
 NumberOfSymbols=1024

@@ -310,17 +310,17 @@ void SignalGenerator::DrawMeasurements(const iq::GeneratedSignal& r)
 {
     ImGui::SeparatorText("Measurements");
     Metric("Mean power", num("%.4g", power_.mean_power), true);
-    ImGui::SetItemTooltip("Mean of |x|^2 over every sample, filter transients included.");
+    Hint("Mean of |x|^2 over every sample, filter transients included.");
     Metric("Peak power", num("%.4g", power_.peak_power));
     Metric("PAPR", num("%.3g dB", power_.papr_db));
-    ImGui::SetItemTooltip("Peak-to-average power ratio. A constant-envelope signal has 0 dB; shaped QAM is several dB higher, which is what stresses power amplifiers.");
+    Hint("Peak-to-average power ratio. A constant-envelope signal has 0 dB; shaped QAM is several dB higher, which is what stresses power amplifiers.");
     if (accuracy_)
     {
         Metric("EVM", num("%.3g %%", 100 * accuracy_->evm_rms), true);
-        ImGui::SetItemTooltip("RMS error between the matched-filter observations and the ideal symbols, relative to the RMS ideal symbol. Even a clean RRC signal shows a small floor from the truncated filter.");
+        Hint("RMS error between the matched-filter observations and the ideal symbols, relative to the RMS ideal symbol. Even a clean RRC signal shows a small floor from the truncated filter.");
         Metric("EVM", num("%.4g dB", accuracy_->evm_db));
         Metric("SNR after matched filter", num("%.4g dB", accuracy_->snr_after_matched_db));
-        ImGui::SetItemTooltip("-EVM in dB. Matched filtering averages noise over about SPS samples, so this exceeds the sample-level SNR by 10 log10(SPS).");
+        Hint("-EVM in dB. Matched filtering averages noise over about SPS samples, so this exceeds the sample-level SNR by 10 log10(SPS).");
         if (r.noise.awgn_applied)
             ImGui::TextWrapped("Requested sample SNR %.4g dB + 10 log10(SPS) = %.4g dB expected after the matched filter. The measured value varies with the noise realization.",
                                r.noise.requested_snr_db, r.noise.requested_snr_db + accuracy_->expected_offset_db);
@@ -371,6 +371,7 @@ void SignalGenerator::DrawPlots()
     }
     if (!noise_source && ImGui::BeginTabItem("Eye"))
     {
+        ImGui::SetNextItemWidth(220);
         ImGui::Combo("Component", &eye_component_, "In-phase (I)\0Quadrature (Q)\0");
         if (eye_.in_phase.empty())
             ImGui::TextWrapped("No steady-state symbols: increase symbol count beyond twice the RRC span.");
@@ -395,12 +396,13 @@ void SignalGenerator::DrawPlots()
     if (ImGui::BeginTabItem("Spectrum"))
     {
         int window = static_cast<int>(window_);
+        ImGui::SetNextItemWidth(220);
         if (ImGui::Combo("Window", &window, "Hann\0Hamming\0Blackman\0Rectangular\0"))
         {
             window_ = static_cast<iq::Window>(window);
             UpdateSpectrum();
         }
-        ImGui::SetItemTooltip("Hann is the default. Rectangular has the narrowest main lobe but the worst leakage; Blackman has the lowest sidelobes with a wider main lobe.");
+        Hint("Hann is the default. Rectangular has the narrowest main lobe but the worst leakage; Blackman has the lowest sidelobes with a wider main lobe.");
         ImGui::Text("Two-sided Welch PSD | Periodic %s | %zu samples/segment | %zu segments",
                     iq::window_name(spectrum_.window), spectrum_.segment_length, spectrum_.segment_count);
         ImGui::TextWrapped("Relative power density; no impedance or watt/dBm calibration. Display floor: -200 dB.");
