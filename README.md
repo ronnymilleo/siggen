@@ -589,7 +589,7 @@ that the runtime can operate under a particular kernel or sandbox.
 
 Leak detection remains enabled. LeakSanitizer cannot run under ptrace, and
 sanitizer tests may need to run outside a ptrace-based sandbox. Do not disable
-leak detection to make that environment pass. macOS validation remains deferred.
+leak detection to make that environment pass. macOS is built and tested in CI (headless tests plus a GUI compile); the UI smoke tests are not run there.
 
 This iteration excludes SDR streaming, RF carrier synthesis, analog modulation,
 channel impairments and eye diagrams. FSK/MSK waveforms, AMCPy-specific dataset
