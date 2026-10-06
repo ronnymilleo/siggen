@@ -1,6 +1,7 @@
 #pragma once
 #include "generator.h"
 #include "iq_export.h"
+#include <complex>
 #include <cstdint>
 #include <filesystem>
 #include <optional>

@@ -34,7 +34,11 @@ SymbolObservations matched_symbols(const GeneratedSignal& r) {
 
 #include <algorithm>
 #include <cmath>
+#include <complex>
+#include <cstddef>
 #include <numbers>
+#include <utility>
+#include <vector>
 namespace iq {
 namespace {
 void fft(std::vector<std::complex<double>>& data) {

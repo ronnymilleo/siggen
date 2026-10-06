@@ -1,6 +1,7 @@
 #pragma once
 #include "generator.h"
 #include <filesystem>
+#include <string>
 #include <string_view>
 namespace iq {
 std::string serialize_preset(const GenerationConfig& config);

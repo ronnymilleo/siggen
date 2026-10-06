@@ -1,8 +1,13 @@
 #include "noise.h"
 #include <cmath>
-#include <numbers>
-#include <stdexcept>
+#include <complex>
+#include <cstddef>
+#include <cstdint>
 #include <limits>
+#include <numbers>
+#include <span>
+#include <stdexcept>
+#include <vector>
 
 namespace iq {
 double snr_power_ratio(double snr_db) {

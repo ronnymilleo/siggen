@@ -3,14 +3,23 @@
 #include "signal_processing.h"
 #include <algorithm>
 #include <cmath>
+#include <complex>
+#include <cstddef>
+#include <cstdint>
+#include <filesystem>
 #include <fstream>
-#include <iomanip>
 #include <initializer_list>
-#include <random>
+#include <iomanip>
 #include <limits>
+#include <optional>
+#include <random>
 #include <set>
+#include <span>
 #include <sstream>
 #include <stdexcept>
+#include <string>
+#include <utility>
+#include <vector>
 
 namespace iq {
 namespace {

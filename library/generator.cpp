@@ -2,9 +2,14 @@
 #include "noise.h"
 #include "signal_processing.h"
 #include <cmath>
+#include <complex>
+#include <cstddef>
 #include <numbers>
 #include <random>
 #include <stdexcept>
+#include <string>
+#include <utility>
+#include <vector>
 
 namespace iq {
 namespace {
