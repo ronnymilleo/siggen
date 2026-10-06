@@ -664,6 +664,28 @@ positive f; conjugating it reverses the sign. The display is
 `10*log10(density)` relative to 1 amplitude²/Hz, floored at -200 dB for plotting.
 It is not dBm/Hz or a hardware-calibrated measurement.
 
+## Exporting plot images
+
+Every plot tab (Waveform, Frequency, Constellation, Eye, Pipeline, Spectrum) has an
+**Export image...** button that saves what the tab shows as a **PNG** or an **SVG**,
+for slides and reports. Choose the destination, the format, the size in pixels
+(200 to 8192 per side, default 1600x900) and a light background for print or a dark
+one for dark slides. An existing file is only replaced after you confirm.
+
+![Export image dialog on the Eye tab](docs/images/export-image-dialog.png)
+
+The image is drawn from the plotted data, not captured from the window, so it does
+not depend on the window size, the zoom or the screen's DPI, and the axes, tick
+labels, legend and titles are added for you. SVG is vector: it stays sharp at any
+size in a document and its text can be edited. PNG is antialiased and uses a small
+built-in bitmap font. Colours follow the screen (I blue, Q orange). What is exported:
+
+- Waveform: the same min/max-reduced points as the screen, whole signal.
+- Constellation: the view selected (mapped symbols or matched-filter observations), equal scale on both axes.
+- Eye: the selected component, all overlaid traces with transparency.
+- Pipeline: the five rows for the symbols currently shown (first symbol, count and the delay-compensation checkbox apply).
+- Spectrum: the selected window. Frequency (FSK): estimate and nominal tone.
+
 ## Presets
 
 The **Presets** section accepts a complete path (default `default.preset`). Save
@@ -766,6 +788,7 @@ assert len(iq) == metadata["sample_count"]
 - `library/measurements.*`: power statistics (PAPR), EVM, measured SNR and eye traces.
 - `library/pipeline.*`: the staged signal (bits, symbols, zero-inserted, filtered, noisy) behind the Pipeline tab.
 - `library/impairments.*`: carrier offset, phase noise, IQ imbalance, DC offset and quantization.
+- `library/plot_export.*`: renderer that draws a `Figure` (panels, series, axes, legend) to SVG or PNG; `application/plot_figures.h` builds the figures from the plotted data.
 - `presets/`: guided lesson presets (`NN-name.preset`, with `#` note lines).
 - `library/preset.*`, `library/iq_export.*`: validated file I/O.
 - `application/command_line.h`, `application/cli_config.*`: CLI parsing and
