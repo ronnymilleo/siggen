@@ -19,12 +19,19 @@ namespace iq {
 namespace {
 void validate_linear(const GeneratedSignal& r) {
     const auto sps = static_cast<std::size_t>(r.config.samples_per_symbol);
-    const auto taps = r.config.pulse == Pulse::RRC ? static_cast<std::size_t>(r.config.span_symbols) * sps + 1 : sps;
+    const auto taps = uses_rrc(r.config) ? static_cast<std::size_t>(r.config.span_symbols) * sps + 1 : sps;
     if (r.samples.size() != static_cast<std::size_t>(r.config.symbol_count-1) * sps + taps ||
         r.symbols.size() != static_cast<std::size_t>(r.config.symbol_count) ||
         r.sample_rate_hz != r.config.symbol_rate_baud * sps ||
-        r.filter_delay_samples != (r.config.pulse == Pulse::RRC ? (taps-1)/2 : 0))
+        r.filter_delay_samples != (uses_rrc(r.config) ? (taps-1)/2 : 0))
         throw std::invalid_argument("Result metadata does not match configuration");
+}
+void validate_fsk(const GeneratedSignal& r) {
+    const auto sps = static_cast<std::size_t>(r.config.samples_per_symbol);
+    if (r.samples.size() != static_cast<std::size_t>(r.config.symbol_count) * sps || !r.symbols.empty() ||
+        r.symbol_frequencies_hz.size() != static_cast<std::size_t>(r.config.symbol_count) ||
+        r.sample_rate_hz != r.config.symbol_rate_baud * sps || r.filter_delay_samples != 0)
+        throw std::invalid_argument("FSK result metadata does not match configuration");
 }
 void validate_noise(const GeneratedSignal& r) {
     if (r.samples.size() != static_cast<std::size_t>(r.config.noise_source.sample_count) ||
@@ -36,9 +43,24 @@ void validate_result(const GeneratedSignal& r, ExportFormat format) {
     validate(r.config);
     if (format != ExportFormat::CSV && format != ExportFormat::BinaryFloat32) throw std::invalid_argument("Unsupported export format");
     if (r.family != waveform_family(r.config.modulation)) throw std::invalid_argument("Result family does not match configuration");
-    if (r.family == Family::Noise) validate_noise(r); else validate_linear(r);
+    if (r.family == Family::Noise) validate_noise(r);
+    else if (r.family == Family::Fsk) validate_fsk(r);
+    else validate_linear(r);
     for (auto value : r.samples)
         if (!std::isfinite(value.real()) || !std::isfinite(value.imag())) throw std::invalid_argument("Cannot export non-finite samples");
+}
+// AWGN and impairment provenance, shared by every non-noise family.
+void append_noise_metadata(std::ostream& out, const GeneratedSignal& r) {
+    if (r.noise.awgn_applied) {
+        out << "  \"awgn\": {\n    \"requested_snr_db\": " << r.noise.requested_snr_db
+            << ",\n    \"reference_power\": " << r.noise.reference_power
+            << ",\n    \"reference_interval\": {\"begin\": " << r.noise.reference_begin << ", \"end\": " << r.noise.reference_end << "}"
+            << ",\n    \"added_noise_power\": " << r.noise.added_noise_power
+            << ",\n    \"noise_seed\": " << r.noise.noise_seed
+            << ",\n    \"snr_definition\": \"clean sample power / added complex noise power\"\n  },\n";
+    }
+    if (r.impairments_applied)
+        out << "  \"impairments\": " << impairments_json(r.config.impairments, r.config.impairment_seed, "  ") << ",\n";
 }
 std::string quote(std::string_view text) {
     std::ostringstream out;
@@ -66,7 +88,7 @@ std::string export_metadata(const GeneratedSignal& r, ExportFormat format) {
     out << std::setprecision(std::numeric_limits<double>::max_digits10)
         << "{\n  \"version\": 2,\n  \"format\": \"" << (format == ExportFormat::CSV ? "csv" : "cf32_le")
         << "\",\n  \"waveform\": " << quote(modulation_name(c.modulation))
-        << ",\n  \"family\": \"" << (r.family == Family::Noise ? "noise" : "linear")
+        << ",\n  \"family\": \"" << family_name(r.family)
         << "\",\n  \"sample_count\": " << r.samples.size() << ",\n  \"sample_rate_hz\": " << r.sample_rate_hz
         << ",\n  \"filter_delay_samples\": " << r.filter_delay_samples
         << ",\n  \"scale\": " << c.amplitude_gain << ",\n  \"sample_units\": \"relative amplitude\",\n";
@@ -75,6 +97,18 @@ std::string export_metadata(const GeneratedSignal& r, ExportFormat format) {
             << ",\n    \"noise_seed\": " << c.noise_seed
             << ",\n    \"rule\": \"Box-Muller from mt19937; open-interval uniforms; I=cos, Q=sin\""
             << "\n  },\n";
+    } else if (r.family == Family::Fsk) {
+        out << "  \"configuration\": {\n    \"modulation\": " << quote(modulation_name(c.modulation))
+            << ",\n    \"symbol_count\": " << c.symbol_count << ",\n    \"symbol_rate_baud\": " << c.symbol_rate_baud
+            << ",\n    \"samples_per_symbol\": " << c.samples_per_symbol
+            << ",\n    \"tone_spacing_hz\": " << fsk_tone_spacing_hz(c)
+            << ",\n    \"modulation_index\": " << fsk_modulation_index(c)
+            << ",\n    \"amplitude_gain\": " << c.amplitude_gain
+            << ",\n    \"data_source\": \"" << (c.data_source == DataSource::Random ? "Random" : "Explicit") << '"'
+            << ",\n    \"seed\": " << c.seed << ",\n    \"bits\": " << quote(c.bits)
+            << ",\n    \"random_bit_rule\": \"mt19937: one output per bit, least significant bit\""
+            << ",\n    \"tone_rule\": \"continuous phase from zero; ascending Gray-labelled tones at (m - (M-1)/2) * tone spacing\"\n  },\n";
+        append_noise_metadata(out, r);
     } else {
         out << "  \"symbol_energy\": 1,\n  \"configuration\": {\n    \"modulation\": " << quote(modulation_name(c.modulation))
             << ",\n    \"symbol_count\": " << c.symbol_count << ",\n    \"symbol_rate_baud\": " << c.symbol_rate_baud
@@ -85,15 +119,7 @@ std::string export_metadata(const GeneratedSignal& r, ExportFormat format) {
             << ",\n    \"data_source\": \"" << (c.data_source == DataSource::Random ? "Random" : "Explicit") << '"'
             << ",\n    \"seed\": " << c.seed << ",\n    \"bits\": " << quote(c.bits)
             << ",\n    \"random_bit_rule\": \"mt19937: one output per bit, least significant bit\"\n  },\n";
-        if (r.noise.awgn_applied) {
-            out << "  \"awgn\": {\n    \"requested_snr_db\": " << r.noise.requested_snr_db
-                << ",\n    \"reference_power\": " << r.noise.reference_power
-                << ",\n    \"reference_interval\": {\"begin\": " << r.noise.reference_begin << ", \"end\": " << r.noise.reference_end << "}"
-                << ",\n    \"added_noise_power\": " << r.noise.added_noise_power
-                << ",\n    \"noise_seed\": " << r.noise.noise_seed
-                << ",\n    \"snr_definition\": \"clean sample power / added complex noise power\"\n  },\n";
-        }
-        if (r.impairments_applied) out << "  \"impairments\": " << impairments_json(c.impairments, c.impairment_seed, "  ") << ",\n";
+        append_noise_metadata(out, r);
     }
     out << "  \"timing\": {\n    \"filter_delay_samples\": " << r.filter_delay_samples
         << ",\n    \"duration_s\": " << (r.sample_rate_hz > 0 ? r.samples.size() / r.sample_rate_hz : 0)

@@ -5,10 +5,12 @@
 
 namespace iq {
 // Canonical waveform set. WGN is a noise source, not a symbol modulation.
-enum class Modulation { BPSK, QPSK, PSK8, QAM16, QAM64, WGN };
+enum class Modulation { BPSK, QPSK, PSK8, QAM16, QAM64, WGN, OOK, PAM4, DBPSK, DQPSK, QAM256, FSK2, FSK4, MSK };
 enum class Pulse { RRC, Rectangular };
 enum class DataSource { Random, Explicit };
-enum class Family { Linear, Noise };
+// Linear: mapped symbols convolved with a pulse. Noise: seeded complex WGN.
+// Fsk: continuous-phase frequency modulation (2-FSK, 4-FSK, MSK), no pulse filter.
+enum class Family { Linear, Noise, Fsk };
 
 // Shared capability table consumed by CLI, GUI, validation, serialization and analysis.
 struct WaveformDescriptor {
@@ -27,6 +29,10 @@ const WaveformDescriptor& waveform_descriptor(Modulation modulation);
 Family waveform_family(Modulation modulation);
 int bits_per_symbol(Modulation modulation);
 const char* modulation_name(Modulation modulation);
+// Lowercase family identifier used in export and batch metadata.
+const char* family_name(Family family);
+// Fixed modulation index of MSK (tone spacing / symbol rate).
+inline constexpr double MSK_MODULATION_INDEX = 0.5;
 // Stable serialized/derivation identifier, independent of enum/table order.
 int waveform_id(Modulation modulation);
 bool is_valid(Modulation modulation);

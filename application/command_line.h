@@ -29,6 +29,7 @@ struct CommandLine
     double        symbol_rate = 0;
     int           sps = 0;
     std::string   pulse;
+    double        tone_spacing_hz = 0;
     double        roll_off = 0;
     int           span = 0;
     double        gain = 0;
@@ -108,12 +109,13 @@ private:
     // Both bind the same members; only the parsed context assigns them.
     void add_signal_options(CLI::App& target)
     {
-        target.add_option("--modulation", modulation, "Waveform: BPSK, QPSK, 8-PSK, 16-QAM, 64-QAM, WGN");
+        target.add_option("--modulation", modulation, "Waveform: BPSK, QPSK, 8-PSK, 16-QAM, 64-QAM, 256-QAM, OOK, 4-PAM, DBPSK, DQPSK, 2-FSK, 4-FSK, MSK, WGN");
         target.add_option("--symbols", symbols, "Symbol count (linear waveforms)");
         target.add_option("--symbol-rate", symbol_rate, "Symbol rate in baud (linear waveforms)");
         target.add_option("--sps", sps, "Samples per symbol (linear waveforms)");
         target.add_option("--pulse", pulse, "Pulse shape")
             ->check(CLI::IsMember({"rrc", "rectangular"}));
+        target.add_option("--tone-spacing-hz", tone_spacing_hz, "FSK tone spacing in Hz (2-FSK/4-FSK; default 1000, MSK uses symbol rate / 2)");
         target.add_option("--roll-off", roll_off, "RRC roll-off in [0,1]");
         target.add_option("--span", span, "RRC span in symbols");
         target.add_option("--gain", gain, "Amplitude gain in [0,1000000]");

@@ -8,7 +8,7 @@ namespace iq {
 namespace {
 std::vector<double> matched_taps(const GenerationConfig& c) {
     const auto sps = static_cast<std::size_t>(c.samples_per_symbol);
-    return c.pulse == Pulse::RRC ? RRCFilter(c.roll_off, c.span_symbols, c.samples_per_symbol)
+    return uses_rrc(c) ? RRCFilter(c.roll_off, c.span_symbols, c.samples_per_symbol)
                                  : std::vector<double>(sps, 1. / static_cast<double>(sps));
 }
 }
@@ -27,7 +27,7 @@ PowerStatistics power_statistics(const std::vector<std::complex<float>>& samples
     return stats;
 }
 std::optional<SymbolAccuracy> symbol_accuracy(const GeneratedSignal& signal) {
-    if (signal.family == Family::Noise) return std::nullopt;
+    if (signal.family != Family::Linear) return std::nullopt;
     const auto observations = matched_symbols(signal);
     if (observations.values.empty()) return std::nullopt;
     double error = 0, reference = 0;
@@ -47,13 +47,13 @@ std::optional<SymbolAccuracy> symbol_accuracy(const GeneratedSignal& signal) {
     return accuracy;
 }
 EyeDiagram eye_diagram(const GeneratedSignal& r, std::size_t max_traces) {
-    if (r.family == Family::Noise) throw std::invalid_argument("Noise sources have no eye diagram");
+    if (r.family != Family::Linear) throw std::invalid_argument("Only linear waveforms have a matched-filter eye diagram");
     if (max_traces == 0) throw std::invalid_argument("Eye diagram needs at least one trace");
     validate(r.config);
     const auto sps = static_cast<std::size_t>(r.config.samples_per_symbol);
     const auto count = static_cast<std::size_t>(r.config.symbol_count);
     const auto taps = matched_taps(r.config);
-    const bool rrc = r.config.pulse == Pulse::RRC;
+    const bool rrc = uses_rrc(r.config);
     if (r.samples.size() != (count - 1) * sps + taps.size())
         throw std::invalid_argument("Signal dimensions do not match configuration");
     EyeDiagram eye;

@@ -8,6 +8,8 @@ struct XYData { std::vector<double> x, y; };
 struct PlotData {
     std::vector<double> time, i, q;
     XYData mapped, matched;
+    // FSK family: frequency estimate per sample pair against the nominal tone of each symbol.
+    std::vector<double> freq_time, freq_estimate, freq_nominal;
 };
 inline PlotData make_plot_data(const iq::GeneratedSignal& signal, std::size_t limit = 4096) {
     if (!std::isfinite(signal.sample_rate_hz) || signal.sample_rate_hz <= 0)
@@ -45,7 +47,17 @@ inline PlotData make_plot_data(const iq::GeneratedSignal& signal, std::size_t li
         plot.mapped.y.push_back(value.imag() * signal.config.amplitude_gain);
     }
     // Noise sources have no symbol constellation; leave matched observations empty.
-    if (signal.family != iq::Family::Noise)
+    if (signal.family == iq::Family::Fsk) {
+        const auto estimate = iq::instantaneous_frequency(samples, signal.sample_rate_hz);
+        const auto sps = static_cast<std::size_t>(signal.config.samples_per_symbol);
+        const auto stride = std::max<std::size_t>(1, estimate.size() / limit);
+        for (std::size_t n = 0; n < estimate.size(); n += stride) {
+            plot.freq_time.push_back((static_cast<double>(n) + 0.5) / signal.sample_rate_hz);
+            plot.freq_estimate.push_back(estimate[n]);
+            plot.freq_nominal.push_back(signal.symbol_frequencies_hz[std::min(n / sps, signal.symbol_frequencies_hz.size() - 1)]);
+        }
+    }
+    if (signal.family == iq::Family::Linear)
         for (auto value : iq::matched_symbols(signal).values) {
             plot.matched.x.push_back(value.real()); plot.matched.y.push_back(value.imag());
         }

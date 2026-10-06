@@ -10,6 +10,10 @@ struct SymbolObservations {
     std::vector<std::size_t> symbol_indices;
 };
 SymbolObservations matched_symbols(const GeneratedSignal& signal);
+// Frequency estimate between consecutive samples, arg(x[n+1] * conj(x[n])) * Fs / (2 pi),
+// in Hz; one value fewer than the input. The principal phase difference is taken,
+// so it is valid for |f| < Fs/2 and unaffected by phase wrapping.
+std::vector<double> instantaneous_frequency(const std::vector<std::complex<float>>& samples, double sample_rate_hz);
 }
 namespace iq {
 // Periodic analysis windows for the Welch estimator.

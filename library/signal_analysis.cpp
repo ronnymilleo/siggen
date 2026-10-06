@@ -2,27 +2,39 @@
 #include "signal_processing.h"
 #include <stdexcept>
 #include <cmath>
+#include <numbers>
 namespace iq {
+std::vector<double> instantaneous_frequency(const std::vector<std::complex<float>>& samples, double sample_rate_hz) {
+    if (!std::isfinite(sample_rate_hz) || sample_rate_hz <= 0)
+        throw std::invalid_argument("Sample rate must be positive and finite");
+    std::vector<double> frequency;
+    if (samples.size() < 2) return frequency;
+    frequency.reserve(samples.size() - 1);
+    for (std::size_t n = 0; n + 1 < samples.size(); ++n)
+        frequency.push_back(std::arg(std::complex<double>(samples[n + 1]) * std::conj(std::complex<double>(samples[n]))) *
+                            sample_rate_hz / (2 * std::numbers::pi));
+    return frequency;
+}
 SymbolObservations matched_symbols(const GeneratedSignal& r) {
     validate(r.config);
-    if (r.family == Family::Noise || waveform_family(r.config.modulation) == Family::Noise)
-        throw std::invalid_argument("Noise sources have no matched-symbol observations");
+    if (r.family != Family::Linear || waveform_family(r.config.modulation) != Family::Linear)
+        throw std::invalid_argument("Only linear waveforms have matched-symbol observations");
     SymbolObservations result;
     const auto sps = static_cast<std::size_t>(r.config.samples_per_symbol);
     const auto count = static_cast<std::size_t>(r.config.symbol_count);
-    auto taps = r.config.pulse == Pulse::RRC ? RRCFilter(r.config.roll_off, r.config.span_symbols, r.config.samples_per_symbol)
+    auto taps = uses_rrc(r.config) ? RRCFilter(r.config.roll_off, r.config.span_symbols, r.config.samples_per_symbol)
                                           : std::vector<double>(sps, 1. / sps);
     const auto expected = (count - 1) * sps + taps.size();
     if (r.samples.size() != expected || r.symbols.size() != count ||
-        r.filter_delay_samples != (r.config.pulse == Pulse::RRC ? (taps.size()-1)/2 : 0))
+        r.filter_delay_samples != (uses_rrc(r.config) ? (taps.size()-1)/2 : 0))
         throw std::invalid_argument("Signal dimensions or delay do not match configuration");
     for (auto sample : r.samples)
         if (!std::isfinite(sample.real()) || !std::isfinite(sample.imag()))
             throw std::invalid_argument("Matched-filter input must be finite");
     // Exclude one complete RRC span on each edge for steady-state comparisons.
-    const auto margin = r.config.pulse == Pulse::RRC ? static_cast<std::size_t>(r.config.span_symbols) : 0;
+    const auto margin = uses_rrc(r.config) ? static_cast<std::size_t>(r.config.span_symbols) : 0;
     for (std::size_t k = margin; k + margin < count; ++k) {
-        const auto index = r.config.pulse == Pulse::RRC ? 2 * r.filter_delay_samples + k * sps : k * sps + sps - 1;
+        const auto index = uses_rrc(r.config) ? 2 * r.filter_delay_samples + k * sps : k * sps + sps - 1;
         std::complex<double> value{};
         for (std::size_t j = 0; j < taps.size(); ++j) value += std::complex<double>(r.samples[index - j]) * taps[j];
         result.values.emplace_back(value);

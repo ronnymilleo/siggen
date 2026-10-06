@@ -140,10 +140,12 @@ current directory, then exits. Use `--gui` to open the desktop interface instead
 Configuration resolves as **defaults → loaded preset → explicitly supplied CLI
 options**, then validates through the shared library; options that were not
 supplied never replace preset values. Modulation names (`BPSK`, `QPSK`, `8-PSK`,
-`16-QAM`, `64-QAM`, `WGN`) are accepted case-insensitively; pulse names are
+`16-QAM`, `64-QAM`, `256-QAM`, `OOK`, `4-PAM`, `DBPSK`, `DQPSK`, `2-FSK`,
+`4-FSK`, `MSK`, `WGN`) are accepted case-insensitively; pulse names are
 `rrc` and `rectangular`. Signal options are `--preset`, `--modulation`,
 `--symbols`, `--symbol-rate`, `--sps`, `--pulse`, `--roll-off`, `--span`,
-`--gain`, `--seed`, `--data-source random|explicit`, and `--bits`. Noise options
+`--tone-spacing-hz` (2-FSK and 4-FSK only), `--gain`, `--seed`,
+`--data-source random|explicit`, and `--bits`. Noise options
 are `--samples`, `--sample-rate`, `--noise-power`, `--noise-seed`, and
 `--snr-db <dB>|off`; `--snr-db off` disables preset-provided AWGN. Channel
 impairment options for linear waveforms are `--cfo-hz`, `--phase-noise-hz`,
@@ -154,7 +156,9 @@ output path, CSV uses `signal.csv` and binary uses `signal.iq`.
 
 Options incompatible with the selected waveform are rejected: noise-source
 options require `--modulation WGN`, and linear options (including `--snr-db`)
-are rejected for WGN. Switching waveform families through `--modulation` starts
+are rejected for WGN. Pulse options (`--pulse`, `--roll-off`, `--span`) are
+rejected for FSK and MSK, which have no pulse filter, and `--tone-spacing-hz`
+is rejected for every other waveform (MSK fixes the spacing). Switching waveform families through `--modulation` starts
 from that family's defaults while retaining gain and seeds; incompatible preset
 fields never silently become active. `--bits` selects explicit input unless a
 conflicting `--data-source random` was explicitly supplied. Preset and signal
@@ -296,7 +300,7 @@ and an even `span * SPS`. Rate must be positive, with finite derived sample rate
 and buffer duration. Generation uses checked sizes and a 4,194,304-sample
 ceiling, which also bounds WGN sample counts. There is no implicit padding or
 truncation of explicit bits: supply exactly `symbol_count * bits_per_symbol`
-characters, each `0` or `1` (no whitespace), up to 393,216 bits for 64-QAM.
+characters, each `0` or `1` (no whitespace), up to 524,288 bits (65,536 symbols x 8 bits) for 256-QAM.
 
 ## Measurements, eye diagram, spectral windows and guided presets
 
@@ -308,8 +312,8 @@ the gain-scaled ideal symbols, and the corresponding SNR after the matched filte
 value is the requested sample-level SNR plus `10*log10(SPS)` in expectation; the
 GUI shows both numbers and the measured one still varies with the noise
 realization. A clean RRC signal shows a small EVM floor (about -43 dB for the
-default span 10, roll-off 0.2) from the truncated filter. Noise sources have power
-statistics only.
+default span 10, roll-off 0.2) from the truncated filter. Noise sources and FSK
+signals have power statistics only (no symbol-rate observations to compare).
 
 The **Eye** tab overlays up to 200 matched-filter traces, each two symbol periods
 wide and centred on a decision instant, for the I or Q component. Traces cover the
@@ -321,14 +325,16 @@ Hamming, Blackman or Rectangular. Hann output is unchanged from earlier releases
 `presets/` contains numbered guided lessons. Lines beginning with `#` after the
 preset header are notes: parsers ignore them and the GUI shows them after
 **Load Preset**, so a lesson can say what to look at (for example
-`presets/02-qpsk-snr-8db.preset`). Controls also have hover tooltips.
+`presets/02-qpsk-snr-8db.preset`). Lessons 11–16 cover 2-FSK, MSK, DQPSK under a
+carrier offset, 4-PAM, 256-QAM and OOK. Controls also have hover tooltips.
 
 ## Mapping and reproducibility
 
 Mapped symbols have **unit average constellation energy**, before amplitude gain.
 A particular random buffer need not have exactly unit empirical symbol energy.
 There is no per-buffer renormalization. QPSK has two bits per symbol; 8-PSK
-three; 16-QAM four; 64-QAM six. Bits are consumed left to right in symbol order.
+three; 16-QAM four; 64-QAM six; 256-QAM eight. Bits are consumed left to right in
+symbol order.
 
 | Modulation | Bits | Complex symbol before gain |
 |---|---|---|
@@ -379,9 +385,84 @@ constellation energy:
 | 101 | +5 |
 | 100 | +7 |
 
-These mappings make horizontal/vertical nearest neighbors differ by one bit.
-QPSK, 8-PSK, 16-QAM and 64-QAM have defined I and Q components; BPSK Q is
-zero. Gain scales sample amplitude once; power scales by gain squared.
+256-QAM works the same way with four bits per axis: the first four bits select I
+and the next four select Q. Each axis uses the binary-reflected Gray label of
+the level index, so levels ascend from `-15` to `+15` in steps of 2 and every
+level is divided by `sqrt(170)`. These mappings make horizontal/vertical nearest
+neighbors differ by one bit. QPSK, 8-PSK and the QAM orders have defined I and
+Q components; BPSK Q is zero. Gain scales sample amplitude once; power scales by
+gain squared.
+
+### PAM, on-off keying and differential PSK
+
+These use the same pulse-shaped path as the other linear waveforms.
+
+| Waveform | Bits | Symbol before gain |
+|---|---|---|
+| OOK | 0 / 1 | `0` / `+sqrt(2)` (mean energy 1; the symbols have a non-zero mean, so the spectrum carries a 0 Hz line) |
+| 4-PAM | 00, 01, 11, 10 | `-3`, `-1`, `+1`, `+3`, divided by `sqrt(5)` on I; Q is zero |
+
+DBPSK and DQPSK carry the data in the phase *change* between symbols. The
+reference phase before the first symbol is 0 for DBPSK and 45 degrees for DQPSK
+(so the DQPSK points coincide with the QPSK points). With `phi[k] = phi[k-1] + delta`:
+
+| Waveform | Bits | Phase change `delta` |
+|---|---|---|
+| DBPSK | 0 / 1 | 0 / +180 degrees |
+| DQPSK | 00, 01, 11, 10 | 0, +90, +180, +270 degrees |
+
+The symbol is `exp(j*phi[k])`, so the first bit pair already moves the phase
+away from the reference. A receiver recovers the data from `s[k] * conj(s[k-1])`,
+which is unchanged by a constant phase rotation of the channel. The
+matched-filter constellation of a DQPSK signal with a carrier offset therefore
+spins, yet each symbol-to-symbol step stays near its transmitted value.
+
+## Frequency modulation: 2-FSK, 4-FSK and MSK
+
+<p align="center">
+  <img width="900" src="docs/images/gui-fsk-frequency.png" alt="Frequency tab of a 2-FSK signal at 30 dB SNR, showing the measured frequency against the nominal tones" />
+</p>
+
+FSK carries the data in the carrier frequency instead of in a pulse-shaped
+amplitude. The output has a constant envelope and **no pulse filter**: exactly
+`symbols x SPS` samples, with no RRC tail, filter delay or guard symbols. The
+pulse settings do not apply and the GUI hides them.
+
+For M tones (M = 2 for 2-FSK and MSK, 4 for 4-FSK) the tone of symbol value `m`
+(`m = 0` is the lowest tone) is
+
+    f_m = (m - (M-1)/2) * tone_spacing_hz
+
+and bits are assigned in ascending-tone Gray order: `0, 1` for binary tones and
+`00, 01, 11, 10` for 4-FSK. The samples are
+
+    phase[0] = 0;  phase[n+1] = phase[n] + 2*pi*f[n] / Fs;  x[n] = gain * exp(j*phase[n])
+
+where `f[n]` is the tone of the symbol containing sample `n` and `Fs = symbol
+rate x SPS`. The phase is carried across symbol boundaries (continuous-phase
+FSK), so there are no phase jumps. The modulation index is
+`h = tone_spacing_hz / symbol_rate_baud`; only the tone spacing is a setting and
+`h` is displayed from it. The default spacing of 1000 Hz at 1000 Bd gives `h = 1`.
+**MSK** is binary FSK with `h = 0.5` fixed: the tones sit at plus and minus
+`symbol_rate / 4` and the phase moves exactly +/-90 degrees per symbol. MSK
+ignores the stored tone spacing.
+
+Validation requires every tone centre to be strictly below `Fs/2`
+(`(M-1)/2 x spacing < Fs/2`). That check alone does not make the spectrum
+bandlimited: the instantaneous frequency steps between tones, so spectral
+skirts can still alias at a low SPS. Use SPS 8 or more and inspect the
+Spectrum tab. FSK supports explicit bits (exactly `symbols x bits per symbol`
+digits), seeded random bits with the same bit stream as the linear waveforms,
+AWGN (reference interval: the whole signal, since the envelope is constant) and the
+channel impairments. Clean FSK has a PAPR of 0 dB.
+
+In the GUI the Constellation and Eye tabs, which need symbol-rate matched-filter
+observations, are replaced by a **Frequency** tab that plots the frequency
+estimated from the phase step between consecutive samples,
+`arg(x[n+1] * conj(x[n])) * Fs / (2 pi)`, against the nominal tone of each
+symbol. Measurements show power and PAPR; EVM does not apply. Export metadata
+use `"family": "fsk"` with the tone spacing and modulation index, and batch
+frames are unguarded slices that restart from phase zero.
 
 Random input uses `std::mt19937(seed)`, consuming one engine output per bit and
 mapping its least significant bit to `0` or `1`. It does not use an
@@ -492,7 +573,8 @@ all original samples. **Constellation** separates mapped ideal symbols from
 matched-filter observations and constrains equal units per pixel on the axes;
 with AWGN enabled the observation view is explicitly labeled as noisy. WGN
 results show waveform, spectrum and power statistics without any symbol
-constellation.
+constellation. FSK and MSK results replace the constellation and eye with a
+**Frequency** tab (see "Frequency modulation").
 
 **Spectrum** uses full complex samples, independent of waveform reduction. The
 Welch estimator uses a periodic Hann window, 50% overlap, no mean subtraction,
@@ -539,8 +621,11 @@ NoiseSeed=5490
 ```
 
 All version-2 fields are required; version 3 additionally requires the impairment
-fields listed in "Channel impairments". Modulation accepts `BPSK`, `QPSK`, `8-PSK`,
-`16-QAM`, `64-QAM`, `WGN` case-insensitively; pulse accepts `RRC`,
+fields listed in "Channel impairments". Version 4 is written for 2-FSK, 4-FSK and
+MSK: it adds `ToneSpacingHz` and always includes the impairment fields, and FSK
+waveforms are rejected in older versions. Version 1 only knows BPSK, QPSK and
+16-QAM. Modulation accepts `BPSK`, `QPSK`, `8-PSK`, `16-QAM`, `64-QAM`, `256-QAM`,
+`OOK`, `4-PAM`, `DBPSK`, `DQPSK`, `2-FSK`, `4-FSK`, `MSK`, `WGN` case-insensitively; pulse accepts `RRC`,
 `Rectangular`; source accepts `Random`, `Explicit`; booleans accept `true`,
 `false`. Numbers use a locale-independent decimal point.
 Unknown/duplicate fields, unsupported versions, non-finite numbers, and trailing

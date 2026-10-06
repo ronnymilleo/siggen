@@ -6,7 +6,10 @@ file(REMOVE "${WORK_DIR}/signal.csv" "${WORK_DIR}/signal.csv.json"
     "${WORK_DIR}/custom.csv" "${WORK_DIR}/custom.csv.json"
     "${WORK_DIR}/signal.iq" "${WORK_DIR}/signal.iq.json"
     "${WORK_DIR}/wgn.csv" "${WORK_DIR}/wgn.csv.json"
-    "${WORK_DIR}/awgn.csv" "${WORK_DIR}/awgn.csv.json")
+    "${WORK_DIR}/awgn.csv" "${WORK_DIR}/awgn.csv.json"
+    "${WORK_DIR}/msk.csv" "${WORK_DIR}/msk.csv.json"
+    "${WORK_DIR}/qam256.csv" "${WORK_DIR}/qam256.csv.json"
+    "${WORK_DIR}/dqpsk.csv" "${WORK_DIR}/dqpsk.csv.json")
 file(REMOVE_RECURSE "${WORK_DIR}/dataset")
 function(run expected)
     execute_process(COMMAND "${CMAKE_COMMAND}" -E env --unset=DISPLAY --unset=WAYLAND_DISPLAY
@@ -92,6 +95,19 @@ string(JSON wgn_count GET "${wgn_metadata}" sample_count)
 if(NOT wgn_family STREQUAL "noise" OR NOT wgn_count EQUAL 512)
     message(FATAL_ERROR "Unexpected WGN metadata")
 endif()
+# FSK exports are unfiltered: exactly symbols * SPS samples and FSK metadata.
+run(success --modulation msk --symbols 100 --output msk.csv)
+file(READ "${WORK_DIR}/msk.csv.json" msk_metadata)
+string(JSON msk_family GET "${msk_metadata}" family)
+string(JSON msk_count GET "${msk_metadata}" sample_count)
+string(JSON msk_index GET "${msk_metadata}" configuration modulation_index)
+if(NOT msk_family STREQUAL "fsk" OR NOT msk_count EQUAL 800 OR NOT msk_index EQUAL 0.5)
+    message(FATAL_ERROR "Unexpected MSK metadata")
+endif()
+run(failure --modulation 2-fsk --pulse rrc)
+run(failure --modulation 2-fsk --sps 1)
+run(success --modulation 256-qam --symbols 64 --output qam256.csv)
+run(success --modulation dqpsk --symbols 64 --output dqpsk.csv)
 # AWGN exports must carry parsable noise provenance metadata.
 run(success --snr-db 10 --output awgn.csv)
 file(READ "${WORK_DIR}/awgn.csv.json" awgn_metadata)

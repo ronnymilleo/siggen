@@ -1,0 +1,21 @@
+[IQ Generator Preset]
+# Lesson 15: 256-QAM.
+# Eight bits per symbol on a 16 by 16 grid. Neighbouring points are only 2/15 of the peak amplitude apart, so even a little noise merges neighbouring points. Compare the matched-filter constellation here (SNR 35 dB) with 64-QAM in lesson 5 and check the PAPR and EVM in the Measurements block. Lower the SNR in steps of 5 dB to see where the grid dissolves.
+Version=2
+Modulation=256-QAM
+NumberOfSymbols=2048
+SymbolRateBaud=1000
+SamplesPerSymbol=8
+Pulse=RRC
+RRCBeta=0.2
+SpanSymbols=10
+AmplitudeGain=1
+DataSource=Random
+Seed=5489
+Bits=
+NoiseSampleCount=2048
+NoiseSampleRateHz=8000
+NoisePower=1
+AwgnEnabled=true
+AwgnSnrDb=35
+NoiseSeed=5490

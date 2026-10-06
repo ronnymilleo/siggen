@@ -93,15 +93,15 @@ void validate_frame_request(const GenerationConfig& base, Modulation waveform, i
     validate(config);
     const auto sps = static_cast<std::size_t>(config.samples_per_symbol);
     const auto payload = (static_cast<std::size_t>(frame_size) + sps - 1) / sps;
-    const auto guard = config.pulse == Pulse::RRC ? static_cast<std::size_t>(config.span_symbols) : 0;
+    const auto guard = uses_rrc(config) ? static_cast<std::size_t>(config.span_symbols) : 0;
     const auto symbols = payload + 2 * guard;
     if (symbols > 65536) throw std::length_error("Frame generation exceeds symbol limit including guards");
     config.symbol_count = static_cast<int>(symbols);
     validate(config);
-    const auto taps = config.pulse == Pulse::RRC
+    const auto taps = uses_rrc(config)
                           ? static_cast<std::size_t>(config.span_symbols) * sps + 1 : sps;
     const auto full_size = (symbols - 1) * sps + taps;
-    const auto offset = guard * sps + (config.pulse == Pulse::RRC ? (taps - 1) / 2 : 0);
+    const auto offset = guard * sps + (uses_rrc(config) ? (taps - 1) / 2 : 0);
     if (offset + static_cast<std::size_t>(frame_size) > full_size)
         throw std::length_error("Frame crop exceeds generated buffer");
 }
@@ -130,7 +130,7 @@ FrameResult generate_frame(const GenerationConfig& base, int frame_size, std::si
     config.seed = frame.data_seed;
     const auto sps = static_cast<std::size_t>(config.samples_per_symbol);
     const auto payload = (static_cast<std::size_t>(frame_size) + sps - 1) / sps;
-    const auto guard = config.pulse == Pulse::RRC ? static_cast<std::size_t>(config.span_symbols) : 0;
+    const auto guard = uses_rrc(config) ? static_cast<std::size_t>(config.span_symbols) : 0;
     config.symbol_count = static_cast<int>(payload + 2 * guard);
     auto full = generate(config);
     frame.crop_offset = guard * sps + full.filter_delay_samples;
@@ -202,9 +202,12 @@ std::string frame_sidecar(const BatchRequest& r, Modulation waveform, std::uint3
                           const FrameResult& frame, const std::string& data_name) {
     auto out = json_stream();
     const bool noise = waveform_family(waveform) == Family::Noise;
+    const bool fsk = waveform_family(waveform) == Family::Fsk;
+    auto shaped = r.base;
+    shaped.modulation = waveform;
     out << "{\n  \"version\": 2,\n  \"kind\": \"batch_frame\",\n  \"format\": \"" << format_name(r.format)
         << "\",\n  \"waveform\": " << json_quote(modulation_name(waveform))
-        << ",\n  \"family\": \"" << (noise ? "noise" : "linear")
+        << ",\n  \"family\": \"" << family_name(waveform_family(waveform))
         << "\",\n  \"frame_size\": " << frame.samples.size()
         << ",\n  \"sample_rate_hz\": " << frame.sample_rate_hz
         << ",\n  \"sample_units\": \"relative amplitude\",\n  \"amplitude_gain\": " << r.base.amplitude_gain
@@ -217,6 +220,13 @@ std::string frame_sidecar(const BatchRequest& r, Modulation waveform, std::uint3
     if (noise) {
         out << "  \"noise_source\": {\n    \"noise_power\": " << r.base.noise_source.noise_power
             << ",\n    \"rule\": \"Box-Muller from mt19937; open-interval uniforms; I=cos, Q=sin\"\n  },\n";
+    } else if (fsk) {
+        out << "  \"fsk\": {\n    \"samples_per_symbol\": " << r.base.samples_per_symbol
+            << ",\n    \"symbol_rate_baud\": " << r.base.symbol_rate_baud
+            << ",\n    \"tone_spacing_hz\": " << fsk_tone_spacing_hz(shaped)
+            << ",\n    \"modulation_index\": " << fsk_modulation_index(shaped)
+            << ",\n    \"rule\": \"continuous phase, zero initial phase per frame, ascending Gray-labelled tones\"\n  },\n"
+            << "  \"crop\": {\n    \"offset_samples\": 0,\n    \"filter_delay_samples\": 0,\n    \"guard_symbols\": 0\n  },\n";
     } else {
         out << "  \"linear\": {\n    \"pulse\": \"" << (r.base.pulse == Pulse::RRC ? "RRC" : "Rectangular")
             << "\",\n    \"roll_off\": " << r.base.roll_off << ",\n    \"span_symbols\": " << r.base.span_symbols
@@ -226,6 +236,8 @@ std::string frame_sidecar(const BatchRequest& r, Modulation waveform, std::uint3
             << ",\n    \"filter_delay_samples\": " << frame.filter_delay_samples
             << ",\n    \"guard_symbols\": " << (r.base.pulse == Pulse::RRC ? r.base.span_symbols : 0)
             << "\n  },\n";
+    }
+    if (!noise) {
         if (frame.noise.awgn_applied) {
             out << "  \"awgn\": {\n    \"requested_snr_db\": " << frame.noise.requested_snr_db
                 << ",\n    \"reference_power\": " << frame.noise.reference_power
@@ -249,7 +261,7 @@ std::string manifest_record(const BatchRequest& r, Modulation waveform, std::uin
         << ",\"path\":" << json_quote(data_name)
         << ",\"sidecar\":" << json_quote(data_name + ".json")
         << ",\"waveform\":" << json_quote(modulation_name(waveform))
-        << ",\"family\":\"" << (waveform_family(waveform) == Family::Noise ? "noise" : "linear")
+        << ",\"family\":\"" << family_name(waveform_family(waveform))
         << "\",\"seed\":" << seed << ",\"snr_db\":";
     if (snr) out << *snr; else out << "null";
     out << ",\"data_seed\":" << frame.data_seed << ",\"noise_seed\":" << frame.noise_seed

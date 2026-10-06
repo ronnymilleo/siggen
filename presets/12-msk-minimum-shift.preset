@@ -1,0 +1,30 @@
+[IQ Generator Preset]
+# Lesson 12: minimum-shift keying.
+# MSK is binary FSK with the smallest tone spacing that keeps the two tones orthogonal over one symbol: h = 0.5, so the tones sit at plus and minus symbol rate / 4 (250 Hz here). The phase moves exactly plus or minus 90 degrees per symbol. Compare the Spectrum tab with lesson 11: the closer tones give a much narrower main lobe at the same bit rate. MSK ignores the tone spacing setting.
+Version=4
+Modulation=MSK
+NumberOfSymbols=512
+SymbolRateBaud=1000
+SamplesPerSymbol=8
+Pulse=RRC
+RRCBeta=0.2
+SpanSymbols=10
+AmplitudeGain=1
+DataSource=Random
+Seed=5489
+Bits=
+NoiseSampleCount=2048
+NoiseSampleRateHz=8000
+NoisePower=1
+AwgnEnabled=false
+AwgnSnrDb=10
+NoiseSeed=5490
+ToneSpacingHz=1000
+CfoHz=0
+PhaseNoiseLinewidthHz=0
+IqGainDb=0
+IqPhaseDeg=0
+DcOffsetI=0
+DcOffsetQ=0
+AdcBits=0
+ImpairmentSeed=5491

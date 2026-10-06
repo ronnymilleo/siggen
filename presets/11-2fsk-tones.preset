@@ -1,0 +1,30 @@
+[IQ Generator Preset]
+# Lesson 11: binary FSK.
+# Each bit selects one of two tones, 500 Hz either side of the carrier here (tone spacing 1000 Hz, symbol rate 1000 Bd, so the modulation index h = 1). Open the Frequency tab and zoom in on the first few symbols: the orange line is the tone of each symbol and the blue line is the frequency measured from the phase step between samples. Before noise the envelope never changes (PAPR 0 dB), which is why FSK suits efficient nonlinear amplifiers. On the Spectrum tab look for two lobes at the tone frequencies. Try raising the SNR or changing the tone spacing.
+Version=4
+Modulation=2-FSK
+NumberOfSymbols=256
+SymbolRateBaud=1000
+SamplesPerSymbol=8
+Pulse=RRC
+RRCBeta=0.2
+SpanSymbols=10
+AmplitudeGain=1
+DataSource=Random
+Seed=5489
+Bits=
+NoiseSampleCount=2048
+NoiseSampleRateHz=8000
+NoisePower=1
+AwgnEnabled=true
+AwgnSnrDb=30
+NoiseSeed=5490
+ToneSpacingHz=1000
+CfoHz=0
+PhaseNoiseLinewidthHz=0
+IqGainDb=0
+IqPhaseDeg=0
+DcOffsetI=0
+DcOffsetQ=0
+AdcBits=0
+ImpairmentSeed=5491
