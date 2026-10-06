@@ -24,6 +24,9 @@ training. This application generates complex baseband, not an RF carrier.
 
   <img width="900" src="docs/images/gui-eye.png" alt="Eye tab showing the eye diagram of 16-QAM" />
   <p align="center"><em>Eye - overlaid symbol-period traces</em></p>
+
+  <img width="900" src="docs/images/gui-pipeline.png" alt="Pipeline tab showing bits, mapped symbols, upsampled symbols, filter output and noisy signal on one time axis" />
+  <p align="center"><em>Pipeline - bits to transmitted samples, step by step</em></p>
 </div>
 
 ## Build and test
@@ -331,7 +334,7 @@ Hamming, Blackman or Rectangular. Hann output is unchanged from earlier releases
 preset header are notes: parsers ignore them and the GUI shows them after
 **Load Preset**, so a lesson can say what to look at (for example
 `presets/02-qpsk-snr-8db.preset`). Lessons 11–16 cover 2-FSK, MSK, DQPSK under a
-carrier offset, 4-PAM, 256-QAM and OOK; lessons 17–21 cover OQPSK, pi/4-DQPSK, 32-QAM, 8-DPSK and 4-ASK. Controls also have hover tooltips.
+carrier offset, 4-PAM, 256-QAM and OOK; lessons 17–21 cover OQPSK, pi/4-DQPSK, 32-QAM, 8-DPSK and 4-ASK. Controls also have hover tooltips, and the symbol rate, SPS, pulse, roll-off, span and SNR controls have a **?** button that opens a longer "what is this?" panel (the SNR panel also shows your current SNR as Es/N0 and Eb/N0).
 
 ## Mapping and reproducibility
 
@@ -532,6 +535,18 @@ Gaussian conversion is a documented Box–Muller transform driven by
 `z0 = sqrt(-2 ln u1) * cos(2*pi*u2)` first and `z1 = sqrt(-2 ln u1) * sin(2*pi*u2)`
 second; consecutive draws alternate cos/sin from the same pair, with I before Q.
 
+### SNR, Es/N0 and Eb/N0
+
+The SNR setting is a per-sample ratio over the whole sample rate, so it changes
+with oversampling. With `Ps` the clean signal power, `Pn` the added complex noise
+power, `Fs = Rs * SPS` the sample rate and `Rs` the symbol rate, the symbol energy
+is `Es = Ps / Rs` and the noise density `N0 = Pn / Fs`, so
+`Es/N0 = SNR * SPS` (dB: `SNR + 10*log10(SPS)`) and
+`Eb/N0 = Es/N0 / bits_per_symbol` (dB: `Es/N0 - 10*log10(bits_per_symbol)`).
+Compare modulations at equal Eb/N0, not equal SNR. The GUI shows the equivalent
+Es/N0 and Eb/N0 under the SNR field; they follow the requested SNR, not the
+measured one.
+
 ## Channel impairments
 
 Linear signals can pass through a simple front-end/channel stage after AWGN.
@@ -623,7 +638,18 @@ constellation. FSK and MSK results replace the constellation and eye with a
 **Frequency** tab (see "Frequency modulation").
 
 **Eye** overlays two-symbol-period traces of the matched-filter I and Q (OQPSK
-shows the half-symbol Q offset). **Spectrum** uses full complex samples, independent of waveform reduction. The
+shows the half-symbol Q offset). **Pipeline** (linear signals only) stacks five
+rows on one time axis, in symbol periods: the data bits; the mapped symbols
+(amplitude gain applied); the symbols with SPS - 1 zeros inserted after each
+(for OQPSK the Q impulses lag by half a symbol); the clean pulse-filter output;
+and the final signal with AWGN and impairments. The filter delays its output by
+`span / 2` symbols, so by default rows 4 and 5 are shifted back by that delay
+to line each pulse peak up with its symbol (a checkbox turns this off, to see the
+delay itself). Sliders choose the first symbol and how many (4 to 64) are shown.
+Row 4 is the same signal as the exported samples without noise, regenerated from
+the same configuration with AWGN and impairments off; when none are enabled rows 4
+and 5 coincide. FSK, MSK and WGN have no symbol/filter chain and no Pipeline tab.
+**Spectrum** uses full complex samples, independent of waveform reduction. The
 Welch estimator uses a periodic window (Hann by default, see above), 50% overlap, no mean subtraction,
 and an unnormalized forward FFT with negative exponent. The default segment size
 is 1024; shorter buffers use the largest power of two that fits, with a minimum
@@ -738,6 +764,7 @@ assert len(iq) == metadata["sample_count"]
 - `library/signal_processing.*`: stable RRC taps and convolution.
 - `library/signal_analysis.*`: matched observations and Welch PSD with selectable window.
 - `library/measurements.*`: power statistics (PAPR), EVM, measured SNR and eye traces.
+- `library/pipeline.*`: the staged signal (bits, symbols, zero-inserted, filtered, noisy) behind the Pipeline tab.
 - `library/impairments.*`: carrier offset, phase noise, IQ imbalance, DC offset and quantization.
 - `presets/`: guided lesson presets (`NN-name.preset`, with `#` note lines).
 - `library/preset.*`, `library/iq_export.*`: validated file I/O.

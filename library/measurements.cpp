@@ -87,4 +87,9 @@ EyeDiagram eye_diagram(const GeneratedSignal& r, std::size_t max_traces) {
     }
     return eye;
 }
+EnergyRatios snr_to_energy_ratios(double snr_db, int samples_per_symbol, int bits_per_symbol) {
+    if (samples_per_symbol < 1 || bits_per_symbol < 1) throw std::invalid_argument("SPS and bits per symbol must be positive");
+    const auto es_n0 = snr_db + 10 * std::log10(static_cast<double>(samples_per_symbol));
+    return {es_n0, es_n0 - 10 * std::log10(static_cast<double>(bits_per_symbol))};
+}
 }

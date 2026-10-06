@@ -274,6 +274,7 @@ GeneratedSignal generate(const GenerationConfig& config) {
         std::mt19937 rng(config.seed);
         for (char& bit : bits) bit = (rng() & 1u) ? '1' : '0'; // One engine output per bit, least significant bit.
     }
+    result.bits = bits;
     result.sample_rate_hz = config.symbol_rate_baud * config.samples_per_symbol;
     if (result.family == Family::Fsk) {
         generate_fsk(result, bits);

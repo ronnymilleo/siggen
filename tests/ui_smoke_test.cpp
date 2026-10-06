@@ -1,5 +1,6 @@
 #include "implot.h"
 #include "implot_internal.h"
+#include "help_topics.h"
 #include "signal_generator.h"
 #include <gtest/gtest.h>
 // The tab bar lives inside a layout table cell, whose ID scope differs from the window's; find it by its tab names.
@@ -193,13 +194,25 @@ TEST(UI, GeneratedViewsAndPendingClosure)
                 const std::string name = ImGui::TabBarGetTabName(bar, &tab);
                 EXPECT_NE(name, "Constellation"); // FSK has no symbol constellation or matched-filter eye.
                 EXPECT_NE(name, "Eye");
+                EXPECT_NE(name, "Pipeline"); // No symbol/filter pipeline for FSK.
                 saw_frequency |= name == "Frequency";
             }
             EXPECT_TRUE(saw_frequency);
         }
+        else
+        {
+            frame(window);
+            frame(window);
+            auto* bar = find_signal_views();
+            ASSERT_NE(bar, nullptr);
+            bool saw_pipeline = false;
+            for (auto& tab : bar->Tabs)
+                saw_pipeline |= std::string(ImGui::TabBarGetTabName(bar, &tab)) == "Pipeline";
+            EXPECT_TRUE(saw_pipeline);
+        }
         const std::vector<const char*> views =
             fsk ? std::vector<const char*>{"Waveform", "Frequency", "Spectrum"}
-                : std::vector<const char*>{"Waveform", "Constellation", "Matched", "Eye", "Spectrum"};
+                : std::vector<const char*>{"Waveform", "Constellation", "Matched", "Eye", "Pipeline", "Spectrum"};
         for (const char* view : views)
         {
             frame(window);
@@ -328,6 +341,7 @@ TEST(UI, NoiseSourceRendersWithoutConstellation)
         {
             const std::string name = ImGui::TabBarGetTabName(bar, &tab);
             EXPECT_NE(name, "Constellation"); // Noise sources expose no symbol constellation.
+            EXPECT_NE(name, "Pipeline");
             saw_waveform |= name == "Waveform";
             saw_spectrum |= name == "Spectrum";
         }
@@ -336,4 +350,17 @@ TEST(UI, NoiseSourceRendersWithoutConstellation)
     }
     ImPlot::DestroyContext();
     ImGui::DestroyContext();
+}
+
+TEST(UI, EveryHelpTopicHasATitleAndExplanation)
+{
+    for (const auto& topic : help::all)
+    {
+        EXPECT_FALSE(topic.id.empty());
+        EXPECT_FALSE(topic.title.empty()) << topic.id;
+        EXPECT_GT(topic.body.size(), 100u) << topic.id;
+    }
+    // The topics the controls link to: roll-off, span, SPS and the SNR / Es/N0 / Eb/N0 relation.
+    EXPECT_NE(help::snr.body.find("Es/N0"), std::string_view::npos);
+    EXPECT_NE(help::snr.body.find("Eb/N0"), std::string_view::npos);
 }

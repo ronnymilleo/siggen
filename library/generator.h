@@ -63,6 +63,7 @@ struct GeneratedSignal {
     std::vector<std::complex<float>> samples;
     std::vector<std::complex<float>> symbols; // Unit-energy mapping, before gain. Empty for noise and FSK sources.
     std::vector<double> symbol_frequencies_hz; // Tone of each symbol (FSK family only).
+    std::string bits; // Transmitted bits, '0'/'1' (empty for noise sources).
     GenerationConfig config;
     Family family = Family::Linear;
     double sample_rate_hz = 0;

@@ -1,4 +1,5 @@
 #include "signal_generator.h"
+#include "help_topics.h"
 #include "imgui.h"
 #include "implot.h"
 #include "preset.h"
@@ -29,6 +30,35 @@ void Hint(const char* text)
         ImGui::PopTextWrapPos();
         ImGui::EndTooltip();
     }
+}
+// "?" button beside a control: opens a panel explaining the setting. `live` adds a line computed from the current settings.
+void HelpButton(const help::Topic& topic, const std::string& live = {}, bool inside_disabled = false)
+{
+    if (inside_disabled)
+        ImGui::EndDisabled(); // The explanation stays readable while its control is greyed out.
+    ImGui::SameLine();
+    ImGui::PushID(topic.id.data(), topic.id.data() + topic.id.size());
+    if (ImGui::SmallButton("?"))
+        ImGui::OpenPopup("help");
+    if (ImGui::IsItemHovered(ImGuiHoveredFlags_ForTooltip))
+        ImGui::SetTooltip("What is this? Click for an explanation.");
+    if (ImGui::BeginPopup("help"))
+    {
+        ImGui::PushTextWrapPos(ImGui::GetFontSize() * 32.f);
+        ImGui::TextColored(ImVec4(.55f, .75f, 1.f, 1.f), "%.*s", static_cast<int>(topic.title.size()), topic.title.data());
+        ImGui::Separator();
+        ImGui::TextUnformatted(topic.body.data(), topic.body.data() + topic.body.size());
+        if (!live.empty())
+        {
+            ImGui::Separator();
+            ImGui::TextUnformatted(live.c_str());
+        }
+        ImGui::PopTextWrapPos();
+        ImGui::EndPopup();
+    }
+    ImGui::PopID();
+    if (inside_disabled)
+        ImGui::BeginDisabled();
 }
 std::string num(const char* f, double v)
 {
@@ -68,6 +98,11 @@ void SignalGenerator::DrawContents()
             power_        = iq::power_statistics(r.samples);
             accuracy_     = iq::symbol_accuracy(r);
             eye_          = r.family == iq::Family::Linear ? iq::eye_diagram(r) : iq::EyeDiagram{};
+            pipeline_.reset();
+            if (r.family == iq::Family::Linear)
+                pipeline_ = iq::pipeline_stages(r);
+            pipeline_first_ = 0;
+            pipeline_fit_   = true;
             UpdateSpectrum();
         }
     }
@@ -122,8 +157,10 @@ void SignalGenerator::DrawContents()
         Hint("How many symbols to transmit. Each symbol carries log2(M) bits: 1 for BPSK, OOK, DBPSK, 2-FSK and MSK, 2 for QPSK, OQPSK, 4-PAM, 4-ASK, DQPSK, pi/4-DQPSK and 4-FSK, 3 for 8-PSK and 8-DPSK, 4 for 16-QAM, 5 for 32-QAM, 6 for 64-QAM, 8 for 256-QAM.");
         ImGui::InputDouble("Symbol rate (Bd)", &config_.symbol_rate_baud, 100, 1000, "%.6g");
         Hint("Symbols per second. Together with samples per symbol it sets the sample rate.");
+        HelpButton(help::symbol_rate);
         ImGui::InputInt("Samples per symbol", &config_.samples_per_symbol);
         Hint("Oversampling factor (SPS). Higher values give smoother waveforms and more room in the spectrum, at the cost of more samples. RRC needs at least 2; FSK needs enough SPS to keep every tone below half the sample rate.");
+        HelpButton(help::sps);
         ImGui::Text("Sample rate: %.6g Hz", config_.symbol_rate_baud * config_.samples_per_symbol);
         ImGui::InputDouble("Amplitude gain", &config_.amplitude_gain, .1, 1, "%.6g");
         Hint("Scales every sample once. Power scales with gain squared.");
@@ -147,11 +184,14 @@ void SignalGenerator::DrawContents()
         if (ImGui::Combo("Pulse", &pulse, "Root-raised cosine\0Rectangular\0"))
             config_.pulse = static_cast<iq::Pulse>(pulse);
         Hint("RRC is the practical choice: with a matching receive filter it has no inter-symbol interference at the decision instants and a compact spectrum. Rectangular pulses open the eye fully but have wide sinc sidelobes.");
+        HelpButton(help::pulse);
         ImGui::BeginDisabled(config_.pulse != iq::Pulse::RRC);
         ImGui::InputDouble("RRC roll-off", &config_.roll_off, .05, .1, "%.4g");
         Hint("Excess bandwidth of the root-raised-cosine filter, from 0 to 1. Occupied bandwidth is about symbol rate x (1 + roll-off). Low values give narrow spectra but longer, more sensitive filter tails.");
+        HelpButton(help::roll_off, {}, config_.pulse != iq::Pulse::RRC);
         ImGui::InputInt("RRC span (symbols)", &config_.span_symbols);
         Hint("Filter length in symbols. Longer filters approximate the ideal response better (less residual ISI) and cost more samples.");
+        HelpButton(help::span, {}, config_.pulse != iq::Pulse::RRC);
         ImGui::EndDisabled();
         }
         ImGui::SeparatorText("AWGN");
@@ -160,8 +200,21 @@ void SignalGenerator::DrawContents()
         ImGui::BeginDisabled(!config_.awgn.enabled);
         ImGui::InputDouble("SNR (dB)", &config_.awgn.snr_db, 1, 10, "%.6g");
         Hint("Clean signal power divided by added noise power, in dB. Lower values spread the constellation and close the eye.");
+        {
+            const auto ratios = iq::snr_to_energy_ratios(config_.awgn.snr_db, std::max(config_.samples_per_symbol, 1),
+                                                         std::max(iq::bits_per_symbol(config_.modulation), 1));
+            HelpButton(help::snr, num("With your settings: SNR %.4g dB", config_.awgn.snr_db) + num(" = Es/N0 %.4g dB", ratios.es_n0_db) +
+                                      num(" = Eb/N0 %.4g dB", ratios.eb_n0_db),
+                       !config_.awgn.enabled);
+        }
         ImGui::EndDisabled();
-        ImGui::TextWrapped("SNR is clean sample power over added complex noise power, measured on the steady-state interval.");
+        ImGui::TextWrapped("SNR is clean sample power over added complex noise power, measured on the steady-state interval. Es/N0 = SNR + 10 log10(SPS); Eb/N0 = Es/N0 - 10 log10(bits per symbol).");
+        if (config_.awgn.enabled && std::isfinite(config_.awgn.snr_db))
+        {
+            const auto ratios = iq::snr_to_energy_ratios(config_.awgn.snr_db, std::max(config_.samples_per_symbol, 1),
+                                                         std::max(iq::bits_per_symbol(config_.modulation), 1));
+            ImGui::Text("Equivalent: Es/N0 %.4g dB | Eb/N0 %.4g dB", ratios.es_n0_db, ratios.eb_n0_db);
+        }
         ImGui::SeparatorText("Channel impairments");
         auto& imp = config_.impairments;
         ImGui::InputDouble("CFO (Hz)", &imp.cfo_hz, 1, 10, "%.6g");
@@ -456,6 +509,11 @@ void SignalGenerator::DrawPlots()
         }
         ImGui::EndTabItem();
     }
+    if (!noise_source && !fsk_source && result && pipeline_ && ImGui::BeginTabItem("Pipeline"))
+    {
+        DrawPipeline(*result);
+        ImGui::EndTabItem();
+    }
     if (ImGui::BeginTabItem("Spectrum"))
     {
         int window = static_cast<int>(window_);
@@ -489,6 +547,148 @@ void SignalGenerator::DrawPlots()
     }
     ImPlot::PopStyleVar();
     ImGui::EndTabBar();
+}
+
+void SignalGenerator::DrawPipeline(const iq::GeneratedSignal& r)
+{
+    const auto& p = *pipeline_;
+    const int   total = static_cast<int>(p.symbols.size());
+    const int   sps   = p.samples_per_symbol;
+    const int   bps   = p.bits_per_symbol;
+    ImGui::TextWrapped("One transmission, step by step, on a shared time axis (symbol periods). I: blue | Q: orange");
+    HelpButton(help::pipeline);
+    bool moved = false;
+    ImGui::SetNextItemWidth(220);
+    pipeline_count_ = std::clamp(pipeline_count_, std::min(4, total), std::min(64, total));
+    moved |= ImGui::SliderInt("Symbols shown", &pipeline_count_, std::min(4, total), std::min(64, total));
+    Hint("How many symbols the rows cover. Fewer symbols make each step easier to read.");
+    const int max_first = std::max(0, total - pipeline_count_);
+    pipeline_first_     = std::clamp(pipeline_first_, 0, max_first);
+    ImGui::SetNextItemWidth(220);
+    moved |= ImGui::SliderInt("First symbol", &pipeline_first_, 0, max_first);
+    Hint("Index of the first symbol shown. Scroll through the signal; the start and end show the filter ramping up and down.");
+    ImGui::BeginDisabled(p.filter_delay_samples == 0);
+    ImGui::Checkbox("Compensate filter delay", &pipeline_align_);
+    ImGui::EndDisabled();
+    Hint("The pulse filter delays its output by half its span. With this on, steps 4 and 5 are shifted back so each pulse peak lines up with its symbol in steps 2 and 3.");
+    if (p.filter_delay_samples > 0)
+    {
+        ImGui::SameLine();
+        ImGui::TextDisabled("(delay %.4g symbols)", static_cast<double>(p.filter_delay_samples) / sps);
+    }
+    if (moved)
+        pipeline_fit_ = true;
+    const int  count  = pipeline_count_;
+    const int  first  = pipeline_first_;
+    const bool align  = pipeline_align_ && p.filter_delay_samples > 0;
+    const auto offset = align ? p.filter_delay_samples : 0;
+    // Samples [first*SPS, (first+count)*SPS) of a stage, with x in symbol periods.
+    struct Series { std::vector<double> x, i, q; };
+    auto series = [&](const std::vector<std::complex<float>>& stage, std::size_t shift, bool closed) {
+        Series s;
+        const auto begin = static_cast<std::size_t>(first) * static_cast<std::size_t>(sps) + shift;
+        const auto n     = static_cast<std::size_t>(count) * static_cast<std::size_t>(sps) + (closed ? 1 : 0);
+        for (std::size_t k = 0; k < n && begin + k < stage.size(); ++k)
+        {
+            s.x.push_back(first + static_cast<double>(k) / sps);
+            s.i.push_back(stage[begin + k].real());
+            s.q.push_back(stage[begin + k].imag());
+        }
+        return s;
+    };
+    auto start_plot = [&](const char* title, bool last, double ylo, double yhi) {
+        if (!ImPlot::BeginPlot(title, ImVec2(0, 0), ImPlotFlags_NoLegend | ImPlotFlags_NoMouseText))
+            return false;
+        ImPlot::SetupAxes(last ? "Time (symbol periods)" : nullptr, nullptr, 0, ImPlotAxisFlags_AutoFit);
+        ImPlot::SetupAxisLimits(ImAxis_X1, first, first + count, pipeline_fit_ ? ImPlotCond_Always : ImPlotCond_Once);
+        if (ylo < yhi)
+            ImPlot::SetupAxisLimits(ImAxis_Y1, ylo, yhi, ImPlotCond_Always);
+        return true;
+    };
+    const ImVec4 blue(.2f, .6f, 1.f, 1.f), orange(1.f, .55f, .15f, 1.f);
+    // Shared vertical scale for the sample-level rows so that amplitude changes between steps are visible.
+    double peak = 1e-9;
+    for (const auto* stage : {&p.symbols, &p.upsampled, &p.shaped, &p.received})
+        for (const auto& v : *stage)
+            peak = std::max({peak, static_cast<double>(std::abs(v.real())), static_cast<double>(std::abs(v.imag()))});
+    const double ymax = peak * 1.25;
+    if (ImPlot::BeginSubplots("##pipeline", 5, 1, ImVec2(-1, -1), ImPlotSubplotFlags_LinkAllX | ImPlotSubplotFlags_NoTitle))
+    {
+        if (start_plot("1. Data bits", false, -.3, 1.3))
+        {
+            std::vector<double> x, y;
+            const int           bit_begin = first * bps, bit_end = std::min(static_cast<int>(p.bits.size()), (first + count) * bps);
+            for (int b = bit_begin; b < bit_end; ++b)
+            {
+                x.push_back(static_cast<double>(b) / bps);
+                y.push_back(p.bits[static_cast<std::size_t>(b)] == '1' ? 1. : 0.);
+            }
+            if (!x.empty())
+            {
+                x.push_back(static_cast<double>(bit_end) / bps);
+                y.push_back(y.back());
+                ImPlot::SetNextLineStyle(blue, 2.f);
+                ImPlot::PlotStairs("bits", x.data(), y.data(), static_cast<int>(x.size()));
+                if (bit_end - bit_begin <= 96)
+                    for (int b = bit_begin; b < bit_end; ++b)
+                        ImPlot::PlotText(p.bits[static_cast<std::size_t>(b)] == '1' ? "1" : "0", (b + .5) / bps, .5);
+            }
+            ImPlot::EndPlot();
+        }
+        if (start_plot("2. Mapped symbols (one complex value per symbol)", false, -ymax, ymax))
+        {
+            std::vector<double> x, yi, yq;
+            for (int k = first; k < first + count; ++k)
+            {
+                x.push_back(k);
+                yi.push_back(p.symbols[static_cast<std::size_t>(k)].real());
+                yq.push_back(p.symbols[static_cast<std::size_t>(k)].imag());
+            }
+            x.push_back(first + count);
+            yi.push_back(yi.back());
+            yq.push_back(yq.back());
+            ImPlot::SetNextLineStyle(blue, 2.f);
+            ImPlot::PlotStairs("I", x.data(), yi.data(), static_cast<int>(x.size()));
+            ImPlot::SetNextLineStyle(orange, 2.f);
+            ImPlot::PlotStairs("Q", x.data(), yq.data(), static_cast<int>(x.size()));
+            ImPlot::EndPlot();
+        }
+        if (start_plot("3. Zeros inserted between symbols (upsampling by SPS)", false, -ymax, ymax))
+        {
+            const auto s = series(p.upsampled, 0, false);
+            ImPlot::SetNextLineStyle(blue, 1.5f);
+            ImPlot::SetNextMarkerStyle(ImPlotMarker_Circle, 2.5f, blue);
+            ImPlot::PlotStems("I", s.x.data(), s.i.data(), static_cast<int>(s.x.size()));
+            ImPlot::SetNextLineStyle(orange, 1.5f);
+            ImPlot::SetNextMarkerStyle(ImPlotMarker_Square, 2.5f, orange);
+            ImPlot::PlotStems("Q", s.x.data(), s.q.data(), static_cast<int>(s.x.size()));
+            ImPlot::EndPlot();
+        }
+        const std::string shaped_title =
+            std::string("4. After the pulse filter (") + (r.config.pulse == iq::Pulse::RRC ? "root-raised cosine" : "rectangular") + ")";
+        if (start_plot(shaped_title.c_str(), false, -ymax, ymax))
+        {
+            const auto s = series(p.shaped, offset, true);
+            ImPlot::SetNextLineStyle(blue, 1.5f);
+            ImPlot::PlotLine("I", s.x.data(), s.i.data(), static_cast<int>(s.x.size()));
+            ImPlot::SetNextLineStyle(orange, 1.5f);
+            ImPlot::PlotLine("Q", s.x.data(), s.q.data(), static_cast<int>(s.x.size()));
+            ImPlot::EndPlot();
+        }
+        const char* noisy_title = p.degraded ? "5. With noise and impairments (the exported signal)"
+                                             : "5. With noise: none added yet (enable AWGN or an impairment and generate)";
+        if (start_plot(noisy_title, true, -ymax, ymax))
+        {
+            const auto s = series(p.received, offset, true);
+            ImPlot::SetNextLineStyle(blue, 1.5f);
+            ImPlot::PlotLine("I", s.x.data(), s.i.data(), static_cast<int>(s.x.size()));
+            ImPlot::SetNextLineStyle(orange, 1.5f);
+            ImPlot::PlotLine("Q", s.x.data(), s.q.data(), static_cast<int>(s.x.size()));
+            ImPlot::EndPlot();
+        }
+        ImPlot::EndSubplots();
+    }
+    pipeline_fit_ = false;
 }
 
 void SignalGenerator::Export(bool overwrite)
