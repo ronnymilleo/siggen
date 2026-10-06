@@ -143,6 +143,24 @@ void SignalGenerator::DrawContents()
         Hint("Clean signal power divided by added noise power, in dB. Lower values spread the constellation and close the eye.");
         ImGui::EndDisabled();
         ImGui::TextWrapped("SNR is clean sample power over added complex noise power, measured on the steady-state interval.");
+        ImGui::SeparatorText("Channel impairments");
+        auto& imp = config_.impairments;
+        ImGui::InputDouble("CFO (Hz)", &imp.cfo_hz, 1, 10, "%.6g");
+        Hint("Carrier frequency offset. The constellation spins at this rate; a receiver needs carrier recovery to stop it.");
+        ImGui::InputDouble("Phase noise linewidth (Hz)", &imp.phase_noise_linewidth_hz, 0.1, 1, "%.6g");
+        Hint("3 dB linewidth of a free-running oscillator. The phase random-walks, smearing each constellation point into an arc.");
+        ImGui::InputDouble("IQ gain imbalance (dB)", &imp.iq_gain_db, 0.1, 1, "%.6g");
+        Hint("Gain of the Q branch relative to I. Squeezes the constellation along one axis and leaves an image of the signal in the spectrum.");
+        ImGui::InputDouble("IQ phase skew (deg)", &imp.iq_phase_deg, 0.5, 5, "%.6g");
+        Hint("Quadrature error: the Q branch leaks a little of I, shearing the constellation.");
+        ImGui::InputDouble("DC offset I (x RMS)", &imp.dc_offset_i, 0.01, 0.1, "%.6g");
+        ImGui::InputDouble("DC offset Q (x RMS)", &imp.dc_offset_q, 0.01, 0.1, "%.6g");
+        Hint("A constant added to I or Q, as a fraction of the signal RMS amplitude. Shifts the whole constellation and adds a spectral line at 0 Hz.");
+        ImGui::InputInt("ADC bits", &imp.adc_bits);
+        Hint("Quantizer resolution per component, 2 to 24; 0 disables it. The full scale auto-ranges to the largest I or Q magnitude. Few bits give a staircase waveform and a grid-like constellation.");
+        ImGui::TextWrapped("Applied after AWGN, in the order: CFO, phase noise, IQ imbalance, DC offset, quantization.");
+        ImGui::InputScalar("Impairment seed", ImGuiDataType_U32, &config_.impairment_seed);
+        Hint("Seeds the phase-noise random walk; it is independent of the data and AWGN seeds.");
         ImGui::InputScalar("Noise seed", ImGuiDataType_U32, &config_.noise_seed);
         ImGui::InputScalar("Random seed", ImGuiDataType_U32, &config_.seed);
         Hint("Same settings and seeds always reproduce the same bits and noise. The data and noise seeds are independent streams.");
@@ -284,6 +302,12 @@ void SignalGenerator::DrawContents()
                 ImGui::TextWrapped("AWGN: requested %.6g dB | reference power %.6g over [%zu,%zu) | added noise power %.6g | noise seed %u",
                             r->noise.requested_snr_db, r->noise.reference_power, r->noise.reference_begin,
                             r->noise.reference_end, r->noise.added_noise_power, r->noise.noise_seed);
+            if (r->impairments_applied)
+                ImGui::TextWrapped("Impairments: CFO %.6g Hz | phase noise %.6g Hz | IQ %.6g dB / %.6g deg | DC %.6g%+.6gj x RMS | ADC %d bits | seed %u",
+                            r->config.impairments.cfo_hz, r->config.impairments.phase_noise_linewidth_hz,
+                            r->config.impairments.iq_gain_db, r->config.impairments.iq_phase_deg,
+                            r->config.impairments.dc_offset_i, r->config.impairments.dc_offset_q,
+                            r->config.impairments.adc_bits, r->config.impairment_seed);
         }
         DrawMeasurements(*r);
         DrawPlots();
@@ -353,9 +377,9 @@ void SignalGenerator::DrawPlots()
     const bool noise_source = result && result->family == iq::Family::Noise;
     if (!noise_source && ImGui::BeginTabItem("Constellation"))
     {
-        const bool noisy = result && result->noise.awgn_applied;
+        const bool noisy = result && (result->noise.awgn_applied || result->impairments_applied);
         ImGui::Combo("View", &constellation_view_,
-                     noisy ? "Mapped symbols (ideal, gain applied)\0Matched filter (noisy observations)\0"
+                     noisy ? "Mapped symbols (ideal, gain applied)\0Matched filter (degraded observations)\0"
                            : "Mapped symbols (gain applied)\0Matched filter (steady-state symbols)\0");
         const auto& data = constellation_view_ == 0 ? plots_.mapped : plots_.matched;
         if (data.x.empty())

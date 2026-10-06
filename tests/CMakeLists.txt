@@ -1,4 +1,4 @@
-add_executable(siggen_tests signal_processing_test.cpp waveform_test.cpp generator_test.cpp noise_test.cpp generation_job_test.cpp signal_analysis_test.cpp preset_test.cpp export_test.cpp batch_test.cpp measurements_test.cpp)
+add_executable(siggen_tests signal_processing_test.cpp waveform_test.cpp generator_test.cpp noise_test.cpp generation_job_test.cpp signal_analysis_test.cpp preset_test.cpp export_test.cpp batch_test.cpp measurements_test.cpp impairments_test.cpp)
 target_link_libraries(siggen_tests PRIVATE signalgenerator GTest::gtest_main Threads::Threads)
 siggen_target_options(siggen_tests)
 include(GoogleTest)

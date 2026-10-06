@@ -46,6 +46,7 @@ void select_waveform(GenerationConfig& config, Modulation modulation) {
         defaults.amplitude_gain = config.amplitude_gain;
         defaults.seed = config.seed;
         defaults.noise_seed = config.noise_seed;
+        defaults.impairment_seed = config.impairment_seed;
         config = defaults;
     }
     config.modulation = modulation;
@@ -85,7 +86,9 @@ void validate(const GenerationConfig& c) {
         throw std::invalid_argument("Noise power must be finite and non-negative");
     if (!std::isfinite(c.awgn.snr_db))
         throw std::invalid_argument("AWGN SNR must be finite");
+    validate(c.impairments);
     if (info.family == Family::Noise) {
+        if (c.impairments.active()) throw std::invalid_argument("Impairments do not apply to noise sources");
         if (!info.awgn_supported && c.awgn.enabled) throw std::invalid_argument("AWGN does not apply to noise sources");
         if (!info.explicit_input && c.data_source == DataSource::Explicit)
             throw std::invalid_argument("Noise sources use seeded random generation");
@@ -164,6 +167,10 @@ GeneratedSignal generate(const GenerationConfig& config) {
         for (std::size_t j = 0; j < taps.size(); ++j)
             result.samples[k * sps + j] += result.symbols[k] * static_cast<float>(config.amplitude_gain * taps[j]);
     if (config.awgn.enabled) apply_awgn(result);
+    if (config.impairments.active()) {
+        apply_impairments(result.samples, result.sample_rate_hz, config.impairments, config.impairment_seed);
+        result.impairments_applied = true;
+    }
     return result;
 }
 }

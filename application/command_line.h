@@ -43,6 +43,16 @@ struct CommandLine
     std::uint32_t noise_seed = 0;
     std::string   snr_db; // Numeric, or "off" to disable preset AWGN.
 
+    // Channel impairments (linear waveforms).
+    double        cfo_hz = 0;
+    double        phase_noise_hz = 0;
+    double        iq_gain_db = 0;
+    double        iq_phase_deg = 0;
+    double        dc_i = 0;
+    double        dc_q = 0;
+    int           adc_bits = 0;
+    std::uint32_t impairment_seed = 0;
+
     // Batch subcommand state.
     CLI::App*                batch = nullptr;
     std::string              batch_format = "cf32";
@@ -116,5 +126,13 @@ private:
         target.add_option("--noise-power", noise_power, "WGN total complex noise power before gain");
         target.add_option("--noise-seed", noise_seed, "Noise PRNG seed (WGN source and AWGN)");
         target.add_option("--snr-db", snr_db, "AWGN SNR in dB, or 'off' to disable preset AWGN");
+        target.add_option("--cfo-hz", cfo_hz, "Carrier frequency offset in Hz (linear waveforms)");
+        target.add_option("--phase-noise-hz", phase_noise_hz, "Oscillator phase-noise 3 dB linewidth in Hz (linear waveforms)");
+        target.add_option("--iq-gain-db", iq_gain_db, "IQ gain imbalance: Q gain relative to I, in dB (linear waveforms)");
+        target.add_option("--iq-phase-deg", iq_phase_deg, "IQ quadrature skew in degrees (linear waveforms)");
+        target.add_option("--dc-i", dc_i, "DC offset on I as a fraction of the RMS amplitude (linear waveforms)");
+        target.add_option("--dc-q", dc_q, "DC offset on Q as a fraction of the RMS amplitude (linear waveforms)");
+        target.add_option("--adc-bits", adc_bits, "Quantizer bits per component, 2-24; 0 disables (linear waveforms)");
+        target.add_option("--impairment-seed", impairment_seed, "Phase-noise PRNG seed");
     }
 };
