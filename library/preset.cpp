@@ -58,7 +58,7 @@ GenerationConfig parse_preset(std::string_view text) {
     std::map<std::string, std::string> fields;
     while (std::getline(input, line)) {
         if (!line.empty() && line.back() == '\r') line.pop_back();
-        if (line.empty()) continue;
+        if (line.empty() || line.front() == '#') continue; // Blank lines and '#' notes.
         const auto split = line.find('=');
         if (split == std::string::npos || !fields.emplace(line.substr(0,split), line.substr(split+1)).second)
             throw std::invalid_argument("Malformed or duplicate preset field");
@@ -108,6 +108,19 @@ GenerationConfig parse_preset(std::string_view text) {
     validate(c);
     return c;
 }
+std::string preset_notes(std::string_view text) {
+    std::istringstream input{std::string(text)};
+    std::string line, notes;
+    while (std::getline(input, line)) {
+        if (!line.empty() && line.back() == '\r') line.pop_back();
+        if (line.empty() || line.front() != '#') continue;
+        auto body = line.substr(1);
+        if (!body.empty() && body.front() == ' ') body.erase(0, 1);
+        if (!notes.empty()) notes += '\n';
+        notes += body;
+    }
+    return notes;
+}
 void save_preset(const std::filesystem::path& path, const GenerationConfig& config) {
     const auto text = serialize_preset(config);
     std::ofstream file;
@@ -127,5 +140,14 @@ GenerationConfig load_preset(const std::filesystem::path& path) {
     }
     if (!file.eof() || file.bad()) throw std::runtime_error("Failed reading preset");
     return parse_preset(text);
+}
+std::string load_preset_notes(const std::filesystem::path& path) {
+    std::ifstream file(path, std::ios::binary);
+    if (!file) throw std::runtime_error("Cannot open preset: " + path.string());
+    std::string text(1024 * 1024 + 1, '\0');
+    file.read(text.data(), static_cast<std::streamsize>(text.size()));
+    text.resize(static_cast<std::size_t>(file.gcount()));
+    if (text.size() > 1024 * 1024) throw std::length_error("Preset exceeds 1 MiB");
+    return preset_notes(text);
 }
 }

@@ -291,6 +291,31 @@ ceiling, which also bounds WGN sample counts. There is no implicit padding or
 truncation of explicit bits: supply exactly `symbol_count * bits_per_symbol`
 characters, each `0` or `1` (no whitespace), up to 393,216 bits for 64-QAM.
 
+## Measurements, eye diagram, spectral windows and guided presets
+
+After **Generate Signal** the **Measurements** block reports mean and peak power
+and the PAPR over the complete buffer (filter transients included). For linear
+signals it also reports the EVM of the matched-filter observations relative to
+the gain-scaled ideal symbols, and the corresponding SNR after the matched filter
+(`-EVM` in dB). Matched filtering averages noise over about SPS samples, so this
+value is the requested sample-level SNR plus `10*log10(SPS)` in expectation; the
+GUI shows both numbers and the measured one still varies with the noise
+realization. A clean RRC signal shows a small EVM floor (about -43 dB for the
+default span 10, roll-off 0.2) from the truncated filter. Noise sources have power
+statistics only.
+
+The **Eye** tab overlays up to 200 matched-filter traces, each two symbol periods
+wide and centred on a decision instant, for the I or Q component. Traces cover the
+same steady-state symbols as the constellation.
+
+The **Spectrum** tab selects the Welch window: periodic Hann (default),
+Hamming, Blackman or Rectangular. Hann output is unchanged from earlier releases.
+
+`presets/` contains numbered guided lessons. Lines beginning with `#` after the
+preset header are notes: parsers ignore them and the GUI shows them after
+**Load Preset**, so a lesson can say what to look at (for example
+`presets/02-qpsk-snr-8db.preset`). Controls also have hover tooltips.
+
 ## Mapping and reproducibility
 
 Mapped symbols have **unit average constellation energy**, before amplitude gain.

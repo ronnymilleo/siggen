@@ -12,11 +12,18 @@ struct SymbolObservations {
 SymbolObservations matched_symbols(const GeneratedSignal& signal);
 }
 namespace iq {
+// Periodic analysis windows for the Welch estimator.
+enum class Window { Hann, Hamming, Blackman, Rectangular };
+const char* window_name(Window window);
+// Window coefficient w[k] for k in [0, length); periodic (DFT-even) definition.
+double window_value(Window window, std::size_t k, std::size_t length);
 struct Spectrum {
     std::vector<double> frequency_hz;
     std::vector<double> power_density; // Relative amplitude squared / Hz, two-sided.
     std::size_t segment_length = 0;
     std::size_t segment_count = 0;
+    Window window = Window::Hann;
 };
-Spectrum welch_psd(const std::vector<std::complex<float>>& samples, double sample_rate_hz, std::size_t segment_length = 1024);
+Spectrum welch_psd(const std::vector<std::complex<float>>& samples, double sample_rate_hz, std::size_t segment_length = 1024,
+                  Window window = Window::Hann);
 }

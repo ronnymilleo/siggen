@@ -2,7 +2,9 @@
 #include "generation_job.h"
 #include "imgui_window_layer.h"
 #include "iq_export.h"
+#include "measurements.h"
 #include "plot_data.h"
+#include <optional>
 #include <string>
 
 class SignalGenerator : public ImGuiWindowLayer
@@ -27,6 +29,14 @@ private:
     bool                                       spectrum_fit_       = true;
     char                                       preset_path_[1024]  = "default.preset";
     int                                        constellation_view_ = 0;
+    iq::Window                                 window_             = iq::Window::Hann;
+    iq::PowerStatistics                        power_;
+    std::optional<iq::SymbolAccuracy>          accuracy_;
+    iq::EyeDiagram                             eye_;
+    int                                        eye_component_ = 0;
+    std::string                                preset_notes_;
+    void                                       UpdateSpectrum();
+    void                                       DrawMeasurements(const iq::GeneratedSignal& result);
     void                                       DrawPlots();
     void                                       DrawExportDialog();
     void                                       Export(bool overwrite);
