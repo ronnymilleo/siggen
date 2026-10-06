@@ -312,3 +312,30 @@ TEST(CliConfig, BatchDefaultsUseResolvedWaveformAndSeed) {
     EXPECT_EQ(request.frames_per_point, 1);
     EXPECT_EQ(request.format, iq::ExportFormat::BinaryFloat32);
 }
+
+TEST(CliConfig, ImpairmentOptionsResolveAndRejectWgn) {
+    CommandLine cli("test");
+    const char* args[] = {"siggen", "--modulation", "QPSK", "--cfo-hz", "12.5", "--phase-noise-hz", "2",
+                         "--iq-gain-db", "1", "--iq-phase-deg", "3", "--dc-i", "0.1", "--dc-q", "-0.1",
+                         "--adc-bits", "5", "--impairment-seed", "77"};
+    cli.app.parse(std::size(args), args);
+    const auto c = resolve_config(cli);
+    EXPECT_EQ(c.impairments.cfo_hz, 12.5);
+    EXPECT_EQ(c.impairments.phase_noise_linewidth_hz, 2);
+    EXPECT_EQ(c.impairments.iq_gain_db, 1);
+    EXPECT_EQ(c.impairments.iq_phase_deg, 3);
+    EXPECT_EQ(c.impairments.dc_offset_i, 0.1);
+    EXPECT_EQ(c.impairments.dc_offset_q, -0.1);
+    EXPECT_EQ(c.impairments.adc_bits, 5);
+    EXPECT_EQ(c.impairment_seed, 77u);
+    CommandLine wgn("test");
+    const char* bad[] = {"siggen", "--modulation", "WGN", "--cfo-hz", "5"};
+    wgn.app.parse(std::size(bad), bad);
+    EXPECT_THROW(resolve_config(wgn), std::invalid_argument);
+    CommandLine batch("test");
+    const char* b[] = {"siggen", "batch", "--cfo-hz", "5", "--adc-bits", "8"};
+    batch.app.parse(std::size(b), b);
+    const auto r = resolve_batch(batch);
+    EXPECT_EQ(r.base.impairments.cfo_hz, 5);
+    EXPECT_EQ(r.base.impairments.adc_bits, 8);
+}

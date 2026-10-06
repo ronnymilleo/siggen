@@ -158,7 +158,7 @@ TEST(GuidedPresets, AllParseAndCarryNotes) {
         EXPECT_FALSE(load_preset_notes(entry.path()).empty()) << entry.path();
         EXPECT_NO_THROW(generate(load_preset(entry.path()))) << entry.path();
     }
-    EXPECT_GE(count, 6);
+    EXPECT_GE(count, 10);
 }
 
 TEST(GuidedPresets, NotesAreIgnoredByTheParser) {

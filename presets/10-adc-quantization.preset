@@ -1,0 +1,29 @@
+[IQ Generator Preset]
+# Lesson 10: ADC resolution and DC offset.
+# Four bits per component and a small DC offset on top of 30 dB AWGN. The DC offset shifts the whole constellation and adds a line at 0 Hz in the Spectrum tab; the quantization error adds to the AWGN, so the clusters are wider than at 30 dB alone. Try ADC bits of 3, 6 and 10 to see where quantization stops mattering next to the noise. Use the Constellation tab with the matched-filter view.
+Version=3
+Modulation=16-QAM
+NumberOfSymbols=1024
+SymbolRateBaud=1000
+SamplesPerSymbol=8
+Pulse=RRC
+RRCBeta=0.2
+SpanSymbols=10
+AmplitudeGain=1
+DataSource=Random
+Seed=5489
+Bits=
+NoiseSampleCount=2048
+NoiseSampleRateHz=8000
+NoisePower=1
+AwgnEnabled=true
+AwgnSnrDb=30
+NoiseSeed=5490
+CfoHz=0
+PhaseNoiseLinewidthHz=0
+IqGainDb=0
+IqPhaseDeg=0
+DcOffsetI=0.2
+DcOffsetQ=0.1
+AdcBits=4
+ImpairmentSeed=5491

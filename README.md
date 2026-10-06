@@ -145,7 +145,10 @@ supplied never replace preset values. Modulation names (`BPSK`, `QPSK`, `8-PSK`,
 `--symbols`, `--symbol-rate`, `--sps`, `--pulse`, `--roll-off`, `--span`,
 `--gain`, `--seed`, `--data-source random|explicit`, and `--bits`. Noise options
 are `--samples`, `--sample-rate`, `--noise-power`, `--noise-seed`, and
-`--snr-db <dB>|off`; `--snr-db off` disables preset-provided AWGN. Export
+`--snr-db <dB>|off`; `--snr-db off` disables preset-provided AWGN. Channel
+impairment options for linear waveforms are `--cfo-hz`, `--phase-noise-hz`,
+`--iq-gain-db`, `--iq-phase-deg`, `--dc-i`, `--dc-q`, `--adc-bits`, and
+`--impairment-seed` (see "Channel impairments"). Export
 options are `--format csv|cf32`, `--output`/`-o`, and `--overwrite`. Without an
 output path, CSV uses `signal.csv` and binary uses `signal.iq`.
 
@@ -274,6 +277,10 @@ six bits per symbol). Selecting **WGN** replaces the symbol controls with the
 noise source: sample count, sample rate, total complex noise power, and noise
 seed.
 
+The **Channel impairments** section degrades the signal after AWGN with a
+carrier frequency offset, oscillator phase noise, IQ gain and phase imbalance,
+DC offsets and an ADC quantizer; every field defaults to off.
+
 **Generate Signal** starts one owned asynchronous job. Editing settings while it
 runs affects the next request. The previous result remains visible until a new
 result completes; a message identifies settings that differ from that result.
@@ -398,6 +405,37 @@ Gaussian conversion is a documented Box–Muller transform driven by
 `z0 = sqrt(-2 ln u1) * cos(2*pi*u2)` first and `z1 = sqrt(-2 ln u1) * sin(2*pi*u2)`
 second; consecutive draws alternate cos/sin from the same pair, with I before Q.
 
+## Channel impairments
+
+Linear signals can pass through a simple front-end/channel stage after AWGN.
+Every effect is disabled at its default value, and a configuration with no
+active effect produces bit-identical output to earlier versions. Effects are
+applied in a fixed order, with `n` the sample index and `fs` the sample rate:
+
+1. **CFO** (`--cfo-hz`): multiplies by `exp(j*2*pi*f*n/fs)`.
+2. **Phase noise** (`--phase-noise-hz`): multiplies by `exp(j*phi[n])`, where `phi` is a
+   Wiener process whose per-sample increments are Gaussian with variance
+   `2*pi*linewidth/fs` (a Lorentzian oscillator with the given 3 dB linewidth).
+   Increments come from the same documented Box–Muller source, seeded by
+   `--impairment-seed` (default 5491), independent of the data and noise seeds.
+3. **IQ imbalance** (`--iq-gain-db`, `--iq-phase-deg`): `I' = I` and
+   `Q' = g*(Q*cos(phi) + I*sin(phi))` with `g = 10^(gain_db/20)`. This squeezes
+   and shears the constellation and creates an image of the signal in the spectrum.
+4. **DC offset** (`--dc-i`, `--dc-q`): adds a constant to I and Q, expressed as a
+   fraction of the buffer's RMS amplitude at that point.
+5. **Quantization** (`--adc-bits`, 2–24, 0 disables): mid-rise quantizer per
+   component whose full scale auto-ranges to the largest I or Q magnitude.
+
+Impairments reject noise sources (WGN). Presets with any active impairment are
+saved as version 3, which appends `CfoHz`, `PhaseNoiseLinewidthHz`, `IqGainDb`,
+`IqPhaseDeg`, `DcOffsetI`, `DcOffsetQ`, `AdcBits` and `ImpairmentSeed`; presets
+without impairments remain version 2. Export and batch sidecars gain an
+`impairments` block when anything was applied. In `siggen batch`, impairments run
+on each cropped frame after AWGN, with a per-frame seed derived from the base seed,
+waveform, frame index and the configured impairment seed (stream tag 3); the
+manifest records the settings and derived seed for impaired frames. Guided
+presets 07–10 demonstrate each effect.
+
 Optional AWGN applies only to linear signals and is disabled by default. SNR is
 defined as clean complex sample power divided by added complex noise power (not
 Eb/N0 or Es/N0). The clean reference power is measured over the fully supported
@@ -500,7 +538,8 @@ AwgnSnrDb=10
 NoiseSeed=5490
 ```
 
-All version-2 fields are required. Modulation accepts `BPSK`, `QPSK`, `8-PSK`,
+All version-2 fields are required; version 3 additionally requires the impairment
+fields listed in "Channel impairments". Modulation accepts `BPSK`, `QPSK`, `8-PSK`,
 `16-QAM`, `64-QAM`, `WGN` case-insensitively; pulse accepts `RRC`,
 `Rectangular`; source accepts `Random`, `Explicit`; booleans accept `true`,
 `false`. Numbers use a locale-independent decimal point.
@@ -516,7 +555,7 @@ and the WGN defaults above); version-1 files must not contain version-2 fields
 or the new waveform names. Legacy files import `NumberOfSymbols`,
 `SamplesPerSymbol`, and `RRCBeta`; the obsolete `ConstellationStart` field is
 ignored. Legacy settings still must satisfy current numerical validation. New
-saves always use version 2.
+saves use version 2, or version 3 when channel impairments are active.
 
 ## I/Q export
 

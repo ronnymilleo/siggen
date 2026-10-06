@@ -12,12 +12,14 @@ inline constexpr std::size_t MAX_BATCH_FRAMES = 100000;
 
 // Deterministic per-frame seed derivation via std::seed_seq over
 // {base seed, waveform id, frame index, stream tag} with fixed stream tags
-// data = 1 and noise = 2. Noise derivation additionally includes the
+// data = 1, noise = 2 and impairments = 3. Noise derivation additionally includes the
 // configured noise seed. SNR is deliberately excluded so every SNR point of a
 // (waveform, seed) sweep shares the same underlying data and noise draws.
 std::uint32_t derive_data_seed(std::uint32_t base_seed, Modulation waveform, std::size_t frame_index);
 std::uint32_t derive_noise_seed(std::uint32_t base_seed, Modulation waveform, std::size_t frame_index,
                                 std::uint32_t configured_noise_seed);
+std::uint32_t derive_impairment_seed(std::uint32_t base_seed, Modulation waveform, std::size_t frame_index,
+                                     std::uint32_t configured_impairment_seed);
 
 struct FrameResult {
     std::vector<std::complex<float>> samples; // Exactly frame_size samples.
@@ -27,6 +29,8 @@ struct FrameResult {
     std::uint32_t data_seed = 0;
     std::uint32_t noise_seed = 0;
     NoiseRecord noise;                        // AWGN provenance when applied.
+    bool impairments_applied = false;         // Channel impairments run after AWGN on the cropped frame.
+    std::uint32_t impairment_seed = 0;
 };
 // Generate one fixed-length frame from base.modulation. A supplied snr_db
 // enables AWGN at that value for linear waveforms; nullopt retains the base

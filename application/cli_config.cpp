@@ -63,7 +63,10 @@ iq::GenerationConfig resolve_base(const CLI::App& source, const CommandLine& cli
                      supplied(source, "--sps") || supplied(source, "--pulse") ||
                      supplied(source, "--roll-off") || supplied(source, "--span") ||
                      supplied(source, "--bits") || supplied(source, "--data-source") ||
-                     supplied(source, "--snr-db")),
+                     supplied(source, "--snr-db") || supplied(source, "--cfo-hz") ||
+                     supplied(source, "--phase-noise-hz") || supplied(source, "--iq-gain-db") ||
+                     supplied(source, "--iq-phase-deg") || supplied(source, "--dc-i") ||
+                     supplied(source, "--dc-q") || supplied(source, "--adc-bits")),
            "Linear options do not apply to --modulation WGN");
     if (for_batch)
         reject(supplied(source, "--symbols") || supplied(source, "--samples") ||
@@ -105,6 +108,14 @@ iq::GenerationConfig resolve_base(const CLI::App& source, const CommandLine& cli
             config.awgn.snr_db = parse_double(cli.snr_db, "--snr-db");
         }
     }
+    if (supplied(source, "--cfo-hz")) config.impairments.cfo_hz = cli.cfo_hz;
+    if (supplied(source, "--phase-noise-hz")) config.impairments.phase_noise_linewidth_hz = cli.phase_noise_hz;
+    if (supplied(source, "--iq-gain-db")) config.impairments.iq_gain_db = cli.iq_gain_db;
+    if (supplied(source, "--iq-phase-deg")) config.impairments.iq_phase_deg = cli.iq_phase_deg;
+    if (supplied(source, "--dc-i")) config.impairments.dc_offset_i = cli.dc_i;
+    if (supplied(source, "--dc-q")) config.impairments.dc_offset_q = cli.dc_q;
+    if (supplied(source, "--adc-bits")) config.impairments.adc_bits = cli.adc_bits;
+    if (supplied(source, "--impairment-seed")) config.impairment_seed = cli.impairment_seed;
     iq::validate(config);
     return config;
 }

@@ -1,4 +1,5 @@
 #pragma once
+#include "impairments.h"
 #include "waveform.h"
 #include <complex>
 #include <cstdint>
@@ -39,6 +40,9 @@ struct GenerationConfig {
     NoiseSourceSettings noise_source;
     AwgnSettings awgn;
     std::uint32_t noise_seed = 5490;
+    // Channel impairments after AWGN; linear families only, off by default.
+    ImpairmentSettings impairments;
+    std::uint32_t impairment_seed = 5491;
     bool operator==(const GenerationConfig&) const = default;
 };
 // Provenance of any noise contribution, recorded for metadata.
@@ -60,6 +64,7 @@ struct GeneratedSignal {
     double sample_rate_hz = 0;
     std::size_t filter_delay_samples = 0;
     NoiseRecord noise;
+    bool impairments_applied = false;
 };
 void validate(const GenerationConfig& config);
 // A family change resets dormant settings, retaining common gain and seeds.

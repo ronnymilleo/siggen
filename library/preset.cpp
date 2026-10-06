@@ -14,7 +14,10 @@
 
 namespace iq {
 namespace {
+// Version 2 predates channel impairments; version 3 adds them. Presets without
+// active impairments are written as version 2 so existing files stay unchanged.
 constexpr int PRESET_VERSION = 2;
+constexpr int PRESET_VERSION_IMPAIRMENTS = 3;
 template<class T> T number(const std::string& text) {
     T result{};
     auto [end, error] = std::from_chars(text.data(), text.data()+text.size(), result);
@@ -33,7 +36,7 @@ std::string serialize_preset(const GenerationConfig& c) {
     std::ostringstream out;
     out.imbue(std::locale::classic());
     out << std::setprecision(std::numeric_limits<double>::max_digits10)
-        << "[IQ Generator Preset]\nVersion=" << PRESET_VERSION << "\nModulation=" << modulation_name(c.modulation)
+        << "[IQ Generator Preset]\nVersion=" << (c.impairments.active() ? PRESET_VERSION_IMPAIRMENTS : PRESET_VERSION) << "\nModulation=" << modulation_name(c.modulation)
         << "\nNumberOfSymbols=" << c.symbol_count << "\nSymbolRateBaud=" << c.symbol_rate_baud
         << "\nSamplesPerSymbol=" << c.samples_per_symbol << "\nPulse=" << (c.pulse == Pulse::RRC ? "RRC" : "Rectangular")
         << "\nRRCBeta=" << c.roll_off << "\nSpanSymbols=" << c.span_symbols << "\nAmplitudeGain=" << c.amplitude_gain
@@ -44,7 +47,17 @@ std::string serialize_preset(const GenerationConfig& c) {
         << "\nNoisePower=" << c.noise_source.noise_power
         << "\nAwgnEnabled=" << (c.awgn.enabled ? "true" : "false")
         << "\nAwgnSnrDb=" << c.awgn.snr_db
-        << "\nNoiseSeed=" << c.noise_seed << '\n';
+        << "\nNoiseSeed=" << c.noise_seed;
+    if (c.impairments.active())
+        out << "\nCfoHz=" << c.impairments.cfo_hz
+            << "\nPhaseNoiseLinewidthHz=" << c.impairments.phase_noise_linewidth_hz
+            << "\nIqGainDb=" << c.impairments.iq_gain_db
+            << "\nIqPhaseDeg=" << c.impairments.iq_phase_deg
+            << "\nDcOffsetI=" << c.impairments.dc_offset_i
+            << "\nDcOffsetQ=" << c.impairments.dc_offset_q
+            << "\nAdcBits=" << c.impairments.adc_bits
+            << "\nImpairmentSeed=" << c.impairment_seed;
+    out << '\n';
     return out.str();
 }
 GenerationConfig parse_preset(std::string_view text) {
@@ -71,8 +84,8 @@ GenerationConfig parse_preset(std::string_view text) {
     GenerationConfig c;
     if (!legacy) {
         const auto version = take("Version");
-        if (version != "1" && version != "2") throw std::invalid_argument("Unsupported preset version");
-        const auto current = version == "2";
+        if (version != "1" && version != "2" && version != "3") throw std::invalid_argument("Unsupported preset version");
+        const auto current = version != "1";
         const auto modulation = take("Modulation");
         if (!parse_modulation(modulation, c.modulation) ||
             (!current && (c.modulation == Modulation::PSK8 || c.modulation == Modulation::QAM64 || c.modulation == Modulation::WGN)))
@@ -98,6 +111,16 @@ GenerationConfig parse_preset(std::string_view text) {
             c.awgn.enabled = boolean(take("AwgnEnabled"));
             c.awgn.snr_db = number<double>(take("AwgnSnrDb"));
             c.noise_seed = number<std::uint32_t>(take("NoiseSeed"));
+        }
+        if (version == "3") {
+            c.impairments.cfo_hz = number<double>(take("CfoHz"));
+            c.impairments.phase_noise_linewidth_hz = number<double>(take("PhaseNoiseLinewidthHz"));
+            c.impairments.iq_gain_db = number<double>(take("IqGainDb"));
+            c.impairments.iq_phase_deg = number<double>(take("IqPhaseDeg"));
+            c.impairments.dc_offset_i = number<double>(take("DcOffsetI"));
+            c.impairments.dc_offset_q = number<double>(take("DcOffsetQ"));
+            c.impairments.adc_bits = number<int>(take("AdcBits"));
+            c.impairment_seed = number<std::uint32_t>(take("ImpairmentSeed"));
         }
         // Version 1 imports keep noise-disabled defaults.
     } else fields.erase("ConstellationStart");

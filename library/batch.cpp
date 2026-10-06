@@ -1,4 +1,5 @@
 #include "batch.h"
+#include "impairments.h"
 #include "noise.h"
 #include "signal_processing.h"
 #include <algorithm>
@@ -26,6 +27,7 @@ namespace {
 // Fixed stream tags for seed derivation; documented in batch.h.
 constexpr std::uint32_t STREAM_TAG_DATA = 1;
 constexpr std::uint32_t STREAM_TAG_NOISE = 2;
+constexpr std::uint32_t STREAM_TAG_IMPAIRMENT = 3;
 std::uint32_t derive_seed(std::initializer_list<std::uint32_t> material) {
     std::seed_seq sequence(material.begin(), material.end());
     std::mt19937 engine(sequence);
@@ -65,6 +67,11 @@ std::uint32_t derive_noise_seed(std::uint32_t base_seed, Modulation waveform, st
     return derive_seed({base_seed, static_cast<std::uint32_t>(waveform_id(waveform)),
                         static_cast<std::uint32_t>(frame_index), STREAM_TAG_NOISE, configured_noise_seed});
 }
+std::uint32_t derive_impairment_seed(std::uint32_t base_seed, Modulation waveform, std::size_t frame_index,
+                                     std::uint32_t configured_impairment_seed) {
+    return derive_seed({base_seed, static_cast<std::uint32_t>(waveform_id(waveform)),
+                        static_cast<std::uint32_t>(frame_index), STREAM_TAG_IMPAIRMENT, configured_impairment_seed});
+}
 void validate_frame_request(const GenerationConfig& base, Modulation waveform, int frame_size) {
     if (!is_valid(waveform)) throw std::invalid_argument("Unsupported modulation");
     if (frame_size < 1 || static_cast<std::size_t>(frame_size) > MAX_SIGNAL_SAMPLES)
@@ -77,6 +84,7 @@ void validate_frame_request(const GenerationConfig& base, Modulation waveform, i
         config.noise_source.sample_count = frame_size;
         // WGN ignores the SNR axis entirely; any base AWGN setting is inactive.
         config.awgn.enabled = false;
+        config.impairments = {};
         validate(config);
         return;
     }
@@ -109,6 +117,7 @@ FrameResult generate_frame(const GenerationConfig& base, int frame_size, std::si
     config.data_source = DataSource::Random;
     config.bits.clear();
     config.awgn.enabled = false;
+    config.impairments = {};
     config.noise_seed = frame.noise_seed;
     if (waveform_family(base.modulation) == Family::Noise) {
         config.noise_source.sample_count = frame_size;
@@ -132,6 +141,11 @@ FrameResult generate_frame(const GenerationConfig& base, int frame_size, std::si
     if (effective_snr) {
         // Batch AWGN measures reference power over the retained clean frame.
         frame.noise = add_awgn(frame.samples, 0, frame.samples.size(), *effective_snr, frame.noise_seed);
+    }
+    if (base.impairments.active()) {
+        frame.impairment_seed = derive_impairment_seed(base.seed, base.modulation, frame_index, base.impairment_seed);
+        apply_impairments(frame.samples, frame.sample_rate_hz, base.impairments, frame.impairment_seed);
+        frame.impairments_applied = true;
     }
     return frame;
 }
@@ -220,6 +234,8 @@ std::string frame_sidecar(const BatchRequest& r, Modulation waveform, std::uint3
                 << ",\n    \"noise_seed\": " << frame.noise.noise_seed
                 << ",\n    \"snr_definition\": \"clean frame power / added complex noise power\"\n  },\n";
         }
+        if (frame.impairments_applied)
+            out << "  \"impairments\": " << impairments_json(r.base.impairments, frame.impairment_seed, "  ") << ",\n";
     }
     out << "  \"timing\": {\n    \"frame_start_s\": 0,\n    \"duration_s\": "
         << (frame.sample_rate_hz > 0 ? frame.samples.size() / frame.sample_rate_hz : 0) << "\n  }\n}\n";
@@ -242,6 +258,14 @@ std::string manifest_record(const BatchRequest& r, Modulation waveform, std::uin
         << ",\"crop_offset_samples\":" << frame.crop_offset
         << ",\"filter_delay_samples\":" << frame.filter_delay_samples
         << ",\"awgn_applied\":" << (frame.noise.awgn_applied ? "true" : "false");
+    if (frame.impairments_applied)
+        out << ",\"impairment_seed\":" << frame.impairment_seed << ",\"cfo_hz\":" << r.base.impairments.cfo_hz
+            << ",\"phase_noise_linewidth_hz\":" << r.base.impairments.phase_noise_linewidth_hz
+            << ",\"iq_gain_db\":" << r.base.impairments.iq_gain_db
+            << ",\"iq_phase_deg\":" << r.base.impairments.iq_phase_deg
+            << ",\"dc_offset_i\":" << r.base.impairments.dc_offset_i
+            << ",\"dc_offset_q\":" << r.base.impairments.dc_offset_q
+            << ",\"adc_bits\":" << r.base.impairments.adc_bits;
     if (frame.noise.awgn_applied)
         out << ",\"requested_snr_db\":" << frame.noise.requested_snr_db
             << ",\"reference_power\":" << frame.noise.reference_power

@@ -1,4 +1,5 @@
 #include "iq_export.h"
+#include "impairments.h"
 #include "signal_processing.h"
 #include <bit>
 #include <cmath>
@@ -92,6 +93,7 @@ std::string export_metadata(const GeneratedSignal& r, ExportFormat format) {
                 << ",\n    \"noise_seed\": " << r.noise.noise_seed
                 << ",\n    \"snr_definition\": \"clean sample power / added complex noise power\"\n  },\n";
         }
+        if (r.impairments_applied) out << "  \"impairments\": " << impairments_json(c.impairments, c.impairment_seed, "  ") << ",\n";
     }
     out << "  \"timing\": {\n    \"filter_delay_samples\": " << r.filter_delay_samples
         << ",\n    \"duration_s\": " << (r.sample_rate_hz > 0 ? r.samples.size() / r.sample_rate_hz : 0)
