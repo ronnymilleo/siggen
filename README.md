@@ -3,10 +3,12 @@
 [![CI](https://github.com/ronnymilleo/siggen/actions/workflows/ci.yml/badge.svg)](https://github.com/ronnymilleo/siggen/actions/workflows/ci.yml)
 
 A C++23 signal generator with a command-line interface and optional ImGui/ImPlot
-GUI. Generate reproducible complex I/Q samples for BPSK, QPSK, Gray-coded 8-PSK,
-Gray-coded square 16-QAM, Gray-coded square 64-QAM, and complex white Gaussian
-noise (WGN), with optional AWGN on linear signals; inspect waveforms,
-constellations and a two-sided spectrum; save presets; export single signals; and
+GUI. Generate reproducible complex I/Q samples for BPSK, QPSK, OQPSK, pi/4-DQPSK,
+DBPSK, DQPSK, 8-PSK, 8-DPSK, 4-ASK, OOK, 4-PAM, 16/32/64/256-QAM, 2-FSK, 4-FSK, MSK,
+and complex white Gaussian noise (WGN), with optional AWGN and simple channel
+impairments on linear signals; inspect waveforms, constellations, eye diagrams,
+a two-sided spectrum and measurements (PAPR, EVM, measured SNR); work through
+guided lesson presets; save presets; export single signals; and
 generate swept fixed-length frame datasets (`siggen batch`) for classifier
 training. This application generates complex baseband, not an RF carrier.
 
@@ -19,6 +21,9 @@ training. This application generates complex baseband, not an RF carrier.
 
   <img width="900" src="docs/images/gui-spectrum.png" alt="Spectrum tab showing the two-sided Welch PSD" />
   <p align="center"><em>Spectrum - two-sided Welch PSD</em></p>
+
+  <img width="900" src="docs/images/gui-eye.png" alt="Eye tab showing the eye diagram of 16-QAM" />
+  <p align="center"><em>Eye - overlaid symbol-period traces</em></p>
 </div>
 
 ## Build and test
@@ -277,7 +282,7 @@ amplitude gain in **Signal Setup**. Choose RRC or rectangular pulses in **Pulse
 Shaping**. The **AWGN** section enables additive noise with a requested SNR in
 dB; the visible data seed defaults to 5489 and the noise seed to 5490.
 **Advanced** selects seeded random bits or exact explicit binary input (up to
-six bits per symbol). Selecting **WGN** replaces the symbol controls with the
+eight bits per symbol). Selecting **WGN** replaces the symbol controls with the
 noise source: sample count, sample rate, total complex noise power, and noise
 seed.
 
@@ -617,8 +622,9 @@ results show waveform, spectrum and power statistics without any symbol
 constellation. FSK and MSK results replace the constellation and eye with a
 **Frequency** tab (see "Frequency modulation").
 
-**Spectrum** uses full complex samples, independent of waveform reduction. The
-Welch estimator uses a periodic Hann window, 50% overlap, no mean subtraction,
+**Eye** overlays two-symbol-period traces of the matched-filter I and Q (OQPSK
+shows the half-symbol Q offset). **Spectrum** uses full complex samples, independent of waveform reduction. The
+Welch estimator uses a periodic window (Hann by default, see above), 50% overlap, no mean subtraction,
 and an unnormalized forward FFT with negative exponent. The default segment size
 is 1024; shorter buffers use the largest power of two that fits, with a minimum
 of four samples. Only complete segments contribute; an incomplete trailing
@@ -730,7 +736,10 @@ assert len(iq) == metadata["sample_count"]
 - `library/batch.*`: fixed-length frame generation, seed derivation and the
   manifest-writing batch writer.
 - `library/signal_processing.*`: stable RRC taps and convolution.
-- `library/signal_analysis.*`: matched observations and Welch PSD.
+- `library/signal_analysis.*`: matched observations and Welch PSD with selectable window.
+- `library/measurements.*`: power statistics (PAPR), EVM, measured SNR and eye traces.
+- `library/impairments.*`: carrier offset, phase noise, IQ imbalance, DC offset and quantization.
+- `presets/`: guided lesson presets (`NN-name.preset`, with `#` note lines).
 - `library/preset.*`, `library/iq_export.*`: validated file I/O.
 - `application/command_line.h`, `application/cli_config.*`: CLI parsing and
   defaults → preset → explicit-option resolution.
@@ -782,7 +791,7 @@ sanitizer tests may need to run outside a ptrace-based sandbox. Do not disable
 leak detection to make that environment pass. macOS is built and tested in CI (headless tests plus a GUI compile); the UI smoke tests are not run there.
 
 This iteration excludes SDR streaming, RF carrier synthesis, analog modulation,
-channel impairments and eye diagrams. FSK/MSK waveforms, AMCPy-specific dataset
+GFSK/GMSK, multipath and fading, AMCPy-specific dataset
 conversion, GUI batch controls, batch resume and automatic cleanup remain
 deferred. Large RRC spans take longer to generate;
 there is no cancellation, and application closure waits for generation. The
