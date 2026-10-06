@@ -14,6 +14,7 @@
 #include <algorithm>
 #include <cmath>
 #include <exceptions.h>
+#include <string>
 
 /***********************************************************************************************************************
  * PARAMETER VALIDATION UTILITIES

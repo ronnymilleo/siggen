@@ -2,11 +2,18 @@
 #include "signal_processing.h"
 #include <bit>
 #include <cmath>
+#include <complex>
+#include <cstddef>
+#include <filesystem>
 #include <fstream>
 #include <iomanip>
 #include <limits>
+#include <ostream>
+#include <span>
 #include <sstream>
 #include <stdexcept>
+#include <string>
+#include <string_view>
 namespace iq {
 namespace {
 void validate_linear(const GeneratedSignal& r) {

@@ -24,3 +24,24 @@ jobs:
 
       - name: Validate Clang
         run: cmake --workflow --preset clang-headless
+
+  macos:
+    runs-on: macos-latest
+    steps:
+      - name: Check out the repository
+        uses: actions/checkout@v7
+        with:
+          submodules: recursive
+
+      - name: Install build tools
+        run: brew install ninja
+
+      - name: Validate headless build and tests
+        run: cmake --workflow --preset headless
+
+      # The UI smoke tests open a native window, which hosted runners cannot
+      # reliably provide, so the GUI is only configured and compiled here.
+      - name: Build GUI
+        run: |
+          cmake --preset dev
+          cmake --build --preset dev

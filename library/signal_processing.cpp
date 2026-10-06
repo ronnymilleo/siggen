@@ -1,7 +1,9 @@
 #include "signal_processing.h"
 #include <cmath>
+#include <cstddef>
 #include <numbers>
 #include <stdexcept>
+#include <vector>
 
 namespace {
 double sinc(double x) { return x == 0 ? 1 : std::sin(x) / x; }

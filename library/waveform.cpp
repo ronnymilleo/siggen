@@ -2,7 +2,10 @@
 #include <algorithm>
 #include <array>
 #include <cctype>
+#include <span>
 #include <stdexcept>
+#include <string>
+#include <string_view>
 
 namespace iq {
 namespace {

@@ -1,8 +1,10 @@
 #pragma once
 #include "generator.h"
+#include <complex>
 #include <filesystem>
 #include <ostream>
 #include <span>
+#include <string>
 #include <string_view>
 namespace iq {
 enum class ExportFormat { CSV, BinaryFloat32 };

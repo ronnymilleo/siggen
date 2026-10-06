@@ -22,11 +22,9 @@ CMakeUserPresets.json
 *.obj
 *.a
 *.lib
-*.dll
 *.so
 *.so.*
 *.dylib
-*.exe
 *.out
 *.app
 

@@ -1,11 +1,16 @@
 #include "preset.h"
 #include <charconv>
+#include <cstddef>
+#include <cstdint>
+#include <filesystem>
 #include <fstream>
 #include <iomanip>
 #include <limits>
 #include <map>
 #include <sstream>
 #include <stdexcept>
+#include <string>
+#include <string_view>
 
 namespace iq {
 namespace {

@@ -1,5 +1,9 @@
 #pragma once
 #include "generator.h"
+
+#include <complex>
+#include <cstddef>
+#include <vector>
 namespace iq {
 struct SymbolObservations {
     std::vector<std::complex<float>> values;
