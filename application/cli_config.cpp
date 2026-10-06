@@ -33,15 +33,20 @@ iq::GenerationConfig resolve_base(const CLI::App& source, const CommandLine& cli
 
     bool has_noise = iq::waveform_family(config.modulation) == iq::Family::Noise;
     bool has_linear = !has_noise;
+    // Tone spacing applies to 2-FSK/4-FSK only (MSK fixes it); pulse options to linear waveforms only.
+    bool has_tones = config.modulation == iq::Modulation::FSK2 || config.modulation == iq::Modulation::FSK4;
+    bool has_pulse = iq::waveform_descriptor(config.modulation).shaped;
     if (for_batch && !cli.batch_modulations.empty()) {
-        has_noise = has_linear = false;
+        has_noise = has_linear = has_tones = has_pulse = false;
         for (const auto& name : cli.batch_modulations) {
             iq::Modulation waveform;
             if (!iq::parse_modulation(name, waveform))
                 throw std::invalid_argument("Unknown --modulations entry: " + name);
             const auto& info = iq::waveform_descriptor(waveform);
             has_noise |= info.family == iq::Family::Noise;
-            has_linear |= info.shaped;
+            has_linear |= info.family != iq::Family::Noise;
+            has_tones |= info.family == iq::Family::Fsk && waveform != iq::Modulation::MSK;
+            has_pulse |= info.shaped;
         }
     }
     // Only the preset's active family supplies settings. The other batch family
@@ -68,6 +73,10 @@ iq::GenerationConfig resolve_base(const CLI::App& source, const CommandLine& cli
                      supplied(source, "--iq-phase-deg") || supplied(source, "--dc-i") ||
                      supplied(source, "--dc-q") || supplied(source, "--adc-bits")),
            "Linear options do not apply to --modulation WGN");
+    reject(!has_pulse && (supplied(source, "--pulse") || supplied(source, "--roll-off") || supplied(source, "--span")),
+           "Pulse options (--pulse/--roll-off/--span) do not apply to FSK and MSK, which are not pulse shaped");
+    reject(!has_tones && supplied(source, "--tone-spacing-hz"),
+           "--tone-spacing-hz requires --modulation 2-FSK or 4-FSK (MSK fixes the spacing at symbol rate / 2)");
     if (for_batch)
         reject(supplied(source, "--symbols") || supplied(source, "--samples") ||
                    supplied(source, "--bits") || supplied(source, "--data-source"),
@@ -81,6 +90,7 @@ iq::GenerationConfig resolve_base(const CLI::App& source, const CommandLine& cli
         if (!iq::parse_pulse(cli.pulse, pulse)) throw std::invalid_argument("Unknown --pulse: " + cli.pulse);
         config.pulse = pulse;
     }
+    if (supplied(source, "--tone-spacing-hz")) config.tone_spacing_hz = cli.tone_spacing_hz;
     if (supplied(source, "--roll-off")) config.roll_off = cli.roll_off;
     if (supplied(source, "--span")) config.span_symbols = cli.span;
     if (supplied(source, "--gain")) config.amplitude_gain = cli.gain;

@@ -1,0 +1,29 @@
+[IQ Generator Preset]
+# Lesson 13: differential QPSK under a carrier offset.
+# DQPSK carries the data in the phase change between consecutive symbols, not in the absolute phase. A 5 Hz carrier offset spins the whole constellation (matched-filter view), but each symbol-to-symbol step stays within a few degrees of the transmitted 0, 90, 180 or 270 degrees. That is why a differential receiver needs no carrier-phase recovery, at the price of a noise penalty of a couple of dB compared with coherent QPSK. Set CFO to 0 and compare the constellation.
+Version=3
+Modulation=DQPSK
+NumberOfSymbols=1024
+SymbolRateBaud=1000
+SamplesPerSymbol=8
+Pulse=RRC
+RRCBeta=0.2
+SpanSymbols=10
+AmplitudeGain=1
+DataSource=Random
+Seed=5489
+Bits=
+NoiseSampleCount=2048
+NoiseSampleRateHz=8000
+NoisePower=1
+AwgnEnabled=true
+AwgnSnrDb=25
+NoiseSeed=5490
+CfoHz=5
+PhaseNoiseLinewidthHz=0
+IqGainDb=0
+IqPhaseDeg=0
+DcOffsetI=0
+DcOffsetQ=0
+AdcBits=0
+ImpairmentSeed=5491

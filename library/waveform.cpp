@@ -9,13 +9,21 @@
 
 namespace iq {
 namespace {
-constexpr std::array<WaveformDescriptor, 6> descriptors{{
+constexpr std::array<WaveformDescriptor, 14> descriptors{{
     {Modulation::BPSK, "BPSK", Family::Linear, 1, true, true, true, 0},
     {Modulation::QPSK, "QPSK", Family::Linear, 2, true, true, true, 1},
     {Modulation::PSK8, "8-PSK", Family::Linear, 3, true, true, true, 2},
     {Modulation::QAM16, "16-QAM", Family::Linear, 4, true, true, true, 3},
     {Modulation::QAM64, "64-QAM", Family::Linear, 6, true, true, true, 4},
     {Modulation::WGN, "WGN", Family::Noise, 0, false, false, false, 5},
+    {Modulation::OOK, "OOK", Family::Linear, 1, true, true, true, 6},
+    {Modulation::PAM4, "4-PAM", Family::Linear, 2, true, true, true, 7},
+    {Modulation::DBPSK, "DBPSK", Family::Linear, 1, true, true, true, 8},
+    {Modulation::DQPSK, "DQPSK", Family::Linear, 2, true, true, true, 9},
+    {Modulation::QAM256, "256-QAM", Family::Linear, 8, true, true, true, 10},
+    {Modulation::FSK2, "2-FSK", Family::Fsk, 1, false, true, true, 11},
+    {Modulation::FSK4, "4-FSK", Family::Fsk, 2, false, true, true, 12},
+    {Modulation::MSK, "MSK", Family::Fsk, 1, false, true, true, 13},
 }};
 std::string ascii_lower(std::string_view text) {
     std::string lowered(text);
@@ -31,6 +39,14 @@ const WaveformDescriptor& waveform_descriptor(Modulation modulation) {
     throw std::invalid_argument("Unsupported waveform");
 }
 Family waveform_family(Modulation modulation) { return waveform_descriptor(modulation).family; }
+const char* family_name(Family family) {
+    switch (family) {
+        case Family::Linear: return "linear";
+        case Family::Noise: return "noise";
+        case Family::Fsk: return "fsk";
+    }
+    return "linear";
+}
 int bits_per_symbol(Modulation modulation) { return waveform_descriptor(modulation).bits_per_symbol; }
 const char* modulation_name(Modulation modulation) { return waveform_descriptor(modulation).canonical_name.data(); }
 int waveform_id(Modulation modulation) {

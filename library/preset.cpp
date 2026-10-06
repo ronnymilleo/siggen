@@ -16,8 +16,15 @@ namespace iq {
 namespace {
 // Version 2 predates channel impairments; version 3 adds them. Presets without
 // active impairments are written as version 2 so existing files stay unchanged.
+// Version 4 adds the FSK tone spacing (and always carries the impairment fields);
+// it is written only for the FSK family.
 constexpr int PRESET_VERSION = 2;
 constexpr int PRESET_VERSION_IMPAIRMENTS = 3;
+constexpr int PRESET_VERSION_FSK = 4;
+int preset_version(const GenerationConfig& c) {
+    if (waveform_family(c.modulation) == Family::Fsk) return PRESET_VERSION_FSK;
+    return c.impairments.active() ? PRESET_VERSION_IMPAIRMENTS : PRESET_VERSION;
+}
 template<class T> T number(const std::string& text) {
     T result{};
     auto [end, error] = std::from_chars(text.data(), text.data()+text.size(), result);
@@ -36,7 +43,7 @@ std::string serialize_preset(const GenerationConfig& c) {
     std::ostringstream out;
     out.imbue(std::locale::classic());
     out << std::setprecision(std::numeric_limits<double>::max_digits10)
-        << "[IQ Generator Preset]\nVersion=" << (c.impairments.active() ? PRESET_VERSION_IMPAIRMENTS : PRESET_VERSION) << "\nModulation=" << modulation_name(c.modulation)
+        << "[IQ Generator Preset]\nVersion=" << preset_version(c) << "\nModulation=" << modulation_name(c.modulation)
         << "\nNumberOfSymbols=" << c.symbol_count << "\nSymbolRateBaud=" << c.symbol_rate_baud
         << "\nSamplesPerSymbol=" << c.samples_per_symbol << "\nPulse=" << (c.pulse == Pulse::RRC ? "RRC" : "Rectangular")
         << "\nRRCBeta=" << c.roll_off << "\nSpanSymbols=" << c.span_symbols << "\nAmplitudeGain=" << c.amplitude_gain
@@ -48,7 +55,8 @@ std::string serialize_preset(const GenerationConfig& c) {
         << "\nAwgnEnabled=" << (c.awgn.enabled ? "true" : "false")
         << "\nAwgnSnrDb=" << c.awgn.snr_db
         << "\nNoiseSeed=" << c.noise_seed;
-    if (c.impairments.active())
+    if (preset_version(c) == PRESET_VERSION_FSK) out << "\nToneSpacingHz=" << c.tone_spacing_hz;
+    if (preset_version(c) >= PRESET_VERSION_IMPAIRMENTS)
         out << "\nCfoHz=" << c.impairments.cfo_hz
             << "\nPhaseNoiseLinewidthHz=" << c.impairments.phase_noise_linewidth_hz
             << "\nIqGainDb=" << c.impairments.iq_gain_db
@@ -84,11 +92,12 @@ GenerationConfig parse_preset(std::string_view text) {
     GenerationConfig c;
     if (!legacy) {
         const auto version = take("Version");
-        if (version != "1" && version != "2" && version != "3") throw std::invalid_argument("Unsupported preset version");
+        if (version != "1" && version != "2" && version != "3" && version != "4") throw std::invalid_argument("Unsupported preset version");
         const auto current = version != "1";
         const auto modulation = take("Modulation");
         if (!parse_modulation(modulation, c.modulation) ||
-            (!current && (c.modulation == Modulation::PSK8 || c.modulation == Modulation::QAM64 || c.modulation == Modulation::WGN)))
+            (!current && c.modulation != Modulation::BPSK && c.modulation != Modulation::QPSK && c.modulation != Modulation::QAM16) ||
+            (waveform_family(c.modulation) == Family::Fsk && version != "4"))
             throw std::invalid_argument("Unsupported preset modulation");
         c.symbol_rate_baud = number<double>(take("SymbolRateBaud"));
         const auto pulse = take("Pulse");
@@ -112,7 +121,8 @@ GenerationConfig parse_preset(std::string_view text) {
             c.awgn.snr_db = number<double>(take("AwgnSnrDb"));
             c.noise_seed = number<std::uint32_t>(take("NoiseSeed"));
         }
-        if (version == "3") {
+        if (version == "4") c.tone_spacing_hz = number<double>(take("ToneSpacingHz"));
+        if (version == "3" || version == "4") {
             c.impairments.cfo_hz = number<double>(take("CfoHz"));
             c.impairments.phase_noise_linewidth_hz = number<double>(take("PhaseNoiseLinewidthHz"));
             c.impairments.iq_gain_db = number<double>(take("IqGainDb"));

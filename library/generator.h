@@ -7,8 +7,8 @@
 #include <vector>
 
 namespace iq {
-// Explicit-count limit: six bits per symbol at up to 65536 symbols.
-inline constexpr std::size_t MAX_EXPLICIT_BITS = 65536 * 6;
+// Explicit-count limit: eight bits per symbol (256-QAM) at up to 65536 symbols.
+inline constexpr std::size_t MAX_EXPLICIT_BITS = 65536 * 8;
 // WGN source settings; active only for the noise family.
 struct NoiseSourceSettings {
     int sample_count = 2048;
@@ -31,6 +31,9 @@ struct GenerationConfig {
     Pulse pulse = Pulse::RRC;
     double roll_off = 0.2;
     int span_symbols = 10;
+    // FSK settings (2-FSK and 4-FSK; MSK locks the spacing to symbol rate / 2).
+    // Adjacent tones are tone_spacing_hz apart, so h = tone_spacing_hz / symbol_rate_baud.
+    double tone_spacing_hz = 1000;
     // Common output/data settings.
     double amplitude_gain = 1;
     DataSource data_source = DataSource::Random;
@@ -58,7 +61,8 @@ struct NoiseRecord {
 };
 struct GeneratedSignal {
     std::vector<std::complex<float>> samples;
-    std::vector<std::complex<float>> symbols; // Unit-energy mapping, before gain. Empty for noise sources.
+    std::vector<std::complex<float>> symbols; // Unit-energy mapping, before gain. Empty for noise and FSK sources.
+    std::vector<double> symbol_frequencies_hz; // Tone of each symbol (FSK family only).
     GenerationConfig config;
     Family family = Family::Linear;
     double sample_rate_hz = 0;
@@ -66,6 +70,12 @@ struct GeneratedSignal {
     NoiseRecord noise;
     bool impairments_applied = false;
 };
+// True when the signal is a linear symbol train shaped by an RRC pulse.
+bool uses_rrc(const GenerationConfig& config);
+// Effective tone spacing: the configured value, or symbol rate / 2 for MSK.
+double fsk_tone_spacing_hz(const GenerationConfig& config);
+// Modulation index h = tone spacing / symbol rate.
+double fsk_modulation_index(const GenerationConfig& config);
 void validate(const GenerationConfig& config);
 // A family change resets dormant settings, retaining common gain and seeds.
 void select_waveform(GenerationConfig& config, Modulation modulation);

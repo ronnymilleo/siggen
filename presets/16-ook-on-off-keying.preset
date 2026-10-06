@@ -1,0 +1,21 @@
+[IQ Generator Preset]
+# Lesson 16: on-off keying.
+# OOK sends a one as a carrier burst and a zero as silence, normalised here to unit average energy. Because the mean of the symbols is not zero, the spectrum has a strong line at 0 Hz (the carrier) and the constellation shows one point at the origin. The eye is one-sided: a symbol is either at 0 or at about 1.4.
+Version=2
+Modulation=OOK
+NumberOfSymbols=1024
+SymbolRateBaud=1000
+SamplesPerSymbol=8
+Pulse=RRC
+RRCBeta=0.2
+SpanSymbols=10
+AmplitudeGain=1
+DataSource=Random
+Seed=5489
+Bits=
+NoiseSampleCount=2048
+NoiseSampleRateHz=8000
+NoisePower=1
+AwgnEnabled=true
+AwgnSnrDb=20
+NoiseSeed=5490

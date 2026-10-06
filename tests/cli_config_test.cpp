@@ -339,3 +339,32 @@ TEST(CliConfig, ImpairmentOptionsResolveAndRejectWgn) {
     EXPECT_EQ(r.base.impairments.cfo_hz, 5);
     EXPECT_EQ(r.base.impairments.adc_bits, 8);
 }
+
+TEST(CliConfig, FskOptionsResolveAndRejectInapplicableOnes) {
+    CommandLine cli("test");
+    const char* args[] = {"siggen", "--modulation", "4-fsk", "--tone-spacing-hz", "600", "--symbol-rate", "1000", "--sps", "8"};
+    cli.app.parse(std::size(args), args);
+    const auto c = resolve_config(cli);
+    EXPECT_EQ(c.modulation, iq::Modulation::FSK4);
+    EXPECT_EQ(c.tone_spacing_hz, 600);
+    for (const auto& bad : std::vector<std::vector<const char*>>{
+             {"siggen", "--modulation", "MSK", "--tone-spacing-hz", "600"},
+             {"siggen", "--modulation", "QPSK", "--tone-spacing-hz", "600"},
+             {"siggen", "--modulation", "2-FSK", "--pulse", "rrc"},
+             {"siggen", "--modulation", "MSK", "--roll-off", "0.3"},
+             {"siggen", "--modulation", "4-FSK", "--sps", "1"}}) {
+        CommandLine rejected("test");
+        rejected.app.parse(static_cast<int>(bad.size()), bad.data());
+        EXPECT_THROW(resolve_config(rejected), std::invalid_argument);
+    }
+    CommandLine msk("test");
+    const char* ok[] = {"siggen", "--modulation", "msk", "--snr-db", "12", "--cfo-hz", "3"};
+    msk.app.parse(std::size(ok), ok);
+    const auto m = resolve_config(msk);
+    EXPECT_EQ(m.modulation, iq::Modulation::MSK);
+    EXPECT_TRUE(m.awgn.enabled);
+    CommandLine batch("test");
+    const char* mixed[] = {"siggen", "batch", "--modulations", "QPSK", "2-FSK", "--tone-spacing-hz", "800", "--sps", "8"};
+    batch.app.parse(std::size(mixed), mixed);
+    EXPECT_EQ(resolve_batch(batch).base.tone_spacing_hz, 800);
+}

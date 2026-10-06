@@ -155,10 +155,19 @@ TEST(UI, GeneratedViewsAndPendingClosure)
         }
     };
     for (auto modulation : {iq::Modulation::BPSK, iq::Modulation::QPSK, iq::Modulation::PSK8,
-                            iq::Modulation::QAM16, iq::Modulation::QAM64})
+                            iq::Modulation::QAM16, iq::Modulation::QAM64, iq::Modulation::QAM256,
+                            iq::Modulation::OOK, iq::Modulation::PAM4, iq::Modulation::DBPSK,
+                            iq::Modulation::DQPSK, iq::Modulation::FSK2, iq::Modulation::FSK4,
+                            iq::Modulation::MSK})
     {
         iq::GenerationConfig c;
         c.modulation = modulation;
+        const bool fsk = iq::waveform_family(modulation) == iq::Family::Fsk;
+        if (fsk)
+        {
+            c.awgn.enabled = true; // Noise makes the frequency estimate visibly non-ideal.
+            c.awgn.snr_db  = 20;
+        }
         SignalGenerator window(c);
         SignalGeneratorTestAccess::start(window);
         SignalGeneratorTestAccess::edit(window); // Edit while work is pending.
@@ -172,7 +181,26 @@ TEST(UI, GeneratedViewsAndPendingClosure)
         ASSERT_TRUE(SignalGeneratorTestAccess::result(window));
         EXPECT_EQ(SignalGeneratorTestAccess::result(window)->config.seed, c.seed);
         EXPECT_TRUE(SignalGeneratorTestAccess::error(window).empty());
-        for (const char* view : {"Waveform", "Constellation", "Matched", "Eye", "Spectrum"})
+        if (fsk)
+        {
+            frame(window);
+            frame(window);
+            auto* bar = find_signal_views();
+            ASSERT_NE(bar, nullptr);
+            bool saw_frequency = false;
+            for (auto& tab : bar->Tabs)
+            {
+                const std::string name = ImGui::TabBarGetTabName(bar, &tab);
+                EXPECT_NE(name, "Constellation"); // FSK has no symbol constellation or matched-filter eye.
+                EXPECT_NE(name, "Eye");
+                saw_frequency |= name == "Frequency";
+            }
+            EXPECT_TRUE(saw_frequency);
+        }
+        const std::vector<const char*> views =
+            fsk ? std::vector<const char*>{"Waveform", "Frequency", "Spectrum"}
+                : std::vector<const char*>{"Waveform", "Constellation", "Matched", "Eye", "Spectrum"};
+        for (const char* view : views)
         {
             frame(window);
             auto* gui_window = ImGui::FindWindowByName("Signal Generator");
@@ -195,12 +223,16 @@ TEST(UI, GeneratedViewsAndPendingClosure)
                     if (plot.Flags & ImPlotFlags_Equal)
                     {
                         EXPECT_NEAR(plot.XAxis(0).GetAspect(), plot.YAxis(0).GetAspect(), 1e-12);
-                        if (modulation != iq::Modulation::BPSK)
+                        const bool real_axis = modulation == iq::Modulation::BPSK || modulation == iq::Modulation::DBPSK ||
+                                               modulation == iq::Modulation::OOK || modulation == iq::Modulation::PAM4;
+                        if (!real_axis)
                         {
-                            const double outer = modulation == iq::Modulation::QPSK    ? 1 / std::sqrt(2.)
-                                                 : modulation == iq::Modulation::PSK8  ? 1.
-                                                 : modulation == iq::Modulation::QAM16 ? 3 / std::sqrt(10.)
-                                                                                       : 7 / std::sqrt(42.);
+                            const double outer = modulation == iq::Modulation::QPSK || modulation == iq::Modulation::DQPSK
+                                                     ? 1 / std::sqrt(2.)
+                                                 : modulation == iq::Modulation::PSK8   ? 1.
+                                                 : modulation == iq::Modulation::QAM16  ? 3 / std::sqrt(10.)
+                                                 : modulation == iq::Modulation::QAM256 ? 15 / std::sqrt(170.)
+                                                                                        : 7 / std::sqrt(42.);
                             EXPECT_GT(plot.YAxis(0).Range.Max, outer);
                             EXPECT_LT(plot.YAxis(0).Range.Min, -outer);
                         }

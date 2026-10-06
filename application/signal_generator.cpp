@@ -56,7 +56,8 @@ void SignalGenerator::DrawContents()
                              r.samples.size(), r.sample_rate_hz);
             else
                 spdlog::info("Generated {}: {} symbols, {} complex samples at {} Hz",
-                             iq::modulation_name(r.config.modulation), r.symbols.size(), r.samples.size(),
+                             iq::modulation_name(r.config.modulation),
+                             r.family == iq::Family::Fsk ? r.symbol_frequencies_hz.size() : r.symbols.size(), r.samples.size(),
                              r.sample_rate_hz);
             plots_    = {};
             spectrum_ = {};
@@ -66,7 +67,7 @@ void SignalGenerator::DrawContents()
             plots_        = make_plot_data(r);
             power_        = iq::power_statistics(r.samples);
             accuracy_     = iq::symbol_accuracy(r);
-            eye_          = r.family == iq::Family::Noise ? iq::EyeDiagram{} : iq::eye_diagram(r);
+            eye_          = r.family == iq::Family::Linear ? iq::eye_diagram(r) : iq::EyeDiagram{};
             UpdateSpectrum();
         }
     }
@@ -98,8 +99,10 @@ void SignalGenerator::DrawContents()
         }
         ImGui::EndCombo();
     }
-    Hint("BPSK, QPSK, 8-PSK, 16-QAM and 64-QAM carry 1, 2, 3, 4 and 6 bits per symbol with Gray labelling. WGN is a pure noise source.");
-    const bool noise_source = !iq::waveform_descriptor(config_.modulation).shaped;
+    Hint("Linear: BPSK, QPSK, 8-PSK, 16/64/256-QAM, OOK and 4-PAM carry 1 to 8 bits per symbol with Gray labelling; DBPSK and DQPSK encode the data in phase changes between symbols. 2-FSK, 4-FSK and MSK switch the carrier frequency with continuous phase. WGN is a pure noise source.");
+    const auto family       = iq::waveform_family(config_.modulation);
+    const bool noise_source = family == iq::Family::Noise;
+    const bool fsk          = family == iq::Family::Fsk;
     if (noise_source)
     {
         ImGui::InputInt("Sample count", &config_.noise_source.sample_count);
@@ -116,14 +119,29 @@ void SignalGenerator::DrawContents()
     else
     {
         ImGui::InputInt("Symbol count", &config_.symbol_count);
-        Hint("How many symbols to transmit. Each symbol carries log2(M) bits: 1 for BPSK, 2 for QPSK, 3 for 8-PSK, 4 for 16-QAM, 6 for 64-QAM.");
+        Hint("How many symbols to transmit. Each symbol carries log2(M) bits: 1 for BPSK, OOK, DBPSK, 2-FSK and MSK, 2 for QPSK, 4-PAM, DQPSK and 4-FSK, 3 for 8-PSK, 4 for 16-QAM, 6 for 64-QAM, 8 for 256-QAM.");
         ImGui::InputDouble("Symbol rate (Bd)", &config_.symbol_rate_baud, 100, 1000, "%.6g");
         Hint("Symbols per second. Together with samples per symbol it sets the sample rate.");
         ImGui::InputInt("Samples per symbol", &config_.samples_per_symbol);
-        Hint("Oversampling factor (SPS). Higher values give smoother waveforms and more room in the spectrum, at the cost of more samples. RRC needs at least 2.");
+        Hint("Oversampling factor (SPS). Higher values give smoother waveforms and more room in the spectrum, at the cost of more samples. RRC needs at least 2; FSK needs enough SPS to keep every tone below half the sample rate.");
         ImGui::Text("Sample rate: %.6g Hz", config_.symbol_rate_baud * config_.samples_per_symbol);
         ImGui::InputDouble("Amplitude gain", &config_.amplitude_gain, .1, 1, "%.6g");
         Hint("Scales every sample once. Power scales with gain squared.");
+        if (fsk)
+        {
+            const bool locked = config_.modulation == iq::Modulation::MSK;
+            ImGui::SeparatorText("Frequency Modulation");
+            double spacing = iq::fsk_tone_spacing_hz(config_);
+            ImGui::BeginDisabled(locked);
+            if (ImGui::InputDouble("Tone spacing (Hz)", &spacing, 50, 500, "%.6g"))
+                config_.tone_spacing_hz = spacing;
+            ImGui::EndDisabled();
+            Hint("Frequency distance between adjacent tones. The modulation index is h = spacing / symbol rate; MSK fixes it at 0.5, the smallest spacing whose tones stay orthogonal over one symbol.");
+            ImGui::Text("Modulation index h: %.4g%s", iq::fsk_modulation_index(config_), locked ? " (fixed for MSK)" : "");
+            ImGui::TextWrapped("Continuous phase, constant envelope. No pulse filter: output is exactly symbols x SPS samples.");
+        }
+        else
+        {
         ImGui::SeparatorText("Pulse Shaping");
         int pulse = static_cast<int>(config_.pulse);
         if (ImGui::Combo("Pulse", &pulse, "Root-raised cosine\0Rectangular\0"))
@@ -135,6 +153,7 @@ void SignalGenerator::DrawContents()
         ImGui::InputInt("RRC span (symbols)", &config_.span_symbols);
         Hint("Filter length in symbols. Longer filters approximate the ideal response better (less residual ISI) and cost more samples.");
         ImGui::EndDisabled();
+        }
         ImGui::SeparatorText("AWGN");
         ImGui::Checkbox("Add AWGN", &config_.awgn.enabled);
         Hint("Additive white Gaussian noise at the SNR below. Disabled keeps the clean signal.");
@@ -292,11 +311,14 @@ void SignalGenerator::DrawContents()
         else
         {
             Metric("Signal", std::string(iq::modulation_name(r->config.modulation)), true);
-            Metric("Symbols", std::to_string(r->symbols.size()));
+            Metric("Symbols", std::to_string(r->family == iq::Family::Fsk ? r->symbol_frequencies_hz.size() : r->symbols.size()));
             Metric("Samples", std::to_string(r->samples.size()));
             Metric("Sample rate", num("%.6g Hz", r->sample_rate_hz));
             Metric("Duration", num("%.6g s", r->samples.size() / r->sample_rate_hz));
-            Metric("Filter delay", std::to_string(r->filter_delay_samples) + " samples", true);
+            if (r->family == iq::Family::Fsk)
+                Metric("Modulation index", num("%.4g", iq::fsk_modulation_index(r->config)), true);
+            else
+                Metric("Filter delay", std::to_string(r->filter_delay_samples) + " samples", true);
             Metric("Gain", num("%.6g", r->config.amplitude_gain));
             if (r->noise.awgn_applied)
                 ImGui::TextWrapped("AWGN: requested %.6g dB | reference power %.6g over [%zu,%zu) | added noise power %.6g | noise seed %u",
@@ -375,7 +397,24 @@ void SignalGenerator::DrawPlots()
     }
     const auto& result = job_.result();
     const bool noise_source = result && result->family == iq::Family::Noise;
-    if (!noise_source && ImGui::BeginTabItem("Constellation"))
+    const bool fsk_source   = result && result->family == iq::Family::Fsk;
+    if (fsk_source && ImGui::BeginTabItem("Frequency"))
+    {
+        ImGui::TextWrapped("Blue: frequency estimated from the phase step between consecutive samples. Orange: nominal tone of each symbol. A continuous-phase signal moves between tones without phase jumps; noise and CFO shift the estimate.");
+        if (ImPlot::BeginPlot("Instantaneous frequency", ImVec2(-1, -1)))
+        {
+            ImPlot::SetupAxes("Time (s)", "Frequency (Hz)", ImPlotAxisFlags_AutoFit, ImPlotAxisFlags_AutoFit);
+            ImPlot::SetNextLineStyle(ImVec4(.2f, .6f, 1.f, 1.f));
+            ImPlot::PlotLine("Estimate", plots_.freq_time.data(), plots_.freq_estimate.data(),
+                             static_cast<int>(plots_.freq_time.size()));
+            ImPlot::SetNextLineStyle(ImVec4(1.f, .55f, .15f, 1.f), 2.f);
+            ImPlot::PlotLine("Nominal tone", plots_.freq_time.data(), plots_.freq_nominal.data(),
+                             static_cast<int>(plots_.freq_time.size()));
+            ImPlot::EndPlot();
+        }
+        ImGui::EndTabItem();
+    }
+    if (!noise_source && !fsk_source && ImGui::BeginTabItem("Constellation"))
     {
         const bool noisy = result && (result->noise.awgn_applied || result->impairments_applied);
         ImGui::Combo("View", &constellation_view_,
@@ -393,7 +432,7 @@ void SignalGenerator::DrawPlots()
         }
         ImGui::EndTabItem();
     }
-    if (!noise_source && ImGui::BeginTabItem("Eye"))
+    if (!noise_source && !fsk_source && ImGui::BeginTabItem("Eye"))
     {
         ImGui::SetNextItemWidth(220);
         ImGui::Combo("Component", &eye_component_, "In-phase (I)\0Quadrature (Q)\0");

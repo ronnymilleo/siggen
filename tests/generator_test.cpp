@@ -145,7 +145,7 @@ TEST(Generator, SixBitExplicitInputLimits) {
     c.data_source = DataSource::Explicit;
     c.symbol_count = 65536;
     c.bits.assign(65536 * 6, '0');
-    EXPECT_EQ(c.bits.size(), MAX_EXPLICIT_BITS);
+    EXPECT_LT(c.bits.size(), MAX_EXPLICIT_BITS); // Eight-bit 256-QAM sets the ceiling.
     EXPECT_NO_THROW(validate(c));
     c.pulse = Pulse::Rectangular;
     c.samples_per_symbol = 1;
@@ -153,6 +153,8 @@ TEST(Generator, SixBitExplicitInputLimits) {
     EXPECT_EQ(maximum.symbols.size(), 65536u);
     EXPECT_EQ(maximum.samples.size(), 65536u);
     c.bits += '0';
+    EXPECT_THROW(validate(c), std::invalid_argument);
+    c.bits.assign(MAX_EXPLICIT_BITS + 1, '0');
     EXPECT_THROW(validate(c), std::invalid_argument);
     c.bits = std::string(65535 * 6, '0');
     EXPECT_THROW(validate(c), std::invalid_argument);
