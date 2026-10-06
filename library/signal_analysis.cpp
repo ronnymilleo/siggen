@@ -64,7 +64,26 @@ void fft(std::vector<std::complex<double>>& data) {
     }
 }
 }
-Spectrum welch_psd(const std::vector<std::complex<float>>& samples, double fs, std::size_t length) {
+const char* window_name(Window window) {
+    switch (window) {
+    case Window::Hann: return "Hann";
+    case Window::Hamming: return "Hamming";
+    case Window::Blackman: return "Blackman";
+    case Window::Rectangular: return "Rectangular";
+    }
+    return "Unknown";
+}
+double window_value(Window window, std::size_t k, std::size_t length) {
+    const auto phase = 2 * std::numbers::pi * static_cast<double>(k) / static_cast<double>(length);
+    switch (window) {
+    case Window::Hann: return .5 - .5 * std::cos(phase);
+    case Window::Hamming: return .54 - .46 * std::cos(phase);
+    case Window::Blackman: return .42 - .5 * std::cos(phase) + .08 * std::cos(2 * phase);
+    case Window::Rectangular: return 1;
+    }
+    throw std::invalid_argument("Unknown window");
+}
+Spectrum welch_psd(const std::vector<std::complex<float>>& samples, double fs, std::size_t length, Window win) {
     if (!std::isfinite(fs) || fs <= 0 || !std::isfinite(1/fs) || length < 4 || length > 65536 || (length & (length-1)) || samples.size() > MAX_SIGNAL_SAMPLES)
         throw std::invalid_argument("PSD needs finite positive sample rate, bounded input and power-of-two segment length 4–65536");
     for (auto x : samples)
@@ -73,10 +92,11 @@ Spectrum welch_psd(const std::vector<std::complex<float>>& samples, double fs, s
     if (samples.size() < 4) return result;
     while (length > samples.size()) length >>= 1;
     result.segment_length = length;
+    result.window = win;
     std::vector<double> window(length);
     double window_energy = 0;
     for (std::size_t k = 0; k < length; ++k) {
-        window[k] = .5 - .5 * std::cos(2 * std::numbers::pi * k / length); // Periodic Hann.
+        window[k] = window_value(win, k, length);
         window_energy += window[k] * window[k];
     }
     result.power_density.assign(length,0);

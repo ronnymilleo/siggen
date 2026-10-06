@@ -1,10 +1,11 @@
-add_executable(siggen_tests signal_processing_test.cpp waveform_test.cpp generator_test.cpp noise_test.cpp generation_job_test.cpp signal_analysis_test.cpp preset_test.cpp export_test.cpp batch_test.cpp)
+add_executable(siggen_tests signal_processing_test.cpp waveform_test.cpp generator_test.cpp noise_test.cpp generation_job_test.cpp signal_analysis_test.cpp preset_test.cpp export_test.cpp batch_test.cpp measurements_test.cpp)
 target_link_libraries(siggen_tests PRIVATE signalgenerator GTest::gtest_main Threads::Threads)
 siggen_target_options(siggen_tests)
 include(GoogleTest)
 gtest_discover_tests(siggen_tests DISCOVERY_MODE PRE_TEST)
 
 target_include_directories(siggen_tests PRIVATE ${PROJECT_SOURCE_DIR}/application)
+target_compile_definitions(siggen_tests PRIVATE SIGGEN_PRESET_DIR="${PROJECT_SOURCE_DIR}/presets")
 if(SIGGEN_BUILD_APP)
     add_executable(siggen_cli_tests command_line_test.cpp cli_config_test.cpp ${PROJECT_SOURCE_DIR}/application/cli_config.cpp)
     target_include_directories(siggen_cli_tests PRIVATE ${PROJECT_SOURCE_DIR}/application)

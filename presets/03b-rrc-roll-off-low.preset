@@ -1,0 +1,21 @@
+[IQ Generator Preset]
+# Lesson 3b: narrow roll-off, narrow spectrum.
+# Roll-off 0.2 packs the spectrum tightly. Compare with lesson 3.
+Version=2
+Modulation=QPSK
+NumberOfSymbols=256
+SymbolRateBaud=1000
+SamplesPerSymbol=8
+Pulse=RRC
+RRCBeta=0.2
+SpanSymbols=10
+AmplitudeGain=1
+DataSource=Random
+Seed=5489
+Bits=
+NoiseSampleCount=2048
+NoiseSampleRateHz=8000
+NoisePower=1
+AwgnEnabled=false
+AwgnSnrDb=10
+NoiseSeed=5490

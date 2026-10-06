@@ -172,7 +172,7 @@ TEST(UI, GeneratedViewsAndPendingClosure)
         ASSERT_TRUE(SignalGeneratorTestAccess::result(window));
         EXPECT_EQ(SignalGeneratorTestAccess::result(window)->config.seed, c.seed);
         EXPECT_TRUE(SignalGeneratorTestAccess::error(window).empty());
-        for (const char* view : {"Waveform", "Constellation", "Matched", "Spectrum"})
+        for (const char* view : {"Waveform", "Constellation", "Matched", "Eye", "Spectrum"})
         {
             frame(window);
             auto* gui_window = ImGui::FindWindowByName("Signal Generator");

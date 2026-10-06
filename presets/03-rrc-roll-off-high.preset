@@ -1,0 +1,21 @@
+[IQ Generator Preset]
+# Lesson 3: wide roll-off, wide spectrum.
+# Roll-off 1.0 uses twice the minimum bandwidth. Open the Spectrum tab and compare with 03b (roll-off 0.2): the skirts are broader but the eye is more forgiving.
+Version=2
+Modulation=QPSK
+NumberOfSymbols=256
+SymbolRateBaud=1000
+SamplesPerSymbol=8
+Pulse=RRC
+RRCBeta=1.0
+SpanSymbols=10
+AmplitudeGain=1
+DataSource=Random
+Seed=5489
+Bits=
+NoiseSampleCount=2048
+NoiseSampleRateHz=8000
+NoisePower=1
+AwgnEnabled=false
+AwgnSnrDb=10
+NoiseSeed=5490

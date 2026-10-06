@@ -18,6 +18,18 @@ void Metric(const char* label, const std::string& value, bool first = false)
     ImGui::TextUnformatted(value.c_str());
     ImGui::EndGroup();
 }
+// Plain-language help shown when the preceding control is hovered.
+void Hint(const char* text)
+{
+    if (ImGui::IsItemHovered(ImGuiHoveredFlags_ForTooltip))
+    {
+        ImGui::BeginTooltip();
+        ImGui::PushTextWrapPos(ImGui::GetFontSize() * 24.f);
+        ImGui::TextUnformatted(text);
+        ImGui::PopTextWrapPos();
+        ImGui::EndTooltip();
+    }
+}
 std::string num(const char* f, double v)
 {
     char buf[48];
@@ -52,10 +64,10 @@ void SignalGenerator::DrawContents()
             waveform_fit_ = true;
             spectrum_fit_ = true;
             plots_        = make_plot_data(r);
-            spectrum_     = iq::welch_psd(r.samples, r.sample_rate_hz);
-            spectrum_db_.resize(spectrum_.power_density.size());
-            std::transform(spectrum_.power_density.begin(), spectrum_.power_density.end(), spectrum_db_.begin(),
-                           [](double p) { return 10 * std::log10(std::max(p, 1e-20)); });
+            power_        = iq::power_statistics(r.samples);
+            accuracy_     = iq::symbol_accuracy(r);
+            eye_          = r.family == iq::Family::Noise ? iq::EyeDiagram{} : iq::eye_diagram(r);
+            UpdateSpectrum();
         }
     }
     catch (const std::exception& e)
@@ -86,39 +98,54 @@ void SignalGenerator::DrawContents()
         }
         ImGui::EndCombo();
     }
+    Hint("BPSK, QPSK, 8-PSK, 16-QAM and 64-QAM carry 1, 2, 3, 4 and 6 bits per symbol with Gray labelling. WGN is a pure noise source.");
     const bool noise_source = !iq::waveform_descriptor(config_.modulation).shaped;
     if (noise_source)
     {
         ImGui::InputInt("Sample count", &config_.noise_source.sample_count);
+        Hint("Number of complex noise samples to generate.");
         ImGui::InputDouble("Sample rate (Hz)", &config_.noise_source.sample_rate_hz, 100, 1000, "%.6g");
+        Hint("Sets the frequency axis of the spectrum: the PSD spans plus/minus half this rate.");
         ImGui::InputDouble("Noise power", &config_.noise_source.noise_power, .1, 1, "%.6g");
+        Hint("Total complex noise power. Each of I and Q has half of it as variance.");
         ImGui::TextWrapped("Complex WGN: independent Gaussian I/Q components, each with variance power/2 before gain.");
         ImGui::InputScalar("Noise seed", ImGuiDataType_U32, &config_.noise_seed);
         ImGui::InputDouble("Amplitude gain", &config_.amplitude_gain, .1, 1, "%.6g");
+        Hint("Scales every sample once. Power scales with gain squared.");
     }
     else
     {
         ImGui::InputInt("Symbol count", &config_.symbol_count);
+        Hint("How many symbols to transmit. Each symbol carries log2(M) bits: 1 for BPSK, 2 for QPSK, 3 for 8-PSK, 4 for 16-QAM, 6 for 64-QAM.");
         ImGui::InputDouble("Symbol rate (Bd)", &config_.symbol_rate_baud, 100, 1000, "%.6g");
+        Hint("Symbols per second. Together with samples per symbol it sets the sample rate.");
         ImGui::InputInt("Samples per symbol", &config_.samples_per_symbol);
+        Hint("Oversampling factor (SPS). Higher values give smoother waveforms and more room in the spectrum, at the cost of more samples. RRC needs at least 2.");
         ImGui::Text("Sample rate: %.6g Hz", config_.symbol_rate_baud * config_.samples_per_symbol);
         ImGui::InputDouble("Amplitude gain", &config_.amplitude_gain, .1, 1, "%.6g");
+        Hint("Scales every sample once. Power scales with gain squared.");
         ImGui::SeparatorText("Pulse Shaping");
         int pulse = static_cast<int>(config_.pulse);
         if (ImGui::Combo("Pulse", &pulse, "Root-raised cosine\0Rectangular\0"))
             config_.pulse = static_cast<iq::Pulse>(pulse);
+        Hint("RRC is the practical choice: with a matching receive filter it has no inter-symbol interference at the decision instants and a compact spectrum. Rectangular pulses open the eye fully but have wide sinc sidelobes.");
         ImGui::BeginDisabled(config_.pulse != iq::Pulse::RRC);
         ImGui::InputDouble("RRC roll-off", &config_.roll_off, .05, .1, "%.4g");
+        Hint("Excess bandwidth of the root-raised-cosine filter, from 0 to 1. Occupied bandwidth is about symbol rate x (1 + roll-off). Low values give narrow spectra but longer, more sensitive filter tails.");
         ImGui::InputInt("RRC span (symbols)", &config_.span_symbols);
+        Hint("Filter length in symbols. Longer filters approximate the ideal response better (less residual ISI) and cost more samples.");
         ImGui::EndDisabled();
         ImGui::SeparatorText("AWGN");
         ImGui::Checkbox("Add AWGN", &config_.awgn.enabled);
+        Hint("Additive white Gaussian noise at the SNR below. Disabled keeps the clean signal.");
         ImGui::BeginDisabled(!config_.awgn.enabled);
         ImGui::InputDouble("SNR (dB)", &config_.awgn.snr_db, 1, 10, "%.6g");
+        Hint("Clean signal power divided by added noise power, in dB. Lower values spread the constellation and close the eye.");
         ImGui::EndDisabled();
         ImGui::TextWrapped("SNR is clean sample power over added complex noise power, measured on the steady-state interval.");
         ImGui::InputScalar("Noise seed", ImGuiDataType_U32, &config_.noise_seed);
         ImGui::InputScalar("Random seed", ImGuiDataType_U32, &config_.seed);
+        Hint("Same settings and seeds always reproduce the same bits and noise. The data and noise seeds are independent streams.");
         if (ImGui::CollapsingHeader("Advanced"))
         {
             int source = static_cast<int>(config_.data_source);
@@ -183,6 +210,7 @@ void SignalGenerator::DrawContents()
     if (ImGui::CollapsingHeader("Presets"))
     {
         ImGui::InputText("Preset path", preset_path_, sizeof preset_path_);
+        Hint("Guided lessons ship in the presets/ folder, for example presets/01-qpsk-clean.preset. Loading one shows its notes below.");
         if (ImGui::Button("Save Preset"))
         {
             try
@@ -204,6 +232,7 @@ void SignalGenerator::DrawContents()
             {
                 auto loaded = iq::load_preset(preset_path_);
                 config_     = std::move(loaded);
+                preset_notes_ = iq::load_preset_notes(preset_path_);
                 spdlog::info("Loaded preset: {}", preset_path_);
                 std::fill(bit_input_.begin(), bit_input_.end(), 0);
                 std::copy(config_.bits.begin(), config_.bits.end(), bit_input_.begin());
@@ -215,6 +244,11 @@ void SignalGenerator::DrawContents()
                 error_ = e.what();
             }
         }
+    }
+    if (!preset_notes_.empty())
+    {
+        ImGui::SeparatorText("Preset notes");
+        ImGui::TextWrapped("%s", preset_notes_.c_str());
     }
     if (two_pane)
         ImGui::TableNextColumn();
@@ -251,12 +285,46 @@ void SignalGenerator::DrawContents()
                             r->noise.requested_snr_db, r->noise.reference_power, r->noise.reference_begin,
                             r->noise.reference_end, r->noise.added_noise_power, r->noise.noise_seed);
         }
+        DrawMeasurements(*r);
         DrawPlots();
     }
     else
         ImGui::TextDisabled("No signal generated yet. Choose settings and select Generate Signal.");
     if (two_pane)
         ImGui::EndTable();
+}
+
+void SignalGenerator::UpdateSpectrum()
+{
+    const auto& r = job_.result();
+    if (!r)
+        return;
+    spectrum_ = iq::welch_psd(r->samples, r->sample_rate_hz, 1024, window_);
+    spectrum_db_.resize(spectrum_.power_density.size());
+    std::transform(spectrum_.power_density.begin(), spectrum_.power_density.end(), spectrum_db_.begin(),
+                   [](double p) { return 10 * std::log10(std::max(p, 1e-20)); });
+    spectrum_fit_ = true;
+}
+
+void SignalGenerator::DrawMeasurements(const iq::GeneratedSignal& r)
+{
+    ImGui::SeparatorText("Measurements");
+    Metric("Mean power", num("%.4g", power_.mean_power), true);
+    Hint("Mean of |x|^2 over every sample, filter transients included.");
+    Metric("Peak power", num("%.4g", power_.peak_power));
+    Metric("PAPR", num("%.3g dB", power_.papr_db));
+    Hint("Peak-to-average power ratio. A constant-envelope signal has 0 dB; shaped QAM is several dB higher, which is what stresses power amplifiers.");
+    if (accuracy_)
+    {
+        Metric("EVM", num("%.3g %%", 100 * accuracy_->evm_rms), true);
+        Hint("RMS error between the matched-filter observations and the ideal symbols, relative to the RMS ideal symbol. Even a clean RRC signal shows a small floor from the truncated filter.");
+        Metric("EVM", num("%.4g dB", accuracy_->evm_db));
+        Metric("SNR after matched filter", num("%.4g dB", accuracy_->snr_after_matched_db));
+        Hint("-EVM in dB. Matched filtering averages noise over about SPS samples, so this exceeds the sample-level SNR by 10 log10(SPS).");
+        if (r.noise.awgn_applied)
+            ImGui::TextWrapped("Requested sample SNR %.4g dB + 10 log10(SPS) = %.4g dB expected after the matched filter. The measured value varies with the noise realization.",
+                               r.noise.requested_snr_db, r.noise.requested_snr_db + accuracy_->expected_offset_db);
+    }
 }
 
 void SignalGenerator::DrawPlots()
@@ -301,10 +369,42 @@ void SignalGenerator::DrawPlots()
         }
         ImGui::EndTabItem();
     }
+    if (!noise_source && ImGui::BeginTabItem("Eye"))
+    {
+        ImGui::SetNextItemWidth(220);
+        ImGui::Combo("Component", &eye_component_, "In-phase (I)\0Quadrature (Q)\0");
+        if (eye_.in_phase.empty())
+            ImGui::TextWrapped("No steady-state symbols: increase symbol count beyond twice the RRC span.");
+        else
+            ImGui::TextWrapped("%zu overlaid matched-filter traces, two symbol periods wide. A wide-open eye at 0 means easy, error-free decisions; noise and ISI close it.",
+                               eye_.in_phase.size());
+        if (ImPlot::BeginPlot("Eye diagram", ImVec2(-1, -1)))
+        {
+            ImPlot::SetupAxes("Time (symbol periods)", eye_component_ == 0 ? "I" : "Q", ImPlotAxisFlags_AutoFit,
+                              ImPlotAxisFlags_AutoFit);
+            const auto& traces = eye_component_ == 0 ? eye_.in_phase : eye_.quadrature;
+            const auto  colour = eye_component_ == 0 ? ImVec4(.2f, .6f, 1.f, .35f) : ImVec4(1.f, .55f, .15f, .35f);
+            for (const auto& trace : traces)
+            {
+                ImPlot::SetNextLineStyle(colour);
+                ImPlot::PlotLine("##eye", eye_.time_symbols.data(), trace.data(), static_cast<int>(trace.size()));
+            }
+            ImPlot::EndPlot();
+        }
+        ImGui::EndTabItem();
+    }
     if (ImGui::BeginTabItem("Spectrum"))
     {
-        ImGui::Text("Two-sided Welch PSD | Periodic Hann | %zu samples/segment | %zu segments",
-                    spectrum_.segment_length, spectrum_.segment_count);
+        int window = static_cast<int>(window_);
+        ImGui::SetNextItemWidth(220);
+        if (ImGui::Combo("Window", &window, "Hann\0Hamming\0Blackman\0Rectangular\0"))
+        {
+            window_ = static_cast<iq::Window>(window);
+            UpdateSpectrum();
+        }
+        Hint("Hann is the default. Rectangular has the narrowest main lobe but the worst leakage; Blackman has the lowest sidelobes with a wider main lobe.");
+        ImGui::Text("Two-sided Welch PSD | Periodic %s | %zu samples/segment | %zu segments",
+                    iq::window_name(spectrum_.window), spectrum_.segment_length, spectrum_.segment_count);
         ImGui::TextWrapped("Relative power density; no impedance or watt/dBm calibration. Display floor: -200 dB.");
         if (spectrum_db_.empty())
             ImGui::TextUnformatted("At least four samples are needed for a spectrum.");
