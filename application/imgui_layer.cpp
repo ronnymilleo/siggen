@@ -131,9 +131,7 @@ void ImGuiLayer::Init(GLFWwindow* window)
     ImGui_ImplOpenGL3_Init("#version 330");
     // Prefer a system UI font; fall back to the built-in one when none is installed.
     constexpr const char* font_candidates[] = {
-#ifdef _WIN32
-        R"(C:\Windows\Fonts\segoeui.ttf)",
-#elif defined(__APPLE__)
+#ifdef __APPLE__
         "/System/Library/Fonts/Helvetica.ttc",
 #else
         "/usr/share/fonts/truetype/inter/Inter-Regular.ttf",
