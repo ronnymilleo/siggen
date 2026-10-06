@@ -1,0 +1,29 @@
+[IQ Generator Preset]
+# Lesson 17: offset QPSK.
+# OQPSK delays the quadrature stream by half a symbol, so I and Q never change at the same instant and the phase moves by at most 90 degrees per step. Compare the PAPR in Measurements with lesson 1 (plain QPSK): it is lower, which is why OQPSK is friendlier to nonlinear power amplifiers. On the Eye tab the Q traces are centred half a symbol after the I traces.
+Version=3
+Modulation=OQPSK
+NumberOfSymbols=1024
+SymbolRateBaud=1000
+SamplesPerSymbol=8
+Pulse=RRC
+RRCBeta=0.2
+SpanSymbols=10
+AmplitudeGain=1
+DataSource=Random
+Seed=5489
+Bits=
+NoiseSampleCount=2048
+NoiseSampleRateHz=8000
+NoisePower=1
+AwgnEnabled=true
+AwgnSnrDb=30
+NoiseSeed=5490
+CfoHz=0
+PhaseNoiseLinewidthHz=0
+IqGainDb=0
+IqPhaseDeg=0
+DcOffsetI=0
+DcOffsetQ=0
+AdcBits=0
+ImpairmentSeed=5491

@@ -20,7 +20,7 @@ namespace {
 void validate_linear(const GeneratedSignal& r) {
     const auto sps = static_cast<std::size_t>(r.config.samples_per_symbol);
     const auto taps = uses_rrc(r.config) ? static_cast<std::size_t>(r.config.span_symbols) * sps + 1 : sps;
-    if (r.samples.size() != static_cast<std::size_t>(r.config.symbol_count-1) * sps + taps ||
+    if (r.samples.size() != static_cast<std::size_t>(r.config.symbol_count-1) * sps + taps + quadrature_delay_samples(r.config) ||
         r.symbols.size() != static_cast<std::size_t>(r.config.symbol_count) ||
         r.sample_rate_hz != r.config.symbol_rate_baud * sps ||
         r.filter_delay_samples != (uses_rrc(r.config) ? (taps-1)/2 : 0))

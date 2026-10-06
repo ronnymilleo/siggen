@@ -109,7 +109,7 @@ private:
     // Both bind the same members; only the parsed context assigns them.
     void add_signal_options(CLI::App& target)
     {
-        target.add_option("--modulation", modulation, "Waveform: BPSK, QPSK, 8-PSK, 16-QAM, 64-QAM, 256-QAM, OOK, 4-PAM, DBPSK, DQPSK, 2-FSK, 4-FSK, MSK, WGN");
+        target.add_option("--modulation", modulation, "Waveform: BPSK, QPSK, 8-PSK, 16-QAM, 32-QAM, 64-QAM, 256-QAM, OOK, 4-PAM, DBPSK, DQPSK, pi/4-DQPSK, OQPSK, 2-FSK, 4-FSK, MSK, WGN");
         target.add_option("--symbols", symbols, "Symbol count (linear waveforms)");
         target.add_option("--symbol-rate", symbol_rate, "Symbol rate in baud (linear waveforms)");
         target.add_option("--sps", sps, "Samples per symbol (linear waveforms)");

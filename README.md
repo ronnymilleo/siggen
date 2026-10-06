@@ -140,8 +140,8 @@ current directory, then exits. Use `--gui` to open the desktop interface instead
 Configuration resolves as **defaults → loaded preset → explicitly supplied CLI
 options**, then validates through the shared library; options that were not
 supplied never replace preset values. Modulation names (`BPSK`, `QPSK`, `8-PSK`,
-`16-QAM`, `64-QAM`, `256-QAM`, `OOK`, `4-PAM`, `DBPSK`, `DQPSK`, `2-FSK`,
-`4-FSK`, `MSK`, `WGN`) are accepted case-insensitively; pulse names are
+`16-QAM`, `32-QAM`, `64-QAM`, `256-QAM`, `OOK`, `4-PAM`, `DBPSK`, `DQPSK`,
+`pi/4-DQPSK`, `OQPSK`, `2-FSK`, `4-FSK`, `MSK`, `WGN`) are accepted case-insensitively; pulse names are
 `rrc` and `rectangular`. Signal options are `--preset`, `--modulation`,
 `--symbols`, `--symbol-rate`, `--sps`, `--pulse`, `--roll-off`, `--span`,
 `--tone-spacing-hz` (2-FSK and 4-FSK only), `--gain`, `--seed`,
@@ -326,14 +326,14 @@ Hamming, Blackman or Rectangular. Hann output is unchanged from earlier releases
 preset header are notes: parsers ignore them and the GUI shows them after
 **Load Preset**, so a lesson can say what to look at (for example
 `presets/02-qpsk-snr-8db.preset`). Lessons 11–16 cover 2-FSK, MSK, DQPSK under a
-carrier offset, 4-PAM, 256-QAM and OOK. Controls also have hover tooltips.
+carrier offset, 4-PAM, 256-QAM and OOK; lessons 17–19 cover OQPSK, pi/4-DQPSK and 32-QAM. Controls also have hover tooltips.
 
 ## Mapping and reproducibility
 
 Mapped symbols have **unit average constellation energy**, before amplitude gain.
 A particular random buffer need not have exactly unit empirical symbol energy.
 There is no per-buffer renormalization. QPSK has two bits per symbol; 8-PSK
-three; 16-QAM four; 64-QAM six; 256-QAM eight. Bits are consumed left to right in
+three; 16-QAM four; 32-QAM five; 64-QAM six; 256-QAM eight. Bits are consumed left to right in
 symbol order.
 
 | Modulation | Bits | Complex symbol before gain |
@@ -416,6 +416,35 @@ away from the reference. A receiver recovers the data from `s[k] * conj(s[k-1])`
 which is unchanged by a constant phase rotation of the channel. The
 matched-filter constellation of a DQPSK signal with a carrier offset therefore
 spins, yet each symbol-to-symbol step stays near its transmitted value.
+
+### 32-QAM, OQPSK and pi/4-DQPSK
+
+**32-QAM** is the cross constellation: the 6 x 6 grid of odd levels
+`-5, -3, -1, +1, +3, +5` on each axis without its four corner points, divided by
+`sqrt(20)` for unit average energy (the energies sum to 640 over 32 points). Five
+bits select a point: the first two choose the quadrant (`00` +,+; `01` -,+; `11`
+-,-; `10` +,-) and the last three one of eight points of that quadrant. With the
+point written as `(x, y)` in the first quadrant, labels `000`..`111` map to
+`(1,1) (3,1) (5,1) (5,3) (1,3) (3,3) (1,5) (3,5)`, mirrored into the other
+quadrants. A cross constellation cannot be fully Gray labelled (one point has four
+nearest neighbours but a 3-bit label only three one-bit neighbours), so this
+assignment, found by exhaustive search, is the best possible: neighbours across an
+axis always differ in one bit, eight of the ten neighbour pairs inside a quadrant
+differ in one bit, and the other two in two bits.
+
+**OQPSK** (offset QPSK) uses the QPSK mapping, but the quadrature stream lags the
+in-phase stream by half a symbol. The two bits of a symbol therefore change at
+different instants, so the phase can only move by 90 degrees at a time and the
+envelope varies less than in QPSK. It needs an even samples-per-symbol value, and
+the buffer is `SPS / 2` samples longer than the QPSK buffer because of the delay.
+The matched-filter decision for Q is taken `SPS / 2` samples after the one for I,
+and the eye diagram centres the Q traces accordingly.
+
+**pi/4-DQPSK** carries the data in phase changes of `+45`, `+135`, `-135` or `-45`
+degrees for bit pairs `00`, `01`, `11`, `10`. The reference phase before the first
+symbol is 0. Every step is an odd multiple of 45 degrees, so the symbols alternate
+between two QPSK sets (offset by 45 degrees), never change phase by 180 degrees, and
+the envelope never passes through the origin. Symbols have unit energy.
 
 ## Frequency modulation: 2-FSK, 4-FSK and MSK
 
@@ -624,8 +653,8 @@ All version-2 fields are required; version 3 additionally requires the impairmen
 fields listed in "Channel impairments". Version 4 is written for 2-FSK, 4-FSK and
 MSK: it adds `ToneSpacingHz` and always includes the impairment fields, and FSK
 waveforms are rejected in older versions. Version 1 only knows BPSK, QPSK and
-16-QAM. Modulation accepts `BPSK`, `QPSK`, `8-PSK`, `16-QAM`, `64-QAM`, `256-QAM`,
-`OOK`, `4-PAM`, `DBPSK`, `DQPSK`, `2-FSK`, `4-FSK`, `MSK`, `WGN` case-insensitively; pulse accepts `RRC`,
+16-QAM. Modulation accepts `BPSK`, `QPSK`, `8-PSK`, `16-QAM`, `32-QAM`, `64-QAM`, `256-QAM`,
+`OOK`, `4-PAM`, `DBPSK`, `DQPSK`, `pi/4-DQPSK`, `OQPSK`, `2-FSK`, `4-FSK`, `MSK`, `WGN` case-insensitively; pulse accepts `RRC`,
 `Rectangular`; source accepts `Random`, `Explicit`; booleans accept `true`,
 `false`. Numbers use a locale-independent decimal point.
 Unknown/duplicate fields, unsupported versions, non-finite numbers, and trailing

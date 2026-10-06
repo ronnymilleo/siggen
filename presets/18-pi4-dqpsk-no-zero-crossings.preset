@@ -1,0 +1,29 @@
+[IQ Generator Preset]
+# Lesson 18: pi/4-DQPSK.
+# The phase changes by +45, +135, -135 or -45 degrees at every symbol, so the points alternate between two QPSK sets and the phase never jumps by 180 degrees. Open the matched-filter constellation: eight points on a circle. The envelope never reaches zero, and a receiver recovers the data from phase differences without carrier-phase recovery.
+Version=3
+Modulation=pi/4-DQPSK
+NumberOfSymbols=1024
+SymbolRateBaud=1000
+SamplesPerSymbol=8
+Pulse=RRC
+RRCBeta=0.2
+SpanSymbols=10
+AmplitudeGain=1
+DataSource=Random
+Seed=5489
+Bits=
+NoiseSampleCount=2048
+NoiseSampleRateHz=8000
+NoisePower=1
+AwgnEnabled=true
+AwgnSnrDb=30
+NoiseSeed=5490
+CfoHz=0
+PhaseNoiseLinewidthHz=0
+IqGainDb=0
+IqPhaseDeg=0
+DcOffsetI=0
+DcOffsetQ=0
+AdcBits=0
+ImpairmentSeed=5491

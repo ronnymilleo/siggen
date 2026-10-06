@@ -157,7 +157,7 @@ TEST(UI, GeneratedViewsAndPendingClosure)
     for (auto modulation : {iq::Modulation::BPSK, iq::Modulation::QPSK, iq::Modulation::PSK8,
                             iq::Modulation::QAM16, iq::Modulation::QAM64, iq::Modulation::QAM256,
                             iq::Modulation::OOK, iq::Modulation::PAM4, iq::Modulation::DBPSK,
-                            iq::Modulation::DQPSK, iq::Modulation::FSK2, iq::Modulation::FSK4,
+                            iq::Modulation::DQPSK, iq::Modulation::QAM32, iq::Modulation::OQPSK, iq::Modulation::PI4DQPSK, iq::Modulation::FSK2, iq::Modulation::FSK4,
                             iq::Modulation::MSK})
     {
         iq::GenerationConfig c;
@@ -227,11 +227,12 @@ TEST(UI, GeneratedViewsAndPendingClosure)
                                                modulation == iq::Modulation::OOK || modulation == iq::Modulation::PAM4;
                         if (!real_axis)
                         {
-                            const double outer = modulation == iq::Modulation::QPSK || modulation == iq::Modulation::DQPSK
+                            const double outer = modulation == iq::Modulation::QPSK || modulation == iq::Modulation::DQPSK || modulation == iq::Modulation::OQPSK
                                                      ? 1 / std::sqrt(2.)
-                                                 : modulation == iq::Modulation::PSK8   ? 1.
+                                                 : modulation == iq::Modulation::PSK8 || modulation == iq::Modulation::PI4DQPSK ? 1.
                                                  : modulation == iq::Modulation::QAM16  ? 3 / std::sqrt(10.)
                                                  : modulation == iq::Modulation::QAM256 ? 15 / std::sqrt(170.)
+                                                 : modulation == iq::Modulation::QAM32  ? 5 / std::sqrt(20.)
                                                                                         : 7 / std::sqrt(42.);
                             EXPECT_GT(plot.YAxis(0).Range.Max, outer);
                             EXPECT_LT(plot.YAxis(0).Range.Min, -outer);
