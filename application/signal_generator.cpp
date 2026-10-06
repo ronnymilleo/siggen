@@ -247,7 +247,7 @@ void SignalGenerator::DrawContents()
             Metric("Filter delay", std::to_string(r->filter_delay_samples) + " samples", true);
             Metric("Gain", num("%.6g", r->config.amplitude_gain));
             if (r->noise.awgn_applied)
-                ImGui::Text("AWGN: requested %.6g dB | reference power %.6g over [%zu,%zu) | added noise power %.6g | noise seed %u",
+                ImGui::TextWrapped("AWGN: requested %.6g dB | reference power %.6g over [%zu,%zu) | added noise power %.6g | noise seed %u",
                             r->noise.requested_snr_db, r->noise.reference_power, r->noise.reference_begin,
                             r->noise.reference_end, r->noise.added_noise_power, r->noise.noise_seed);
         }

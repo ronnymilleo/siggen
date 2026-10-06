@@ -11,14 +11,14 @@ generate swept fixed-length frame datasets (`siggen batch`) for classifier
 training. This application generates complex baseband, not an RF carrier.
 
 <div align="center">
-  <img width="952" height="1040" alt="image" src="https://github.com/user-attachments/assets/e3b1460e-60e9-4812-90b6-55bfb21fdd97" />
-  <p align="center"><em>Waveform - Captured in Arch Linux with Hyprland</em></p>
+  <img width="900" src="docs/images/gui-waveform.png" alt="Waveform tab showing the I and Q traces of a 16-QAM signal with AWGN" />
+  <p align="center"><em>Waveform - 16-QAM, RRC pulse shaping, 22 dB SNR</em></p>
 
-  <img width="954" height="372" alt="image" src="https://github.com/user-attachments/assets/edb93423-c40b-4376-a4ec-829189cd89ae" />
-  <p align="center"><em>Constellation - Captured in Arch Linux with Hyprland</em></p>
+  <img width="900" src="docs/images/gui-constellation.png" alt="Constellation tab showing matched-filter observations of 16-QAM" />
+  <p align="center"><em>Constellation - matched-filter observations</em></p>
 
-  <img width="955" height="365" alt="image" src="https://github.com/user-attachments/assets/21a40add-c82b-4d7e-8faa-69fd4e968864" />
-  <p align="center"><em>Spectrum - Captured in Arch Linux with Hyprland</em></p>
+  <img width="900" src="docs/images/gui-spectrum.png" alt="Spectrum tab showing the two-sided Welch PSD" />
+  <p align="center"><em>Spectrum - two-sided Welch PSD</em></p>
 </div>
 
 ## Build and test

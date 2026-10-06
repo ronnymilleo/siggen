@@ -6,8 +6,8 @@
 
 int run_gui(const iq::GenerationConfig& config)
 {
-    constexpr int SCENE_WIDTH = 1920;
-    constexpr int SCENE_HEIGHT = 1080;
+    constexpr int SCENE_WIDTH = 1280;
+    constexpr int SCENE_HEIGHT = 800;
     App           application = App(SCENE_WIDTH, SCENE_HEIGHT);
     WindowManager windowManager(config);
 
