@@ -36,4 +36,13 @@ struct EyeDiagram {
 // Throws for noise sources. `max_traces` bounds the cost; traces are taken
 // uniformly across the steady-state symbols. Returns empty traces if there are none.
 EyeDiagram eye_diagram(const GeneratedSignal& signal, std::size_t max_traces = 200);
+
+// Per-sample SNR re-expressed per symbol and per bit. With complex noise power
+// Pn over the sample rate Fs, N0 = Pn / Fs and Es = Ps / Rs, so
+// Es/N0 = SNR * SPS and Eb/N0 = Es/N0 / bits per symbol.
+struct EnergyRatios {
+    double es_n0_db = 0;
+    double eb_n0_db = 0;
+};
+EnergyRatios snr_to_energy_ratios(double snr_db, int samples_per_symbol, int bits_per_symbol);
 }
