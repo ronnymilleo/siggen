@@ -99,7 +99,7 @@ void SignalGenerator::DrawContents()
         }
         ImGui::EndCombo();
     }
-    Hint("Linear: BPSK, QPSK, 8-PSK, 16/64/256-QAM, OOK and 4-PAM carry 1 to 8 bits per symbol with Gray labelling; DBPSK and DQPSK encode the data in phase changes between symbols. 2-FSK, 4-FSK and MSK switch the carrier frequency with continuous phase. WGN is a pure noise source.");
+    Hint("Linear: BPSK, QPSK, 8-PSK, 16/32/64/256-QAM, OOK, 4-PAM and 4-ASK carry 1 to 8 bits per symbol with Gray labelling (32-QAM is the cross constellation, only partly Gray); DBPSK, DQPSK, pi/4-DQPSK and 8-DPSK encode the data in phase changes between symbols; OQPSK delays the quadrature stream by half a symbol. 2-FSK, 4-FSK and MSK switch the carrier frequency with continuous phase. WGN is a pure noise source.");
     const auto family       = iq::waveform_family(config_.modulation);
     const bool noise_source = family == iq::Family::Noise;
     const bool fsk          = family == iq::Family::Fsk;
@@ -119,7 +119,7 @@ void SignalGenerator::DrawContents()
     else
     {
         ImGui::InputInt("Symbol count", &config_.symbol_count);
-        Hint("How many symbols to transmit. Each symbol carries log2(M) bits: 1 for BPSK, OOK, DBPSK, 2-FSK and MSK, 2 for QPSK, 4-PAM, DQPSK and 4-FSK, 3 for 8-PSK, 4 for 16-QAM, 6 for 64-QAM, 8 for 256-QAM.");
+        Hint("How many symbols to transmit. Each symbol carries log2(M) bits: 1 for BPSK, OOK, DBPSK, 2-FSK and MSK, 2 for QPSK, OQPSK, 4-PAM, 4-ASK, DQPSK, pi/4-DQPSK and 4-FSK, 3 for 8-PSK and 8-DPSK, 4 for 16-QAM, 5 for 32-QAM, 6 for 64-QAM, 8 for 256-QAM.");
         ImGui::InputDouble("Symbol rate (Bd)", &config_.symbol_rate_baud, 100, 1000, "%.6g");
         Hint("Symbols per second. Together with samples per symbol it sets the sample rate.");
         ImGui::InputInt("Samples per symbol", &config_.samples_per_symbol);

@@ -72,6 +72,9 @@ struct GeneratedSignal {
 };
 // True when the signal is a linear symbol train shaped by an RRC pulse.
 bool uses_rrc(const GenerationConfig& config);
+// Samples by which the quadrature stream lags the in-phase stream: half a
+// symbol for OQPSK, zero otherwise. It lengthens the buffer by the same amount.
+std::size_t quadrature_delay_samples(const GenerationConfig& config);
 // Effective tone spacing: the configured value, or symbol rate / 2 for MSK.
 double fsk_tone_spacing_hz(const GenerationConfig& config);
 // Modulation index h = tone spacing / symbol rate.

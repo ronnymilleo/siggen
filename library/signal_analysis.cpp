@@ -24,7 +24,8 @@ SymbolObservations matched_symbols(const GeneratedSignal& r) {
     const auto count = static_cast<std::size_t>(r.config.symbol_count);
     auto taps = uses_rrc(r.config) ? RRCFilter(r.config.roll_off, r.config.span_symbols, r.config.samples_per_symbol)
                                           : std::vector<double>(sps, 1. / sps);
-    const auto expected = (count - 1) * sps + taps.size();
+    const auto q_delay = quadrature_delay_samples(r.config);
+    const auto expected = (count - 1) * sps + taps.size() + q_delay;
     if (r.samples.size() != expected || r.symbols.size() != count ||
         r.filter_delay_samples != (uses_rrc(r.config) ? (taps.size()-1)/2 : 0))
         throw std::invalid_argument("Signal dimensions or delay do not match configuration");
@@ -37,6 +38,11 @@ SymbolObservations matched_symbols(const GeneratedSignal& r) {
         const auto index = uses_rrc(r.config) ? 2 * r.filter_delay_samples + k * sps : k * sps + sps - 1;
         std::complex<double> value{};
         for (std::size_t j = 0; j < taps.size(); ++j) value += std::complex<double>(r.samples[index - j]) * taps[j];
+        if (q_delay != 0) { // OQPSK: the quadrature decision instant lags by half a symbol.
+            double quadrature = 0;
+            for (std::size_t j = 0; j < taps.size(); ++j) quadrature += r.samples[index + q_delay - j].imag() * taps[j];
+            value = {value.real(), quadrature};
+        }
         result.values.emplace_back(value);
         result.symbol_indices.push_back(k);
     }

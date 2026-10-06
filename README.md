@@ -3,10 +3,12 @@
 [![CI](https://github.com/ronnymilleo/siggen/actions/workflows/ci.yml/badge.svg)](https://github.com/ronnymilleo/siggen/actions/workflows/ci.yml)
 
 A C++23 signal generator with a command-line interface and optional ImGui/ImPlot
-GUI. Generate reproducible complex I/Q samples for BPSK, QPSK, Gray-coded 8-PSK,
-Gray-coded square 16-QAM, Gray-coded square 64-QAM, and complex white Gaussian
-noise (WGN), with optional AWGN on linear signals; inspect waveforms,
-constellations and a two-sided spectrum; save presets; export single signals; and
+GUI. Generate reproducible complex I/Q samples for BPSK, QPSK, OQPSK, pi/4-DQPSK,
+DBPSK, DQPSK, 8-PSK, 8-DPSK, 4-ASK, OOK, 4-PAM, 16/32/64/256-QAM, 2-FSK, 4-FSK, MSK,
+and complex white Gaussian noise (WGN), with optional AWGN and simple channel
+impairments on linear signals; inspect waveforms, constellations, eye diagrams,
+a two-sided spectrum and measurements (PAPR, EVM, measured SNR); work through
+guided lesson presets; save presets; export single signals; and
 generate swept fixed-length frame datasets (`siggen batch`) for classifier
 training. This application generates complex baseband, not an RF carrier.
 
@@ -19,6 +21,9 @@ training. This application generates complex baseband, not an RF carrier.
 
   <img width="900" src="docs/images/gui-spectrum.png" alt="Spectrum tab showing the two-sided Welch PSD" />
   <p align="center"><em>Spectrum - two-sided Welch PSD</em></p>
+
+  <img width="900" src="docs/images/gui-eye.png" alt="Eye tab showing the eye diagram of 16-QAM" />
+  <p align="center"><em>Eye - overlaid symbol-period traces</em></p>
 </div>
 
 ## Build and test
@@ -140,8 +145,8 @@ current directory, then exits. Use `--gui` to open the desktop interface instead
 Configuration resolves as **defaults → loaded preset → explicitly supplied CLI
 options**, then validates through the shared library; options that were not
 supplied never replace preset values. Modulation names (`BPSK`, `QPSK`, `8-PSK`,
-`16-QAM`, `64-QAM`, `256-QAM`, `OOK`, `4-PAM`, `DBPSK`, `DQPSK`, `2-FSK`,
-`4-FSK`, `MSK`, `WGN`) are accepted case-insensitively; pulse names are
+`16-QAM`, `32-QAM`, `64-QAM`, `256-QAM`, `OOK`, `4-PAM`, `DBPSK`, `DQPSK`,
+`pi/4-DQPSK`, `8-DPSK`, `OQPSK`, `4-ASK`, `2-FSK`, `4-FSK`, `MSK`, `WGN`) are accepted case-insensitively; pulse names are
 `rrc` and `rectangular`. Signal options are `--preset`, `--modulation`,
 `--symbols`, `--symbol-rate`, `--sps`, `--pulse`, `--roll-off`, `--span`,
 `--tone-spacing-hz` (2-FSK and 4-FSK only), `--gain`, `--seed`,
@@ -277,7 +282,7 @@ amplitude gain in **Signal Setup**. Choose RRC or rectangular pulses in **Pulse
 Shaping**. The **AWGN** section enables additive noise with a requested SNR in
 dB; the visible data seed defaults to 5489 and the noise seed to 5490.
 **Advanced** selects seeded random bits or exact explicit binary input (up to
-six bits per symbol). Selecting **WGN** replaces the symbol controls with the
+eight bits per symbol). Selecting **WGN** replaces the symbol controls with the
 noise source: sample count, sample rate, total complex noise power, and noise
 seed.
 
@@ -326,14 +331,14 @@ Hamming, Blackman or Rectangular. Hann output is unchanged from earlier releases
 preset header are notes: parsers ignore them and the GUI shows them after
 **Load Preset**, so a lesson can say what to look at (for example
 `presets/02-qpsk-snr-8db.preset`). Lessons 11–16 cover 2-FSK, MSK, DQPSK under a
-carrier offset, 4-PAM, 256-QAM and OOK. Controls also have hover tooltips.
+carrier offset, 4-PAM, 256-QAM and OOK; lessons 17–21 cover OQPSK, pi/4-DQPSK, 32-QAM, 8-DPSK and 4-ASK. Controls also have hover tooltips.
 
 ## Mapping and reproducibility
 
 Mapped symbols have **unit average constellation energy**, before amplitude gain.
 A particular random buffer need not have exactly unit empirical symbol energy.
 There is no per-buffer renormalization. QPSK has two bits per symbol; 8-PSK
-three; 16-QAM four; 64-QAM six; 256-QAM eight. Bits are consumed left to right in
+three; 16-QAM four; 32-QAM five; 64-QAM six; 256-QAM eight. Bits are consumed left to right in
 symbol order.
 
 | Modulation | Bits | Complex symbol before gain |
@@ -416,6 +421,47 @@ away from the reference. A receiver recovers the data from `s[k] * conj(s[k-1])`
 which is unchanged by a constant phase rotation of the channel. The
 matched-filter constellation of a DQPSK signal with a carrier offset therefore
 spins, yet each symbol-to-symbol step stays near its transmitted value.
+
+### 32-QAM, OQPSK and pi/4-DQPSK
+
+**32-QAM** is the cross constellation: the 6 x 6 grid of odd levels
+`-5, -3, -1, +1, +3, +5` on each axis without its four corner points, divided by
+`sqrt(20)` for unit average energy (the energies sum to 640 over 32 points). Five
+bits select a point: the first two choose the quadrant (`00` +,+; `01` -,+; `11`
+-,-; `10` +,-) and the last three one of eight points of that quadrant. With the
+point written as `(x, y)` in the first quadrant, labels `000`..`111` map to
+`(1,1) (3,1) (5,1) (5,3) (1,3) (3,3) (1,5) (3,5)`, mirrored into the other
+quadrants. A cross constellation cannot be fully Gray labelled (one point has four
+nearest neighbours but a 3-bit label only three one-bit neighbours), so this
+assignment, found by exhaustive search, is the best possible: neighbours across an
+axis always differ in one bit, eight of the ten neighbour pairs inside a quadrant
+differ in one bit, and the other two in two bits.
+
+**OQPSK** (offset QPSK) uses the QPSK mapping, but the quadrature stream lags the
+in-phase stream by half a symbol. The two bits of a symbol therefore change at
+different instants, so the phase can only move by 90 degrees at a time and the
+envelope varies less than in QPSK. It needs an even samples-per-symbol value, and
+the buffer is `SPS / 2` samples longer than the QPSK buffer because of the delay.
+The matched-filter decision for Q is taken `SPS / 2` samples after the one for I,
+and the eye diagram centres the Q traces accordingly.
+
+**pi/4-DQPSK** carries the data in phase changes of `+45`, `+135`, `-135` or `-45`
+degrees for bit pairs `00`, `01`, `11`, `10`. The reference phase before the first
+symbol is 0. Every step is an odd multiple of 45 degrees, so the symbols alternate
+between two QPSK sets (offset by 45 degrees), never change phase by 180 degrees, and
+the envelope never passes through the origin. Symbols have unit energy.
+
+**8-DPSK** carries three bits per symbol as a phase change of `0` to `7` steps of
+45 degrees, using the same Gray label order as 8-PSK (`000, 001, 011, 010, 110,
+111, 101, 100` turn the phase by `0, 1, 2, 3, 4, 5, 6, 7` steps). The reference
+phase before the first symbol is 0, so a first label of `000` starts at phase 0.
+The symbol is `exp(j*phi[k])` with unit energy, and like DQPSK the data is
+recovered from `s[k] * conj(s[k-1])`, which a constant channel phase does not change.
+
+**4-ASK** is unipolar amplitude shift keying: Gray labels `00, 01, 11, 10` select
+the amplitudes `0, 1, 2, 3`, divided by `sqrt(3.5)` for unit mean energy (the energies
+`0, 1, 4, 9` average 3.5). Q is zero. Unlike the bipolar 4-PAM, the symbols have a non-zero
+mean, so the spectrum has a strong 0 Hz line, as with OOK (which is 2-ASK).
 
 ## Frequency modulation: 2-FSK, 4-FSK and MSK
 
@@ -576,8 +622,9 @@ results show waveform, spectrum and power statistics without any symbol
 constellation. FSK and MSK results replace the constellation and eye with a
 **Frequency** tab (see "Frequency modulation").
 
-**Spectrum** uses full complex samples, independent of waveform reduction. The
-Welch estimator uses a periodic Hann window, 50% overlap, no mean subtraction,
+**Eye** overlays two-symbol-period traces of the matched-filter I and Q (OQPSK
+shows the half-symbol Q offset). **Spectrum** uses full complex samples, independent of waveform reduction. The
+Welch estimator uses a periodic window (Hann by default, see above), 50% overlap, no mean subtraction,
 and an unnormalized forward FFT with negative exponent. The default segment size
 is 1024; shorter buffers use the largest power of two that fits, with a minimum
 of four samples. Only complete segments contribute; an incomplete trailing
@@ -624,8 +671,8 @@ All version-2 fields are required; version 3 additionally requires the impairmen
 fields listed in "Channel impairments". Version 4 is written for 2-FSK, 4-FSK and
 MSK: it adds `ToneSpacingHz` and always includes the impairment fields, and FSK
 waveforms are rejected in older versions. Version 1 only knows BPSK, QPSK and
-16-QAM. Modulation accepts `BPSK`, `QPSK`, `8-PSK`, `16-QAM`, `64-QAM`, `256-QAM`,
-`OOK`, `4-PAM`, `DBPSK`, `DQPSK`, `2-FSK`, `4-FSK`, `MSK`, `WGN` case-insensitively; pulse accepts `RRC`,
+16-QAM. Modulation accepts `BPSK`, `QPSK`, `8-PSK`, `16-QAM`, `32-QAM`, `64-QAM`, `256-QAM`,
+`OOK`, `4-PAM`, `DBPSK`, `DQPSK`, `pi/4-DQPSK`, `8-DPSK`, `OQPSK`, `4-ASK`, `2-FSK`, `4-FSK`, `MSK`, `WGN` case-insensitively; pulse accepts `RRC`,
 `Rectangular`; source accepts `Random`, `Explicit`; booleans accept `true`,
 `false`. Numbers use a locale-independent decimal point.
 Unknown/duplicate fields, unsupported versions, non-finite numbers, and trailing
@@ -689,7 +736,10 @@ assert len(iq) == metadata["sample_count"]
 - `library/batch.*`: fixed-length frame generation, seed derivation and the
   manifest-writing batch writer.
 - `library/signal_processing.*`: stable RRC taps and convolution.
-- `library/signal_analysis.*`: matched observations and Welch PSD.
+- `library/signal_analysis.*`: matched observations and Welch PSD with selectable window.
+- `library/measurements.*`: power statistics (PAPR), EVM, measured SNR and eye traces.
+- `library/impairments.*`: carrier offset, phase noise, IQ imbalance, DC offset and quantization.
+- `presets/`: guided lesson presets (`NN-name.preset`, with `#` note lines).
 - `library/preset.*`, `library/iq_export.*`: validated file I/O.
 - `application/command_line.h`, `application/cli_config.*`: CLI parsing and
   defaults → preset → explicit-option resolution.
@@ -741,7 +791,7 @@ sanitizer tests may need to run outside a ptrace-based sandbox. Do not disable
 leak detection to make that environment pass. macOS is built and tested in CI (headless tests plus a GUI compile); the UI smoke tests are not run there.
 
 This iteration excludes SDR streaming, RF carrier synthesis, analog modulation,
-channel impairments and eye diagrams. FSK/MSK waveforms, AMCPy-specific dataset
+GFSK/GMSK, multipath and fading, AMCPy-specific dataset
 conversion, GUI batch controls, batch resume and automatic cleanup remain
 deferred. Large RRC spans take longer to generate;
 there is no cancellation, and application closure waits for generation. The

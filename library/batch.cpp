@@ -100,7 +100,7 @@ void validate_frame_request(const GenerationConfig& base, Modulation waveform, i
     validate(config);
     const auto taps = uses_rrc(config)
                           ? static_cast<std::size_t>(config.span_symbols) * sps + 1 : sps;
-    const auto full_size = (symbols - 1) * sps + taps;
+    const auto full_size = (symbols - 1) * sps + taps + quadrature_delay_samples(config);
     const auto offset = guard * sps + (uses_rrc(config) ? (taps - 1) / 2 : 0);
     if (offset + static_cast<std::size_t>(frame_size) > full_size)
         throw std::length_error("Frame crop exceeds generated buffer");

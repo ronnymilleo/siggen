@@ -54,7 +54,8 @@ EyeDiagram eye_diagram(const GeneratedSignal& r, std::size_t max_traces) {
     const auto count = static_cast<std::size_t>(r.config.symbol_count);
     const auto taps = matched_taps(r.config);
     const bool rrc = uses_rrc(r.config);
-    if (r.samples.size() != (count - 1) * sps + taps.size())
+    const auto q_delay = quadrature_delay_samples(r.config);
+    if (r.samples.size() != (count - 1) * sps + taps.size() + q_delay)
         throw std::invalid_argument("Signal dimensions do not match configuration");
     EyeDiagram eye;
     for (std::size_t k = 0; k <= 2 * sps; ++k)
@@ -65,18 +66,21 @@ EyeDiagram eye_diagram(const GeneratedSignal& r, std::size_t max_traces) {
     const auto available = count - 2 * margin;
     const auto used = std::min(available, max_traces);
     const auto output_length = r.samples.size() + taps.size() - 1;
+    const auto filtered = [&](std::size_t n) {
+        std::complex<double> value{};
+        const auto first = n >= r.samples.size() ? n - r.samples.size() + 1 : 0;
+        for (std::size_t j = first; j < taps.size() && j <= n; ++j)
+            value += std::complex<double>(r.samples[n - j]) * taps[j];
+        return value;
+    };
     for (std::size_t t = 0; t < used; ++t) {
         const auto k = margin + t * available / used;
         const auto center = rrc ? 2 * r.filter_delay_samples + k * sps : k * sps + sps - 1;
-        if (center < sps || center + sps >= output_length) continue;
+        if (center < sps || center + q_delay + sps >= output_length) continue;
         std::vector<double> in_phase, quadrature;
         for (std::size_t n = center - sps; n <= center + sps; ++n) {
-            std::complex<double> value{};
-            const auto first = n >= r.samples.size() ? n - r.samples.size() + 1 : 0;
-            for (std::size_t j = first; j < taps.size() && j <= n; ++j)
-                value += std::complex<double>(r.samples[n - j]) * taps[j];
-            in_phase.push_back(value.real());
-            quadrature.push_back(value.imag());
+            in_phase.push_back(filtered(n).real());
+            quadrature.push_back(filtered(n + q_delay).imag()); // OQPSK: Q is centred half a symbol later.
         }
         eye.in_phase.push_back(std::move(in_phase));
         eye.quadrature.push_back(std::move(quadrature));

@@ -17,6 +17,12 @@ namespace {
 constexpr int psk8_phase_index[8] = {0, 1, 3, 2, 7, 6, 4, 5};
 // 64-QAM axis levels by three-bit Gray label, ascending amplitude order, /sqrt(42).
 constexpr int qam64_axis_level[8] = {-7, -5, -1, -3, 7, 5, 1, 3};
+// 32-QAM cross, odd-integer (x, y) of the eight points of the first quadrant (the 3x3 grid
+// without its corner (5,5)), indexed by the three-bit label value. The grid has a point with four
+// neighbours, so a full Gray labelling does not exist; this assignment (found by exhaustive search)
+// minimises the worst Hamming distance between nearest neighbours: eight of the ten in-quadrant
+// neighbour pairs differ in one bit, the other two in two bits.
+constexpr int qam32_quadrant_point[8][2] = {{1, 1}, {3, 1}, {5, 1}, {5, 3}, {1, 3}, {3, 3}, {1, 5}, {3, 5}};
 // Inverse of the binary-reflected Gray code: label -> ascending level index.
 int gray_index(int label) {
     int index = label;
@@ -86,6 +92,9 @@ void generate_fsk(GeneratedSignal& result, const std::string& bits) {
 bool uses_rrc(const GenerationConfig& c) {
     return waveform_family(c.modulation) == Family::Linear && c.pulse == Pulse::RRC;
 }
+std::size_t quadrature_delay_samples(const GenerationConfig& c) {
+    return c.modulation == Modulation::OQPSK ? static_cast<std::size_t>(c.samples_per_symbol) / 2 : 0;
+}
 double fsk_tone_spacing_hz(const GenerationConfig& c) {
     return c.modulation == Modulation::MSK ? c.symbol_rate_baud * MSK_MODULATION_INDEX : c.tone_spacing_hz;
 }
@@ -125,7 +134,9 @@ void validate(const GenerationConfig& c) {
     if (info.family != Family::Fsk && c.pulse == Pulse::RRC && (c.samples_per_symbol < 2 || (c.span_symbols * c.samples_per_symbol) % 2))
         throw std::invalid_argument("RRC needs SPS >= 2 and even span * SPS");
     const auto sps = static_cast<std::size_t>(c.samples_per_symbol);
-    const auto tail = uses_rrc(c) ? static_cast<std::size_t>(c.span_symbols) * sps + 1 : sps;
+    if (c.modulation == Modulation::OQPSK && (c.samples_per_symbol < 2 || c.samples_per_symbol % 2))
+        throw std::invalid_argument("OQPSK needs an even samples per symbol (the quadrature stream lags by half a symbol)");
+    const auto tail = (uses_rrc(c) ? static_cast<std::size_t>(c.span_symbols) * sps + 1 : sps) + quadrature_delay_samples(c);
     if (static_cast<std::size_t>(c.symbol_count - 1) > (MAX_SIGNAL_SAMPLES - tail) / sps)
         throw std::length_error("Generation exceeds sample limit");
     if (c.noise_source.sample_count < 1 || static_cast<std::size_t>(c.noise_source.sample_count) > MAX_SIGNAL_SAMPLES)
@@ -169,7 +180,7 @@ std::vector<std::complex<float>> map_symbols(Modulation modulation, const std::s
     symbols.reserve(bits.size() / bps);
     const float a = 1.f / std::sqrt(2.f);
     // Differential schemes carry state: the phase accumulates the data increments.
-    int dbpsk_state = 0, dqpsk_state = 0;
+    int dbpsk_state = 0, dqpsk_state = 0, pi4_state = 0, dpsk8_state = 0; // States count pi/4 steps modulo 8.
     for (std::size_t i = 0; i < bits.size(); i += bps) {
         const float real = bits[i] == '0' ? 1.f : -1.f;
         if (modulation == Modulation::BPSK) symbols.emplace_back(real, 0);
@@ -210,7 +221,34 @@ std::vector<std::complex<float>> map_symbols(Modulation modulation, const std::s
             static constexpr float sign_i[4] = {1.f, -1.f, -1.f, 1.f}, sign_q[4] = {1.f, 1.f, -1.f, -1.f};
             symbols.emplace_back(sign_i[dqpsk_state] * a, sign_q[dqpsk_state] * a);
         }
-        else if (modulation == Modulation::QPSK)
+        else if (modulation == Modulation::DPSK8) {
+            // Gray phase increments: labels 000, 001, 011, 010, 110, 111, 101, 100 turn the phase by 0..7 steps of pi/4.
+            dpsk8_state = (dpsk8_state + psk8_phase_index[bits_value(bits, i, 3)]) % 8;
+            const auto angle = static_cast<double>(dpsk8_state) * std::numbers::pi / 4;
+            symbols.emplace_back(static_cast<float>(std::cos(angle)), static_cast<float>(std::sin(angle)));
+        }
+        else if (modulation == Modulation::ASK4)
+            // Unipolar levels 0..3 by Gray label 00, 01, 11, 10; mean energy (0+1+4+9)/4 = 3.5.
+            symbols.emplace_back(static_cast<float>(gray_index(bits_value(bits, i, 2))) / std::sqrt(3.5f), 0);
+        else if (modulation == Modulation::PI4DQPSK) {
+            // Gray phase increments 00 -> +45, 01 -> +135, 11 -> -135, 10 -> -45 degrees (units of pi/4).
+            constexpr int increment[4] = {1, 3, 7, 5}; // Indexed by the label value 00,01,10,11.
+            pi4_state = (pi4_state + increment[bits_value(bits, i, 2)]) % 8;
+            const auto angle = static_cast<double>(pi4_state) * std::numbers::pi / 4;
+            symbols.emplace_back(static_cast<float>(std::cos(angle)), static_cast<float>(std::sin(angle)));
+        }
+        else if (modulation == Modulation::QAM32) {
+            // Cross constellation: a 6x6 grid without its four corners, unit mean energy (sum 640 / 32 = 20).
+            // Bits 0-1 pick the quadrant (00 +,+ / 01 -,+ / 11 -,- / 10 +,-), bits 2-4 the point within it;
+            // the point labels are mirrored per quadrant so neighbours across an axis differ in one bit.
+            const auto quadrant = bits_value(bits, i, 2);
+            const auto& point = qam32_quadrant_point[bits_value(bits, i + 2, 3)];
+            const float sign_x = (quadrant == 1 || quadrant == 3) ? -1.f : 1.f;
+            const float sign_y = (quadrant == 3 || quadrant == 2) ? -1.f : 1.f;
+            const auto scale = 1.f / std::sqrt(20.f);
+            symbols.emplace_back(sign_x * static_cast<float>(point[0]) * scale, sign_y * static_cast<float>(point[1]) * scale);
+        }
+        else if (modulation == Modulation::QPSK || modulation == Modulation::OQPSK)
             symbols.emplace_back(real / std::sqrt(2.f), (bits[i+1] == '0' ? 1.f : -1.f) / std::sqrt(2.f));
         else throw std::invalid_argument("Waveform has no implemented symbol mapper");
     }
@@ -249,11 +287,18 @@ GeneratedSignal generate(const GenerationConfig& config) {
         taps = RRCFilter(config.roll_off, config.span_symbols, config.samples_per_symbol);
         result.filter_delay_samples = (taps.size() - 1) / 2;
     } else taps.assign(sps, 1.);
-    result.samples.assign((result.symbols.size() - 1) * sps + taps.size(), {});
+    const auto q_delay = quadrature_delay_samples(config);
+    result.samples.assign((result.symbols.size() - 1) * sps + taps.size() + q_delay, {});
     // Sparse zero-insertion convolution, retaining the complete FIR response.
     for (std::size_t k = 0; k < result.symbols.size(); ++k)
-        for (std::size_t j = 0; j < taps.size(); ++j)
-            result.samples[k * sps + j] += result.symbols[k] * static_cast<float>(config.amplitude_gain * taps[j]);
+        for (std::size_t j = 0; j < taps.size(); ++j) {
+            const auto weight = static_cast<float>(config.amplitude_gain * taps[j]);
+            if (q_delay == 0) result.samples[k * sps + j] += result.symbols[k] * weight;
+            else { // OQPSK: the quadrature stream lags the in-phase stream by half a symbol.
+                result.samples[k * sps + j] += std::complex<float>(result.symbols[k].real() * weight, 0);
+                result.samples[k * sps + q_delay + j] += std::complex<float>(0, result.symbols[k].imag() * weight);
+            }
+        }
     finish(result);
     return result;
 }
