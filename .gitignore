@@ -54,3 +54,6 @@ imgui.ini
 *.log
 *.tmp
 *.bak
+
+# Local agent instructions
+/AGENTS.md
