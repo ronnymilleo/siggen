@@ -31,6 +31,9 @@ struct FrameResult {
     NoiseRecord noise;                        // AWGN provenance when applied.
     bool impairments_applied = false;         // Channel impairments run after AWGN on the cropped frame.
     std::uint32_t impairment_seed = 0;
+    // Preset of the full (guarded, uncropped, noise-free) buffer the frame was cut from; linear waveforms only.
+    // It lets a reader regenerate the ideal symbols and measure EVM on the frame interior.
+    std::string generator_preset;
 };
 // Generate one fixed-length frame from base.modulation. A supplied snr_db
 // enables AWGN at that value for linear waveforms; nullopt retains the base

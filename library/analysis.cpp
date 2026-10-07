@@ -46,6 +46,14 @@ AnalysisReport analyze_recording(const Recording& recording, Window window, std:
         return report;
     }
     report.waveform = modulation_name(recording.config->modulation);
+    if (recording.frame) {
+        if (const auto scoring = frame_scoring(recording)) {
+            report.accuracy = symbol_accuracy(scoring->signal, scoring->first_symbol, scoring->end_symbol);
+        }
+        if (!report.accuracy) report.note = "No symbol of this batch frame has its matched-filter window fully inside the frame: EVM skipped.";
+        else report.sample_snr_db = report.accuracy->snr_after_matched_db - report.accuracy->expected_offset_db;
+        return report;
+    }
     const auto signal = signal_from_recording(recording);
     if (!signal) {
         report.note = "The sample count does not match the embedded configuration: EVM skipped.";

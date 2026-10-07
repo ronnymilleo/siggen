@@ -346,11 +346,11 @@ TEST(Batch, SigmfFramesCarryMetadataAndAnalyze) {
     BatchRequest request;
     request.waveforms = {Modulation::QPSK};
     request.snrs_db = {10};
-    request.frame_size = 256;
+    request.frame_size = 2048;
     request.output_dir = dir;
     ASSERT_EQ(request.format, ExportFormat::SigMF);
     run_batch(request);
-    EXPECT_EQ(std::filesystem::file_size(dir / "frame_000000_000000.sigmf-data"), 256u * 8);
+    EXPECT_EQ(std::filesystem::file_size(dir / "frame_000000_000000.sigmf-data"), 2048u * 8);
     EXPECT_FALSE(std::filesystem::exists(dir / "frame_000000_000000.sigmf-data.json"));
     const auto meta = nlohmann::json::parse(read_file(dir / "frame_000000_000000.sigmf-meta"));
     EXPECT_EQ(meta.at("global").at("core:datatype"), "cf32_le");
@@ -360,7 +360,38 @@ TEST(Batch, SigmfFramesCarryMetadataAndAnalyze) {
     EXPECT_NE(manifest[0].find("\"format\":\"sigmf\""), std::string::npos);
     EXPECT_NE(manifest[1].find("\"sidecar\":\"frame_000000_000000.sigmf-meta\""), std::string::npos);
     const auto recording = read_recording(dir / "frame_000000_000000.sigmf-meta");
-    EXPECT_EQ(recording.samples.size(), 256u);
-    EXPECT_FALSE(recording.config.has_value());
-    EXPECT_NO_THROW(analyze_recording(recording));
+    EXPECT_EQ(recording.samples.size(), 2048u);
+    ASSERT_TRUE(recording.config.has_value());
+    ASSERT_TRUE(recording.frame.has_value());
+    EXPECT_EQ(recording.frame->size, 2048u);
+    // EVM is scored on the frame interior only, so it tracks the requested 10 dB per-sample SNR.
+    const auto report = analyze_recording(recording);
+    ASSERT_TRUE(report.accuracy.has_value());
+    EXPECT_GT(report.accuracy->symbol_count, 100u);
+    EXPECT_LT(report.accuracy->symbol_count, 256u);
+    EXPECT_NEAR(report.sample_snr_db, 10.0, 1.5);
+}
+
+TEST(Batch, CleanSigmfFrameScoresAlmostZeroEvm) {
+    const auto dir = unique_dir("iq-batch-sigmf-clean-");
+    BatchRequest request;
+    request.waveforms = {Modulation::QAM16};
+    request.frame_size = 1024;
+    request.base.awgn.enabled = false;
+    request.output_dir = dir;
+    run_batch(request);
+    const auto report = analyze_recording(read_recording(dir / "frame_000000_000000.sigmf-meta"));
+    ASSERT_TRUE(report.accuracy.has_value());
+    EXPECT_LT(report.accuracy->evm_rms, 0.01);
+}
+
+TEST(Batch, WgnSigmfFrameHasNoEvm) {
+    const auto dir = unique_dir("iq-batch-sigmf-wgn-");
+    BatchRequest request;
+    request.waveforms = {Modulation::WGN};
+    request.frame_size = 256;
+    request.output_dir = dir;
+    run_batch(request);
+    const auto report = analyze_recording(read_recording(dir / "frame_000000_000000.sigmf-meta"));
+    EXPECT_FALSE(report.accuracy.has_value());
 }

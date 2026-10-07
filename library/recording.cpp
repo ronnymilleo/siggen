@@ -1,6 +1,7 @@
 #include "recording.h"
 #include "preset.h"
 #include <nlohmann/json.hpp>
+#include <algorithm>
 #include <bit>
 #include <cmath>
 #include <cstdint>
@@ -80,6 +81,12 @@ Recording read_sigmf(std::filesystem::path meta_path) {
     if (global.contains("siggen:preset") && global.at("siggen:preset").is_string()) {
         try { recording.config = parse_preset(global.at("siggen:preset").get<std::string>()); } catch (const std::exception&) {}
     }
+    if (global.contains("siggen:frame") && global.at("siggen:frame").is_object()) {
+        const auto& frame = global.at("siggen:frame");
+        if (frame.contains("crop_offset_samples") && frame.contains("frame_size") && frame.at("crop_offset_samples").is_number_unsigned() &&
+            frame.at("frame_size").is_number_unsigned())
+            recording.frame = Recording::Frame{frame.at("crop_offset_samples").get<std::size_t>(), frame.at("frame_size").get<std::size_t>()};
+    }
     return recording;
 }
 Recording read_siggen_binary(const std::filesystem::path& path) {
@@ -104,10 +111,28 @@ Recording read_recording(const std::filesystem::path& path) {
     return read_siggen_binary(path);
 }
 std::optional<GeneratedSignal> signal_from_recording(const Recording& recording) {
-    if (!recording.config) return std::nullopt;
+    if (!recording.config || recording.frame) return std::nullopt;
     auto signal = generate(*recording.config);
     if (signal.samples.size() != recording.samples.size()) return std::nullopt;
     signal.samples = recording.samples;
     return signal;
+}
+std::optional<FrameScoring> frame_scoring(const Recording& recording) {
+    if (!recording.config || !recording.frame || waveform_family(recording.config->modulation) != Family::Linear) return std::nullopt;
+    const auto [offset, size] = *recording.frame;
+    if (size != recording.samples.size()) return std::nullopt;
+    FrameScoring scoring{generate(*recording.config), 0, 0};
+    auto& signal = scoring.signal;
+    if (offset + size > signal.samples.size()) return std::nullopt;
+    std::copy(recording.samples.begin(), recording.samples.end(), signal.samples.begin() + static_cast<std::ptrdiff_t>(offset));
+    const auto sps = static_cast<std::size_t>(signal.config.samples_per_symbol);
+    // The matched filter for symbol k reads samples [k*sps, k*sps + taps - 1 + quadrature delay] (see matched_symbols).
+    const auto taps = uses_rrc(signal.config) ? 2 * signal.filter_delay_samples + 1 : sps;
+    const auto reach = taps - 1 + quadrature_delay_samples(signal.config);
+    scoring.first_symbol = (offset + sps - 1) / sps;
+    if (offset + size < reach + 1) return std::nullopt;
+    scoring.end_symbol = (offset + size - 1 - reach) / sps + 1;
+    if (scoring.end_symbol <= scoring.first_symbol) return std::nullopt;
+    return scoring;
 }
 }

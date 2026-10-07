@@ -115,7 +115,7 @@ realizations.
 
 The output directory must not exist; existing directories are never touched.
 Files are named `frame_<point>_<frame>` with zero-padded indices preserving
-user list order, each with its metadata file: `<name>.sigmf-meta` for SigMF (the frame description sits under `siggen:metadata`, so any SigMF tool and `siggen analyze` open the frames) or `<file>.json` for CSV. A versioned
+user list order, each with its metadata file: `<name>.sigmf-meta` for SigMF (any SigMF tool opens the frames; the frame description sits under `siggen:metadata`, with the generator preset and crop position beside it so `siggen analyze` can report EVM on the frame interior) or `<file>.json` for CSV. A versioned
 `manifest.jsonl` starts with a `batch_header` record, gains one `frame`
 completion record (relative path, waveform, axis values, derived seeds, frame
 size, format, and crop/noise provenance) appended and flushed only after that

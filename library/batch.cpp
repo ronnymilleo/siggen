@@ -1,6 +1,7 @@
 #include "batch.h"
 #include "impairments.h"
 #include "noise.h"
+#include "preset.h"
 #include "signal_processing.h"
 #include <algorithm>
 #include <cmath>
@@ -137,6 +138,7 @@ FrameResult generate_frame(const GenerationConfig& base, int frame_size, std::si
     const auto guard = uses_rrc(config) ? static_cast<std::size_t>(config.span_symbols) : 0;
     config.symbol_count = static_cast<int>(payload + 2 * guard);
     auto full = generate(config);
+    frame.generator_preset = serialize_preset(config);
     frame.crop_offset = guard * sps + full.filter_delay_samples;
     frame.filter_delay_samples = full.filter_delay_samples;
     frame.sample_rate_hz = full.sample_rate_hz;
@@ -264,7 +266,12 @@ std::string sigmf_frame_metadata(const FrameResult& frame, const std::string& si
     while (!detail.empty() && (detail.back() == '\n' || detail.back() == ' ')) detail.pop_back();
     out << "{\n  \"global\": {\n    \"core:datatype\": \"cf32_le\",\n    \"core:sample_rate\": " << frame.sample_rate_hz
         << ",\n    \"core:version\": \"1.0.0\",\n    \"core:description\": \"Synthetic frame from siggen batch\""
-        << ",\n    \"core:recorder\": \"siggen\",\n    \"siggen:metadata\": " << detail
+        << ",\n    \"core:recorder\": \"siggen\"";
+    if (!frame.generator_preset.empty())
+        out << ",\n    \"siggen:preset\": " << json_quote(frame.generator_preset)
+            << ",\n    \"siggen:frame\": {\"crop_offset_samples\": " << frame.crop_offset
+            << ", \"frame_size\": " << frame.samples.size() << "}";
+    out << ",\n    \"siggen:metadata\": " << detail
         << "\n  },\n  \"captures\": [\n    {\"core:sample_start\": 0, \"core:frequency\": 0}\n  ],\n  \"annotations\": []\n}\n";
     return out.str();
 }

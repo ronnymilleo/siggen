@@ -25,6 +25,9 @@ struct SymbolAccuracy {
 };
 // Empty for noise sources and for signals without steady-state symbols.
 std::optional<SymbolAccuracy> symbol_accuracy(const GeneratedSignal& signal);
+// Same, restricted to symbols with index in [first_symbol, end_symbol); used to score the part of a
+// buffer that carries real data (for example the interior of a batch frame).
+std::optional<SymbolAccuracy> symbol_accuracy(const GeneratedSignal& signal, std::size_t first_symbol, std::size_t end_symbol);
 
 // Overlaid matched-filter traces, each spanning two symbol periods centred on
 // a symbol decision instant, for the eye diagram.
