@@ -1,4 +1,5 @@
 #include "theory.h"
+#include <algorithm>
 #include <cmath>
 #include <numbers>
 namespace iq {
