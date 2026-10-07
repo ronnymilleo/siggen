@@ -3,21 +3,94 @@
 #include <cmath>
 #include <cstdio>
 #include <cstring>
+#include <filesystem>
 #include <fstream>
+#include <iterator>
 #include <memory>
 #include <stdexcept>
 #include <utility>
 
 #define STB_IMAGE_WRITE_STATIC
 #define STB_IMAGE_WRITE_IMPLEMENTATION
+#define STBTT_STATIC
+#define STB_TRUETYPE_IMPLEMENTATION
 #include "stb_easy_font.h"
 #include "stb_image_write.h"
+#include "stb_truetype.h"
 
 namespace iq {
 namespace {
 struct Pt {
     double x, y;
 };
+
+// The UI font the application itself prefers, so exported text matches the window. Loaded once;
+// when none is installed, `ok` is false and text falls back to a small built-in bitmap font.
+struct SystemFont {
+    std::vector<unsigned char> data;
+    stbtt_fontinfo info{};
+    bool ok = false;
+    SystemFont() {
+        constexpr const char* candidates[] = {
+#ifdef __APPLE__
+            "/System/Library/Fonts/Helvetica.ttc",
+#else
+            "/usr/share/fonts/truetype/inter/Inter-Regular.ttf",
+            "/usr/share/fonts/truetype/noto/NotoSans-Regular.ttf",
+            "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf",
+            "/usr/share/fonts/truetype/liberation/LiberationSans-Regular.ttf",
+#endif
+            "/usr/share/fonts/opentype/inter/Inter-Regular.otf",
+            "/usr/share/fonts/TTF/DejaVuSans.ttf",
+            "C:/Windows/Fonts/segoeui.ttf",
+            "C:/Windows/Fonts/arial.ttf",
+        };
+        for (const char* path : candidates) {
+            std::error_code ec;
+            if (!std::filesystem::exists(path, ec)) continue;
+            std::ifstream in(path, std::ios::binary);
+            data.assign(std::istreambuf_iterator<char>(in), std::istreambuf_iterator<char>());
+            if (!data.empty() && stbtt_InitFont(&info, data.data(), stbtt_GetFontOffsetForIndex(data.data(), 0))) {
+                ok = true;
+                return;
+            }
+        }
+    }
+    static const SystemFont& get() {
+        static const SystemFont font;
+        return font;
+    }
+};
+// Decodes UTF-8; invalid bytes become '?'.
+std::vector<int> codepoints(const std::string& s) {
+    std::vector<int> out;
+    for (std::size_t i = 0; i < s.size();) {
+        const auto b = static_cast<unsigned char>(s[i]);
+        int n = b < 0x80 ? 1 : (b >> 5) == 6 ? 2 : (b >> 4) == 14 ? 3 : (b >> 3) == 30 ? 4 : 0;
+        if (!n || i + static_cast<std::size_t>(n) > s.size()) {
+            out.push_back('?');
+            ++i;
+            continue;
+        }
+        int cp = n == 1 ? b : b & (0xFF >> (n + 1));
+        for (int j = 1; j < n; ++j) cp = (cp << 6) | (static_cast<unsigned char>(s[i + static_cast<std::size_t>(j)]) & 0x3F);
+        out.push_back(cp);
+        i += static_cast<std::size_t>(n);
+    }
+    return out;
+}
+double ttf_width(const stbtt_fontinfo& info, const std::string& s, double px) {
+    const float sc = stbtt_ScaleForMappingEmToPixels(&info, static_cast<float>(px));
+    double w = 0;
+    const auto cps = codepoints(s);
+    for (std::size_t i = 0; i < cps.size(); ++i) {
+        int adv = 0, lsb = 0;
+        stbtt_GetCodepointHMetrics(&info, cps[i], &adv, &lsb);
+        w += adv * sc;
+        if (i + 1 < cps.size()) w += stbtt_GetCodepointKernAdvance(&info, cps[i], cps[i + 1]) * sc;
+    }
+    return w;
+}
 enum class Anchor { Start, Middle, End };
 
 // Everything the layout needs from a backend. Coordinates are output pixels, y down.
@@ -37,12 +110,14 @@ public:
     }
 };
 
+// Dark follows the application's own palette (slate surfaces, muted axis text, faint white grid).
 struct Theme {
-    Rgb background, plot_background, foreground, grid;
+    Rgb background, plot_background, foreground, muted, border, grid;
+    double grid_alpha;
 };
 Theme theme_for(bool dark) {
-    if (dark) return {{24, 26, 31}, {32, 35, 41}, {232, 234, 238}, {64, 68, 77}};
-    return {{255, 255, 255}, {255, 255, 255}, {32, 36, 44}, {226, 229, 234}};
+    if (dark) return {{27, 31, 39}, {19, 22, 28}, {224, 228, 235}, {139, 148, 163}, {52, 59, 72}, {255, 255, 255}, 0.08};
+    return {{255, 255, 255}, {247, 248, 250}, {28, 32, 40}, {95, 104, 120}, {205, 210, 220}, {0, 0, 0}, 0.08};
 }
 
 double pow10i(int e) { return std::pow(10.0, e); }
@@ -133,28 +208,28 @@ void draw_panel(Canvas& c, const Theme& th, const Panel& panel, Axes a, double k
     c.fill_rect(a.x0, a.y0, a.w, a.h, th.plot_background, 1);
     const auto xt = nice_ticks(a.xlo, a.xhi, std::clamp(static_cast<int>(a.w / (95 * k)), 3, 12));
     const auto yt = nice_ticks(a.ylo, a.yhi, std::clamp(static_cast<int>(a.h / (55 * k)), 2, 10));
-    for (double t : xt) c.line(a.px(t), a.y0, a.px(t), a.y0 + a.h, th.grid, 1, std::max(1.0, k));
-    for (double t : yt) c.line(a.x0, a.py(t), a.x0 + a.w, a.py(t), th.grid, 1, std::max(1.0, k));
-    if (panel.zero_line && a.ylo < 0 && a.yhi > 0) c.line(a.x0, a.py(0), a.x0 + a.w, a.py(0), th.foreground, 0.45, std::max(1.2, 1.5 * k));
+    for (double t : xt) c.line(a.px(t), a.y0, a.px(t), a.y0 + a.h, th.grid, th.grid_alpha, std::max(1.0, k));
+    for (double t : yt) c.line(a.x0, a.py(t), a.x0 + a.w, a.py(t), th.grid, th.grid_alpha, std::max(1.0, k));
+    if (panel.zero_line && a.ylo < 0 && a.yhi > 0) c.line(a.x0, a.py(0), a.x0 + a.w, a.py(0), th.muted, 0.6, std::max(1.2, 1.5 * k));
     c.clip(a.x0, a.y0, a.w, a.h);
     for (const auto& s : panel.series) draw_series(c, a, s, k);
     c.unclip();
     // Frame.
     const double fw = std::max(1.0, 1.4 * k);
-    c.polyline({{a.x0, a.y0}, {a.x0 + a.w, a.y0}, {a.x0 + a.w, a.y0 + a.h}, {a.x0, a.y0 + a.h}, {a.x0, a.y0}}, th.foreground, 0.7, fw);
+    c.polyline({{a.x0, a.y0}, {a.x0 + a.w, a.y0}, {a.x0 + a.w, a.y0 + a.h}, {a.x0, a.y0 + a.h}, {a.x0, a.y0}}, th.border, 1, fw);
     const double xstep = xt.size() >= 2 ? xt[1] - xt[0] : 1, ystep = yt.size() >= 2 ? yt[1] - yt[0] : 1;
     for (double t : xt) {
-        c.line(a.px(t), a.y0 + a.h, a.px(t), a.y0 + a.h + 5 * k, th.foreground, 0.7, fw);
-        c.text(a.px(t), a.y0 + a.h + 5 * k + ft * 1.05, format_tick(t, xstep), ft, th.foreground, Anchor::Middle, false);
+        c.line(a.px(t), a.y0 + a.h, a.px(t), a.y0 + a.h + 5 * k, th.muted, 0.7, fw);
+        c.text(a.px(t), a.y0 + a.h + 5 * k + ft * 1.05, format_tick(t, xstep), ft, th.muted, Anchor::Middle, false);
     }
     for (double t : yt) {
-        c.line(a.x0 - 5 * k, a.py(t), a.x0, a.py(t), th.foreground, 0.7, fw);
-        c.text(a.x0 - 9 * k, a.py(t) + ft * 0.35, format_tick(t, ystep), ft, th.foreground, Anchor::End, false);
+        c.line(a.x0 - 5 * k, a.py(t), a.x0, a.py(t), th.muted, 0.7, fw);
+        c.text(a.x0 - 9 * k, a.py(t) + ft * 0.35, format_tick(t, ystep), ft, th.muted, Anchor::End, false);
     }
     if (!panel.x_label.empty())
-        c.text(a.x0 + a.w / 2, a.y0 + a.h + 5 * k + ft * 1.05 + 8 * k + fl, panel.x_label, fl, th.foreground, Anchor::Middle, false);
+        c.text(a.x0 + a.w / 2, a.y0 + a.h + 5 * k + ft * 1.05 + 8 * k + fl, panel.x_label, fl, th.muted, Anchor::Middle, false);
     if (!panel.y_label.empty())
-        c.text(a.x0 - 66 * k, a.y0 + a.h / 2, panel.y_label, fl, th.foreground, Anchor::Middle, true);
+        c.text(a.x0 - 66 * k, a.y0 + a.h / 2, panel.y_label, fl, th.muted, Anchor::Middle, true);
     if (!panel.title.empty()) c.text(a.x0, a.y0 - 9 * k, panel.title, fp, th.foreground, Anchor::Start, false);
     // Legend: in the header row when the panel has a title (stacked panels), otherwise inside the plot, top right.
     double text_w = 0, header_w = 0;
@@ -176,8 +251,8 @@ void draw_panel(Canvas& c, const Theme& th, const Panel& panel, Axes a, double k
     } else if (rows) {
         const double row = 21 * k, bw = 44 * k + text_w, bh = row * static_cast<double>(rows) + 8 * k;
         const double bx = a.x0 + a.w - bw - 10 * k, by = a.y0 + 10 * k;
-        c.fill_rect(bx, by, bw, bh, th.plot_background, 0.88);
-        c.polyline({{bx, by}, {bx + bw, by}, {bx + bw, by + bh}, {bx, by + bh}, {bx, by}}, th.grid, 1, std::max(1.0, k));
+        c.fill_rect(bx, by, bw, bh, th.background, 0.9);
+        c.polyline({{bx, by}, {bx + bw, by}, {bx + bw, by + bh}, {bx, by + bh}, {bx, by}}, th.border, 1, std::max(1.0, k));
         double y = by + 4 * k + row / 2;
         for (const auto& s : panel.series)
             if (!s.label.empty()) {
@@ -231,7 +306,7 @@ public:
         out_ += "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n";
         out_ += "<svg xmlns=\"http://www.w3.org/2000/svg\" width=\"" + std::to_string(st.width) + "\" height=\"" +
                 std::to_string(st.height) + "\" viewBox=\"0 0 " + std::to_string(st.width) + " " + std::to_string(st.height) +
-                "\" font-family=\"Helvetica, Arial, sans-serif\">\n";
+                "\" font-family=\"Inter, 'Noto Sans', 'DejaVu Sans', 'Liberation Sans', Helvetica, Arial, sans-serif\">\n";
         if (!title.empty()) out_ += "<title>" + escape(title) + "</title>\n";
     }
     std::string finish() { return out_ + "</svg>\n"; }
@@ -325,6 +400,54 @@ public:
     }
     void circle(double x, double y, double r, Rgb c, double alpha) override { segment(x * SS, y * SS, x * SS, y * SS, c, alpha, r * SS); }
     void text(double x, double y, const std::string& s, double px, Rgb c, Anchor a, bool up) override {
+        const auto& font = SystemFont::get();
+        if (font.ok) ttf_text(font.info, x, y, s, px, c, a, up);
+        else bitmap_text(x, y, s, px, c, a, up);
+    }
+    double text_width(const std::string& s, double px) override {
+        const auto& font = SystemFont::get();
+        if (font.ok) return ttf_width(font.info, s, px);
+        std::vector<char> text(s.begin(), s.end());
+        text.push_back('\0');
+        return stb_easy_font_width(text.data()) * px / 10.0;
+    }
+    void clip(double x, double y, double w, double h) override {
+        cx0_ = std::max(0, static_cast<int>(std::floor(x * SS)));
+        cy0_ = std::max(0, static_cast<int>(std::floor(y * SS)));
+        cx1_ = std::min(w_, static_cast<int>(std::ceil((x + w) * SS)));
+        cy1_ = std::min(h_, static_cast<int>(std::ceil((y + h) * SS)));
+    }
+    void unclip() override {
+        cx0_ = cy0_ = 0;
+        cx1_ = w_;
+        cy1_ = h_;
+    }
+
+private:
+    void ttf_text(const stbtt_fontinfo& info, double x, double y, const std::string& s, double px, Rgb c, Anchor a, bool up) {
+        const float sc = stbtt_ScaleForMappingEmToPixels(&info, static_cast<float>(px * SS));
+        const double width = ttf_width(info, s, px * SS);
+        double pen = a == Anchor::Start ? 0 : a == Anchor::Middle ? -width / 2 : -width;
+        const auto cps = codepoints(s);
+        for (std::size_t i = 0; i < cps.size(); ++i) {
+            int w = 0, h = 0, xoff = 0, yoff = 0;
+            const auto frac = static_cast<float>(pen - std::floor(pen));
+            unsigned char* bmp = stbtt_GetCodepointBitmapSubpixel(&info, sc, sc, frac, 0, cps[i], &w, &h, &xoff, &yoff);
+            for (int j = 0; j < h; ++j)
+                for (int k = 0; k < w; ++k) {
+                    const double lx = std::floor(pen) + xoff + k, ly = yoff + j;
+                    const int X = static_cast<int>(std::lround(up ? x * SS + ly : x * SS + lx));
+                    const int Y = static_cast<int>(std::lround(up ? y * SS - lx : y * SS + ly));
+                    if (X >= cx0_ && X < cx1_ && Y >= cy0_ && Y < cy1_) blend(X, Y, c, bmp[j * w + k] / 255.0);
+                }
+            if (bmp) stbtt_FreeBitmap(bmp, nullptr);
+            int adv = 0, lsb = 0;
+            stbtt_GetCodepointHMetrics(&info, cps[i], &adv, &lsb);
+            pen += adv * sc;
+            if (i + 1 < cps.size()) pen += stbtt_GetCodepointKernAdvance(&info, cps[i], cps[i + 1]) * sc;
+        }
+    }
+    void bitmap_text(double x, double y, const std::string& s, double px, Rgb c, Anchor a, bool up) {
         const double sc = px / 10.0 * SS;
         std::vector<char> text(s.begin(), s.end());
         text.push_back('\0');
@@ -349,24 +472,6 @@ public:
             else rect_ss(x * SS + lx[0], y * SS + ly[0], x * SS + lx[1], y * SS + ly[1], c, 1);
         }
     }
-    double text_width(const std::string& s, double px) override {
-        std::vector<char> text(s.begin(), s.end());
-        text.push_back('\0');
-        return stb_easy_font_width(text.data()) * px / 10.0;
-    }
-    void clip(double x, double y, double w, double h) override {
-        cx0_ = std::max(0, static_cast<int>(std::floor(x * SS)));
-        cy0_ = std::max(0, static_cast<int>(std::floor(y * SS)));
-        cx1_ = std::min(w_, static_cast<int>(std::ceil((x + w) * SS)));
-        cy1_ = std::min(h_, static_cast<int>(std::ceil((y + h) * SS)));
-    }
-    void unclip() override {
-        cx0_ = cy0_ = 0;
-        cx1_ = w_;
-        cy1_ = h_;
-    }
-
-private:
     std::size_t idx(int x, int y) const { return (static_cast<std::size_t>(y) * static_cast<std::size_t>(w_) + static_cast<std::size_t>(x)) * 3; }
     void blend(int x, int y, Rgb c, double a) {
         if (a <= 0) return;

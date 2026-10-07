@@ -93,7 +93,7 @@ TEST(PlotExport, SvgIsWellFormedAndEscapesText) {
     for (auto at = svg.find("</g>"); at != std::string::npos; at = svg.find("</g>", at + 1)) ++close;
     EXPECT_EQ(open, close);
     const auto dark = iq::render_svg(fig, {800, 450, true});
-    EXPECT_NE(dark.find("fill=\"#181a1f\""), std::string::npos);
+    EXPECT_NE(dark.find("fill=\"#1b1f27\""), std::string::npos);
 }
 
 TEST(PlotExport, PngHasRequestedSizeBackgroundAndSeriesColour) {
@@ -214,7 +214,7 @@ TEST(PlotFigures, BuiltFromARealSignal) {
     // Every figure renders to both formats.
     for (const auto* fig : {&waveform, &constellation, &eye, &pipeline}) {
         EXPECT_NO_THROW(iq::render_svg(*fig, {800, 600}));
-        const auto img = decode(iq::render_png(*fig, {800, 600}));
+        const auto img = decode(iq::render_png(*fig, {800, 600, false}));
         EXPECT_GT(count_near(img, {51, 153, 255}, 50), 8u);
     }
     // A request beyond the signal is clamped, not an error.

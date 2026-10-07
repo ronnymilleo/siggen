@@ -798,7 +798,7 @@ void SignalGenerator::ExportImage(bool overwrite)
         iq::ImageStyle style;
         style.width  = image_width_;
         style.height = image_height_;
-        style.dark   = image_theme_ == 1;
+        style.dark   = image_theme_ == 0;
         iq::export_figure(image_path_, *image_figure_, image_format_ == 0 ? iq::ImageFormat::PNG : iq::ImageFormat::SVG, style, overwrite);
         spdlog::info("Exported image {} ({}x{})", image_path_, style.width, style.height);
         image_status_            = std::string("Saved ") + image_path_;
@@ -837,7 +837,7 @@ void SignalGenerator::DrawImageExportDialog()
     ImGui::InputInt("Height (px)", &image_height_, 100, 400);
     image_width_  = std::clamp(image_width_, iq::MIN_IMAGE_SIZE, iq::MAX_IMAGE_SIZE);
     image_height_ = std::clamp(image_height_, iq::MIN_IMAGE_SIZE, iq::MAX_IMAGE_SIZE);
-    ImGui::Combo("Background", &image_theme_, "Light (for print)\0Dark (for dark slides)\0");
+    ImGui::Combo("Background", &image_theme_, "Dark (matches the app)\0Light (for print)\0");
     if (ImGui::Button("Save image"))
     {
         try

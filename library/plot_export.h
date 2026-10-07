@@ -40,7 +40,7 @@ struct Figure {
 struct ImageStyle {
     int width = 1600;
     int height = 900;
-    bool dark = false;         // Light (white) suits print; dark suits dark slides.
+    bool dark = true;          // Dark is the application's own look; light (white) suits print.
 };
 
 enum class ImageFormat { PNG, SVG };
