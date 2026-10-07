@@ -2,6 +2,7 @@
 #include "signal_analysis.h"
 #include "signal_processing.h"
 #include <cmath>
+#include <limits>
 #include <stdexcept>
 
 namespace iq {
@@ -27,18 +28,23 @@ PowerStatistics power_statistics(const std::vector<std::complex<float>>& samples
     return stats;
 }
 std::optional<SymbolAccuracy> symbol_accuracy(const GeneratedSignal& signal) {
+    return symbol_accuracy(signal, 0, std::numeric_limits<std::size_t>::max());
+}
+std::optional<SymbolAccuracy> symbol_accuracy(const GeneratedSignal& signal, std::size_t first_symbol, std::size_t end_symbol) {
     if (signal.family != Family::Linear) return std::nullopt;
     const auto observations = matched_symbols(signal);
-    if (observations.values.empty()) return std::nullopt;
     double error = 0, reference = 0;
+    std::size_t used = 0;
     for (std::size_t i = 0; i < observations.values.size(); ++i) {
+        if (observations.symbol_indices[i] < first_symbol || observations.symbol_indices[i] >= end_symbol) continue;
+        ++used;
         const auto ideal = std::complex<double>(signal.symbols[observations.symbol_indices[i]]) * signal.config.amplitude_gain;
         error += std::norm(std::complex<double>(observations.values[i]) - ideal);
         reference += std::norm(ideal);
     }
-    if (reference <= 0) return std::nullopt;
+    if (used == 0 || reference <= 0) return std::nullopt;
     SymbolAccuracy accuracy;
-    accuracy.symbol_count = observations.values.size();
+    accuracy.symbol_count = used;
     accuracy.evm_rms = std::sqrt(error / reference);
     // Floor keeps the dB values finite for a noiseless signal.
     accuracy.evm_db = 20 * std::log10(std::max(accuracy.evm_rms, 1e-12));

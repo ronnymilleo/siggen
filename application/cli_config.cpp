@@ -134,14 +134,14 @@ iq::GenerationConfig resolve_base(const CLI::App& source, const CommandLine& cli
 iq::GenerationConfig resolve_config(const CommandLine& cli) { return resolve_base(cli.app, cli, false); }
 
 iq::ExportFormat resolve_format(const std::string& format) {
-    if (format == "cf32") return iq::ExportFormat::BinaryFloat32;
     if (format == "csv") return iq::ExportFormat::CSV;
+    if (format == "sigmf") return iq::ExportFormat::SigMF;
     throw std::invalid_argument("Unknown --format: " + format);
 }
 
 std::string resolve_output(const CommandLine& cli) {
     if (!cli.output.empty()) return cli.output;
-    return resolve_format(cli.format) == iq::ExportFormat::CSV ? "signal.csv" : "signal.iq";
+    return resolve_format(cli.format) == iq::ExportFormat::CSV ? "signal.csv" : "signal.sigmf-data";
 }
 
 iq::BatchRequest resolve_batch(const CommandLine& cli) {
@@ -167,4 +167,12 @@ iq::BatchRequest resolve_batch(const CommandLine& cli) {
     request.format = resolve_format(cli.batch_format);
     request.output_dir = cli.output_dir;
     return request;
+}
+
+iq::Window resolve_window(const std::string& name) {
+    if (name == "hann") return iq::Window::Hann;
+    if (name == "hamming") return iq::Window::Hamming;
+    if (name == "blackman") return iq::Window::Blackman;
+    if (name == "rectangular") return iq::Window::Rectangular;
+    throw std::invalid_argument("Unknown --window: " + name);
 }

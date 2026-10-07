@@ -23,7 +23,10 @@
     },
     {
       "name": "dev",
-      "inherits": "base"
+      "inherits": "base",
+      "cacheVariables": {
+        "SIGGEN_BUILD_PYTHON": "ON"
+      }
     },
     {
       "name": "release",
@@ -36,7 +39,8 @@
       "name": "headless",
       "inherits": "base",
       "cacheVariables": {
-        "SIGGEN_BUILD_GUI": "OFF"
+        "SIGGEN_BUILD_GUI": "OFF",
+        "SIGGEN_BUILD_PYTHON": "ON"
       }
     },
     {
@@ -63,7 +67,8 @@
       "inherits": "headless",
       "cacheVariables": {
         "CMAKE_CXX_COMPILER": "g++",
-        "SIGGEN_SANITIZER": "address-undefined"
+        "SIGGEN_SANITIZER": "address-undefined",
+        "SIGGEN_BUILD_PYTHON": "OFF"
       },
       "condition": {
         "type": "equals",
@@ -76,7 +81,8 @@
       "inherits": "headless",
       "cacheVariables": {
         "CMAKE_CXX_COMPILER": "g++",
-        "SIGGEN_SANITIZER": "thread"
+        "SIGGEN_SANITIZER": "thread",
+        "SIGGEN_BUILD_PYTHON": "OFF"
       },
       "condition": {
         "type": "equals",

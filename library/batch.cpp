@@ -1,6 +1,7 @@
 #include "batch.h"
 #include "impairments.h"
 #include "noise.h"
+#include "preset.h"
 #include "signal_processing.h"
 #include <algorithm>
 #include <cmath>
@@ -39,11 +40,15 @@ std::vector<Modulation> effective_waveforms(const BatchRequest& r) {
 std::vector<std::uint32_t> effective_seeds(const BatchRequest& r) {
     return r.seeds.empty() ? std::vector<std::uint32_t>{r.base.seed} : r.seeds;
 }
+// Manifest format: how a frame is stored. Sidecars describe the sample encoding instead.
 const char* format_name(ExportFormat format) {
+    return format == ExportFormat::CSV ? "csv" : "sigmf";
+}
+const char* data_format_name(ExportFormat format) {
     return format == ExportFormat::CSV ? "csv" : "cf32_le";
 }
 const char* format_extension(ExportFormat format) {
-    return format == ExportFormat::CSV ? ".csv" : ".cf32";
+    return format == ExportFormat::CSV ? ".csv" : ".sigmf-data";
 }
 std::string frame_basename(std::size_t point_index, std::size_t frame_index) {
     std::ostringstream out;
@@ -133,6 +138,7 @@ FrameResult generate_frame(const GenerationConfig& base, int frame_size, std::si
     const auto guard = uses_rrc(config) ? static_cast<std::size_t>(config.span_symbols) : 0;
     config.symbol_count = static_cast<int>(payload + 2 * guard);
     auto full = generate(config);
+    frame.generator_preset = serialize_preset(config);
     frame.crop_offset = guard * sps + full.filter_delay_samples;
     frame.filter_delay_samples = full.filter_delay_samples;
     frame.sample_rate_hz = full.sample_rate_hz;
@@ -151,7 +157,7 @@ FrameResult generate_frame(const GenerationConfig& base, int frame_size, std::si
 }
 void validate_batch(const BatchRequest& r) {
     if (r.frames_per_point < 1) throw std::invalid_argument("Frames per point must be at least 1");
-    if (r.format != ExportFormat::CSV && r.format != ExportFormat::BinaryFloat32)
+    if (r.format != ExportFormat::CSV && r.format != ExportFormat::SigMF)
         throw std::invalid_argument("Unsupported batch format");
     if (r.output_dir.empty()) throw std::invalid_argument("Batch output directory is empty");
     if (r.base.data_source == DataSource::Explicit)
@@ -205,7 +211,7 @@ std::string frame_sidecar(const BatchRequest& r, Modulation waveform, std::uint3
     const bool fsk = waveform_family(waveform) == Family::Fsk;
     auto shaped = r.base;
     shaped.modulation = waveform;
-    out << "{\n  \"version\": 2,\n  \"kind\": \"batch_frame\",\n  \"format\": \"" << format_name(r.format)
+    out << "{\n  \"version\": 2,\n  \"kind\": \"batch_frame\",\n  \"format\": \"" << data_format_name(r.format)
         << "\",\n  \"waveform\": " << json_quote(modulation_name(waveform))
         << ",\n  \"family\": \"" << family_name(waveform_family(waveform))
         << "\",\n  \"frame_size\": " << frame.samples.size()
@@ -253,13 +259,29 @@ std::string frame_sidecar(const BatchRequest& r, Modulation waveform, std::uint3
         << (frame.sample_rate_hz > 0 ? frame.samples.size() / frame.sample_rate_hz : 0) << "\n  }\n}\n";
     return out.str();
 }
+// SigMF 1.0.0 wrapper around the frame sidecar, which rides along under `siggen:metadata`.
+std::string sigmf_frame_metadata(const FrameResult& frame, const std::string& sidecar) {
+    auto out = json_stream();
+    auto detail = sidecar;
+    while (!detail.empty() && (detail.back() == '\n' || detail.back() == ' ')) detail.pop_back();
+    out << "{\n  \"global\": {\n    \"core:datatype\": \"cf32_le\",\n    \"core:sample_rate\": " << frame.sample_rate_hz
+        << ",\n    \"core:version\": \"1.0.0\",\n    \"core:description\": \"Synthetic frame from siggen batch\""
+        << ",\n    \"core:recorder\": \"siggen\"";
+    if (!frame.generator_preset.empty())
+        out << ",\n    \"siggen:preset\": " << json_quote(frame.generator_preset)
+            << ",\n    \"siggen:frame\": {\"crop_offset_samples\": " << frame.crop_offset
+            << ", \"frame_size\": " << frame.samples.size() << "}";
+    out << ",\n    \"siggen:metadata\": " << detail
+        << "\n  },\n  \"captures\": [\n    {\"core:sample_start\": 0, \"core:frequency\": 0}\n  ],\n  \"annotations\": []\n}\n";
+    return out.str();
+}
 std::string manifest_record(const BatchRequest& r, Modulation waveform, std::uint32_t seed,
                             const std::optional<double>& snr, std::size_t point_index, std::size_t frame_index,
                             const FrameResult& frame, const std::string& data_name) {
     auto out = json_stream();
     out << "{\"kind\":\"frame\",\"point_index\":" << point_index << ",\"frame_index\":" << frame_index
         << ",\"path\":" << json_quote(data_name)
-        << ",\"sidecar\":" << json_quote(data_name + ".json")
+        << ",\"sidecar\":" << json_quote(metadata_path(data_name).string())
         << ",\"waveform\":" << json_quote(modulation_name(waveform))
         << ",\"family\":\"" << family_name(waveform_family(waveform))
         << "\",\"seed\":" << seed << ",\"snr_db\":";
@@ -355,10 +377,11 @@ BatchSummary run_batch(const BatchRequest& r) {
                     const auto name = frame_basename(point_index, static_cast<std::size_t>(frame_index));
                     const auto data_name = name + format_extension(r.format);
                     const auto data_path = r.output_dir / data_name;
-                    const auto sidecar_path = r.output_dir / (data_name + ".json");
-                    const auto sidecar = frame_sidecar(r, waveform, seed, noise ? std::nullopt : snr,
+                    const auto sidecar_path = r.output_dir / metadata_path(data_name);
+                    auto sidecar = frame_sidecar(r, waveform, seed, noise ? std::nullopt : snr,
                                                        point_index, static_cast<std::size_t>(frame_index),
                                                        frame, data_name);
+                    if (r.format == ExportFormat::SigMF) sidecar = sigmf_frame_metadata(frame, sidecar);
                     {
                         std::ofstream data(data_path, std::ios::binary | std::ios::noreplace);
                         std::ofstream meta(sidecar_path, std::ios::binary | std::ios::noreplace);

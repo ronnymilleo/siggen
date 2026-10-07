@@ -1,7 +1,10 @@
 #include "cli_config.h"
 #include "command_line.h"
 #include "generator.h"
+#include "analysis.h"
 #include "iq_export.h"
+#include "recording.h"
+#include <iostream>
 #include <spdlog/cfg/env.h>
 #include <spdlog/sinks/stdout_color_sinks.h>
 #include <spdlog/spdlog.h>
@@ -40,6 +43,20 @@ int main(int argc, char** argv)
             return 0;
         }
 
+        if (command_line.analyze_selected())
+        {
+            for (const auto* option : command_line.app.get_options())
+                if (option->count() && option->get_name() != "--log-level")
+                    throw std::invalid_argument("With analyze, no signal or export options apply; root option: " + option->get_name());
+            if (command_line.analyze_segment < 4)
+                throw std::invalid_argument("--segment must be at least 4 samples");
+            const auto recording = iq::read_recording(command_line.analyze_file);
+            const auto report = iq::analyze_recording(recording, resolve_window(command_line.analyze_window),
+                                                      static_cast<std::size_t>(command_line.analyze_segment));
+            std::cout << (command_line.analyze_json ? iq::report_json(report) : iq::report_text(report));
+            return 0;
+        }
+
         const auto config = resolve_config(command_line);
 
         if (command_line.gui)
@@ -58,7 +75,7 @@ int main(int argc, char** argv)
         spdlog::debug("Generating {} signal", iq::modulation_name(config.modulation));
         const auto signal = iq::generate(config);
         iq::export_signal(output, signal, format, command_line.overwrite);
-        spdlog::info("Exported {} complex samples to {} and its JSON metadata sidecar",
+        spdlog::info("Exported {} complex samples to {} and its metadata file",
                      signal.samples.size(), output);
         return 0;
     }

@@ -18,7 +18,7 @@ struct CommandLine
     bool        gui = false;
 
     // Single-generation export controls (incompatible with --gui and batch).
-    std::string output; // Empty selects signal.csv / signal.iq by format.
+    std::string output; // Empty selects signal.csv / signal.sigmf-data by format.
     bool        overwrite = false;
     std::string format = "csv";
 
@@ -56,7 +56,7 @@ struct CommandLine
 
     // Batch subcommand state.
     CLI::App*                batch = nullptr;
-    std::string              batch_format = "cf32";
+    std::string              batch_format = "sigmf";
     std::vector<std::string>   batch_modulations;
     std::vector<std::uint32_t> batch_seeds;
     std::vector<double>        batch_snrs_db;
@@ -65,15 +65,22 @@ struct CommandLine
     std::string              output_dir = "dataset";
     bool                     batch_overwrite = false;
 
+    // Analyze subcommand state.
+    CLI::App*                analyze = nullptr;
+    std::string              analyze_file;
+    std::string              analyze_window = "hann";
+    int                      analyze_segment = 1024;
+    bool                     analyze_json = false;
+
     explicit CommandLine(const std::string& version)
     {
         auto* gui_option = app.add_flag("--gui", gui, "Open the GUI, optionally initialized by preset/signal options");
 
-        app.add_option("-o,--output", output, "Sample destination (default: signal.csv or signal.iq)")
+        app.add_option("-o,--output", output, "Sample destination (default: signal.csv or signal.sigmf-data)")
             ->excludes(gui_option);
         app.add_flag("--overwrite", overwrite, "Replace existing sample and metadata files")->excludes(gui_option);
         app.add_option("--format", format, "Single-generation output format")
-            ->check(CLI::IsMember({"csv", "cf32"}))
+            ->check(CLI::IsMember({"csv", "sigmf"}))
             ->excludes(gui_option);
 
         app.add_option("--preset", preset, "Load a preset before applying explicit options");
@@ -94,15 +101,25 @@ struct CommandLine
         batch->add_option("--frame-size", frame_size, "Samples per frame (default: 2048)");
         batch->add_option("--frames-per-point", frames_per_point, "Frames per sweep point (default: 1)");
         batch->add_option("--output-dir", output_dir, "New output directory (must not exist; default: dataset)");
-        batch->add_option("--format", batch_format, "Frame format (default: cf32)")
-            ->check(CLI::IsMember({"csv", "cf32"}));
+        batch->add_option("--format", batch_format, "Frame format (default: sigmf)")
+            ->check(CLI::IsMember({"csv", "sigmf"}));
         batch->add_flag("--overwrite", batch_overwrite, "Rejected; batches never replace an existing directory");
         batch->add_option("--preset", preset, "Load a preset before applying explicit batch overrides");
         add_signal_options(*batch);
         batch->excludes(gui_option);
+
+        analyze = app.add_subcommand("analyze", "Measure a SigMF recording (single signal or batch frame) (power, PAPR, spectrum, EVM)");
+        analyze->add_option("file", analyze_file, "SigMF .sigmf-meta or .sigmf-data")
+            ->required();
+        analyze->add_option("--window", analyze_window, "Welch window (default: hann)")
+            ->check(CLI::IsMember({"hann", "hamming", "blackman", "rectangular"}));
+        analyze->add_option("--segment", analyze_segment, "Welch segment length in samples (default: 1024)");
+        analyze->add_flag("--json", analyze_json, "Print the report as JSON");
+        analyze->excludes(gui_option);
     }
 
     bool batch_selected() const { return batch != nullptr && batch->parsed(); }
+    bool analyze_selected() const { return analyze != nullptr && analyze->parsed(); }
 
 private:
     // Signal and noise options shared by single generation and the batch sweep.

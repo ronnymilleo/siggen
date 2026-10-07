@@ -77,7 +77,7 @@ TEST(CommandLine, DefaultModeExportsCsv)
 
 TEST(CommandLine, GuiCannotSilentlyIgnoreExportOptions)
 {
-    for (const char* option : {"--output=custom.csv", "--overwrite", "--format=cf32"})
+    for (const char* option : {"--output=custom.csv", "--overwrite", "--format=sigmf"})
     {
         CommandLine cli("test-version");
         const char* argv[] = {"siggen", "--gui", option};
@@ -111,7 +111,7 @@ TEST(CommandLine, SignalAndNoiseOptionsParse)
     const char* argv[] = {"siggen", "--modulation", "8-PSK", "--symbols", "64", "--symbol-rate", "2000",
                           "--sps", "4", "--pulse", "rrc", "--roll-off", "0.35", "--span", "6",
                           "--gain", "1.5", "--seed", "7", "--noise-seed", "9", "--snr-db", "off",
-                          "--format", "cf32"};
+                          "--format", "sigmf"};
     cli.app.parse(std::size(argv), argv);
     EXPECT_EQ(cli.modulation, "8-PSK");
     EXPECT_EQ(cli.symbols, 64);
@@ -124,7 +124,7 @@ TEST(CommandLine, SignalAndNoiseOptionsParse)
     EXPECT_EQ(cli.seed, 7u);
     EXPECT_EQ(cli.noise_seed, 9u);
     EXPECT_EQ(cli.snr_db, "off");
-    EXPECT_EQ(cli.format, "cf32");
+    EXPECT_EQ(cli.format, "sigmf");
 }
 
 TEST(CommandLine, RejectsInvalidMembers)
@@ -171,7 +171,7 @@ TEST(CommandLine, BatchDefaults)
     EXPECT_EQ(cli.frame_size, 2048);
     EXPECT_EQ(cli.frames_per_point, 1);
     EXPECT_EQ(cli.output_dir, "dataset");
-    EXPECT_EQ(cli.batch_format, "cf32");
+    EXPECT_EQ(cli.batch_format, "sigmf");
 }
 
 TEST(CommandLine, BatchOverwriteFlagIsDetected)

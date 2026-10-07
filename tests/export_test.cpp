@@ -36,7 +36,7 @@ TEST(Export, CSVPrecisionCountAndMetadata) {
 }
 TEST(Export, BinaryByteOrderAndWriteFailure) {
     auto r = fixture(); std::ostringstream out;
-    iq::write_samples(out,r,iq::ExportFormat::BinaryFloat32);
+    iq::write_samples(out,r,iq::ExportFormat::SigMF);
     const unsigned char bytes[] = {0,0,128,63,0,0,0,0,0,0,128,191,0,0,0,0};
     EXPECT_EQ(out.str(), std::string(reinterpret_cast<const char*>(bytes),sizeof bytes));
     std::ostringstream bad; bad.setstate(std::ios::badbit);
@@ -47,9 +47,9 @@ TEST(Export, BinaryByteOrderAndWriteFailure) {
 TEST(Export, FilePairAndOverwriteProtection) {
     auto dir = std::filesystem::temp_directory_path() / ("iq-export-test-" + std::to_string(std::chrono::steady_clock::now().time_since_epoch().count()));
     std::filesystem::create_directory(dir);
-    const auto path = dir / "test.iq";
+    const auto path = dir / "test.sigmf-data";
     const auto r = fixture();
-    iq::export_signal(path,r,iq::ExportFormat::BinaryFloat32);
+    iq::export_signal(path,r,iq::ExportFormat::SigMF);
     EXPECT_EQ(std::filesystem::file_size(path),16u);
     EXPECT_TRUE(std::filesystem::exists(iq::metadata_path(path)));
     EXPECT_THROW(iq::export_signal(path,r,iq::ExportFormat::CSV), std::runtime_error);
@@ -82,7 +82,7 @@ TEST(Export, Version2LinearAndAwgnMetadata) {
     EXPECT_EQ(clean_meta.find("\"awgn\""), std::string::npos);
     c.awgn.enabled = true; c.awgn.snr_db = 10;
     const auto noisy = iq::generate(c);
-    const auto meta = iq::export_metadata(noisy, iq::ExportFormat::BinaryFloat32);
+    const auto meta = iq::export_metadata(noisy, iq::ExportFormat::SigMF);
     EXPECT_NE(meta.find("\"awgn\""), std::string::npos);
     EXPECT_NE(meta.find("\"requested_snr_db\": 10"), std::string::npos);
     EXPECT_NE(meta.find("\"reference_interval\": {\"begin\": 80, \"end\": 512}"), std::string::npos);
@@ -90,7 +90,7 @@ TEST(Export, Version2LinearAndAwgnMetadata) {
     EXPECT_NE(meta.find("\"noise_seed\": 5490"), std::string::npos);
     // Byte layout is unchanged: little-endian float32 I/Q pairs.
     std::ostringstream out;
-    iq::write_samples(out, noisy, iq::ExportFormat::BinaryFloat32);
+    iq::write_samples(out, noisy, iq::ExportFormat::SigMF);
     EXPECT_EQ(out.str().size(), noisy.samples.size() * 8);
 }
 TEST(Export, NoiseFamilyMetadataOmitsSymbolClaims) {
@@ -119,8 +119,8 @@ TEST(Export, RawSpanWriterMatchesSignalWriter) {
     const auto r = fixture();
     std::ostringstream direct, via_signal;
     iq::write_samples(direct, std::span<const std::complex<float>>(r.samples), r.sample_rate_hz,
-                      iq::ExportFormat::BinaryFloat32);
-    iq::write_samples(via_signal, r, iq::ExportFormat::BinaryFloat32);
+                      iq::ExportFormat::SigMF);
+    iq::write_samples(via_signal, r, iq::ExportFormat::SigMF);
     EXPECT_EQ(direct.str(), via_signal.str());
     std::ostringstream bad;
     EXPECT_THROW(iq::write_samples(bad, std::span<const std::complex<float>>(r.samples), 0,

@@ -9,7 +9,7 @@ and complex white Gaussian noise (WGN), with optional AWGN and simple channel
 impairments on linear signals; inspect waveforms, constellations, eye diagrams,
 a two-sided spectrum and measurements (PAPR, EVM, measured SNR); work through
 guided lesson presets; save presets; export single signals; and
-generate swept fixed-length frame datasets (`siggen batch`) for classifier
+export SigMF recordings, measure recordings with `siggen analyze`, script it all from Python/NumPy, and generate swept fixed-length frame datasets (`siggen batch`) for classifier
 training. This application generates complex baseband, not an RF carrier.
 
 <div align="center">
@@ -120,7 +120,7 @@ inheritance gives each new name its own build directory. For example:
 
 Run `cmake --workflow --preset local-clang`. To build only the signal library,
 run `cmake --preset library-only` followed by `cmake --build --preset library-only`;
-this needs only the `stb` submodule (image export) and has no test step. `SIGGEN_BUILD_APP` controls
+this needs only the `stb` (image export) and `json` (recording import) submodules and has no test step. `SIGGEN_BUILD_APP` controls
 the executable; `SIGGEN_BUILD_GUI` controls its optional graphical interface. For a local
 GUI or Release Clang profile, inherit `dev` or `release` and set the compiler path.
 CMake 3.28 supports these built-in [workflow presets](https://cmake.org/cmake/help/v3.28/manual/cmake-presets.7.html).
@@ -134,7 +134,8 @@ Everything else lives in [docs/](docs/):
 - [Modulations, mapping and reproducibility](docs/modulations.md): every mapping (PSK, QAM, PAM, ASK, differential schemes, OQPSK, FSK/MSK), seeds and bit order.
 - [Noise, SNR and channel impairments](docs/noise-and-impairments.md): AWGN, SNR vs Es/N0 vs Eb/N0, CFO, phase noise, IQ imbalance, DC offset and quantization.
 - [Pulse gain, length and timing](docs/signal-timing.md): amplitude gain, filter length, delay and sample counts.
-- [Presets and I/Q export](docs/presets-and-export.md): guided lessons, preset format, CSV/binary export and metadata.
+- [Presets and I/Q export](docs/presets-and-export.md): guided lessons, preset format, CSV, binary and SigMF export and metadata.
+- [Analysis, SigMF and Python](docs/analysis-and-python.md): `siggen analyze`, reading recordings, the NumPy-based Python package and the notebooks.
 - [Architecture and validation](docs/architecture.md): source layout, tests and sanitizer workflows.
 
 ## License

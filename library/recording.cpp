@@ -1,0 +1,123 @@
+#include "recording.h"
+#include "preset.h"
+#include <nlohmann/json.hpp>
+#include <algorithm>
+#include <bit>
+#include <cmath>
+#include <cstdint>
+#include <fstream>
+#include <iterator>
+#include <sstream>
+#include <stdexcept>
+namespace iq {
+namespace {
+std::string read_text(const std::filesystem::path& path) {
+    std::ifstream in(path, std::ios::binary);
+    if (!in) throw std::runtime_error("Cannot open " + path.string());
+    std::ostringstream text;
+    text << in.rdbuf();
+    return text.str();
+}
+std::vector<char> read_bytes(const std::filesystem::path& path) {
+    std::ifstream in(path, std::ios::binary);
+    if (!in) throw std::runtime_error("Cannot open " + path.string());
+    return std::vector<char>(std::istreambuf_iterator<char>(in), std::istreambuf_iterator<char>());
+}
+std::uint32_t word32(const char* p) {
+    std::uint32_t v = 0;
+    for (int k = 3; k >= 0; --k) v = (v << 8) | static_cast<unsigned char>(p[k]);
+    return v;
+}
+std::int16_t word16(const char* p) {
+    return static_cast<std::int16_t>(static_cast<std::uint16_t>(static_cast<unsigned char>(p[0]) | (static_cast<unsigned char>(p[1]) << 8)));
+}
+std::vector<std::complex<float>> decode(const std::vector<char>& bytes, const std::string& datatype) {
+    std::vector<std::complex<float>> samples;
+    if (datatype == "cf32_le") {
+        if (bytes.size() % 8) throw std::runtime_error("Data size is not a whole number of cf32_le samples");
+        samples.reserve(bytes.size() / 8);
+        for (std::size_t k = 0; k < bytes.size(); k += 8)
+            samples.emplace_back(std::bit_cast<float>(word32(&bytes[k])), std::bit_cast<float>(word32(&bytes[k + 4])));
+    } else if (datatype == "ci16_le") {
+        if (bytes.size() % 4) throw std::runtime_error("Data size is not a whole number of ci16_le samples");
+        samples.reserve(bytes.size() / 4);
+        for (std::size_t k = 0; k < bytes.size(); k += 4)
+            samples.emplace_back(word16(&bytes[k]) / 32768.0f, word16(&bytes[k + 2]) / 32768.0f);
+    } else {
+        throw std::runtime_error("Unsupported datatype '" + datatype + "' (supported: cf32_le, ci16_le)");
+    }
+    for (auto value : samples)
+        if (!std::isfinite(value.real()) || !std::isfinite(value.imag())) throw std::runtime_error("Recording contains non-finite samples");
+    return samples;
+}
+using Json = nlohmann::json;
+Json parse_json(const std::string& text) {
+    try {
+        return Json::parse(text);
+    } catch (const Json::parse_error& e) {
+        throw std::invalid_argument(std::string("Invalid JSON: ") + e.what());
+    }
+}
+const Json& require(const Json& object, const char* key, const char* where) {
+    if (!object.is_object() || !object.contains(key)) throw std::runtime_error(std::string(where) + " is missing '" + key + "'");
+    return object.at(key);
+}
+Recording read_sigmf(std::filesystem::path meta_path) {
+    if (meta_path.extension() == ".sigmf-data") meta_path.replace_extension(".sigmf-meta");
+    const auto root = parse_json(read_text(meta_path));
+    const auto& global = require(root, "global", "SigMF metadata");
+    Recording recording;
+    const auto& datatype = require(global, "core:datatype", "SigMF global object");
+    const auto& rate = require(global, "core:sample_rate", "SigMF global object");
+    if (!datatype.is_string() || !rate.is_number() || !(rate.get<double>() > 0))
+        throw std::runtime_error("SigMF core:datatype must be a string and core:sample_rate a positive number");
+    recording.datatype = datatype.get<std::string>();
+    recording.sample_rate_hz = rate.get<double>();
+    if (global.contains("core:description") && global.at("core:description").is_string())
+        recording.description = global.at("core:description").get<std::string>();
+    auto data_path = meta_path;
+    data_path.replace_extension(".sigmf-data");
+    recording.samples = decode(read_bytes(data_path), recording.datatype);
+    if (global.contains("siggen:preset") && global.at("siggen:preset").is_string()) {
+        try { recording.config = parse_preset(global.at("siggen:preset").get<std::string>()); } catch (const std::exception&) {}
+    }
+    if (global.contains("siggen:frame") && global.at("siggen:frame").is_object()) {
+        const auto& frame = global.at("siggen:frame");
+        if (frame.contains("crop_offset_samples") && frame.contains("frame_size") && frame.at("crop_offset_samples").is_number_unsigned() &&
+            frame.at("frame_size").is_number_unsigned())
+            recording.frame = Recording::Frame{frame.at("crop_offset_samples").get<std::size_t>(), frame.at("frame_size").get<std::size_t>()};
+    }
+    return recording;
+}
+}
+Recording read_recording(const std::filesystem::path& path) {
+    if (path.extension() != ".sigmf-meta" && path.extension() != ".sigmf-data")
+        throw std::runtime_error("Unsupported file '" + path.string() + "': expected a .sigmf-meta or .sigmf-data recording");
+    return read_sigmf(path);
+}
+std::optional<GeneratedSignal> signal_from_recording(const Recording& recording) {
+    if (!recording.config || recording.frame) return std::nullopt;
+    auto signal = generate(*recording.config);
+    if (signal.samples.size() != recording.samples.size()) return std::nullopt;
+    signal.samples = recording.samples;
+    return signal;
+}
+std::optional<FrameScoring> frame_scoring(const Recording& recording) {
+    if (!recording.config || !recording.frame || waveform_family(recording.config->modulation) != Family::Linear) return std::nullopt;
+    const auto [offset, size] = *recording.frame;
+    if (size != recording.samples.size()) return std::nullopt;
+    FrameScoring scoring{generate(*recording.config), 0, 0};
+    auto& signal = scoring.signal;
+    if (offset + size > signal.samples.size()) return std::nullopt;
+    std::copy(recording.samples.begin(), recording.samples.end(), signal.samples.begin() + static_cast<std::ptrdiff_t>(offset));
+    const auto sps = static_cast<std::size_t>(signal.config.samples_per_symbol);
+    // The matched filter for symbol k reads samples [k*sps, k*sps + taps - 1 + quadrature delay] (see matched_symbols).
+    const auto taps = uses_rrc(signal.config) ? 2 * signal.filter_delay_samples + 1 : sps;
+    const auto reach = taps - 1 + quadrature_delay_samples(signal.config);
+    scoring.first_symbol = (offset + sps - 1) / sps;
+    if (offset + size < reach + 1) return std::nullopt;
+    scoring.end_symbol = (offset + size - 1 - reach) / sps + 1;
+    if (scoring.end_symbol <= scoring.first_symbol) return std::nullopt;
+    return scoring;
+}
+}
