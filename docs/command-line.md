@@ -36,8 +36,8 @@ are `--samples`, `--sample-rate`, `--noise-power`, `--noise-seed`, and
 impairment options for linear waveforms are `--cfo-hz`, `--phase-noise-hz`,
 `--iq-gain-db`, `--iq-phase-deg`, `--dc-i`, `--dc-q`, `--adc-bits`, and
 `--impairment-seed` (see [Noise, SNR and channel impairments](noise-and-impairments.md)). Export
-options are `--format csv|cf32`, `--output`/`-o`, and `--overwrite`. Without an
-output path, CSV uses `signal.csv` and binary uses `signal.iq`.
+options are `--format csv|cf32|sigmf`, `--output`/`-o`, and `--overwrite`. Without an
+output path, CSV uses `signal.csv`, binary uses `signal.iq` and SigMF uses `signal.sigmf-data` (plus `signal.sigmf-meta`).
 
 Options incompatible with the selected waveform are rejected: noise-source
 options require `--modulation WGN`, and linear options (including `--snr-db`)
@@ -57,6 +57,16 @@ The GUI keeps the generator controls and plots inside the main application
 window, including on Wayland. The content follows window resizing and scrolls
 when needed; detached platform windows and saved floating-panel positions are
 disabled.
+
+### Analyzing a recording
+
+`siggen analyze <file>` measures a SigMF recording (`.sigmf-meta` or `.sigmf-data`) or a
+`cf32` export (with its `.json` sidecar) without opening the GUI, using the same
+estimators: sample count and rate, mean power, PAPR, the strongest spectral bin, the
+99 % occupied bandwidth and, for a recording made by siggen, the waveform, EVM and
+SNR after the matched filter. `--window hann|hamming|blackman|rectangular` and
+`--segment N` select the Welch estimator, and `--json` prints the report as JSON.
+See [Analysis, SigMF and Python](analysis-and-python.md).
 
 ### Batch dataset generation
 

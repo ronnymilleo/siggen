@@ -9,7 +9,7 @@ and complex white Gaussian noise (WGN), with optional AWGN and simple channel
 impairments on linear signals; inspect waveforms, constellations, eye diagrams,
 a two-sided spectrum and measurements (PAPR, EVM, measured SNR); work through
 guided lesson presets; save presets; export single signals; and
-generate swept fixed-length frame datasets (`siggen batch`) for classifier
+export SigMF recordings, measure recordings with `siggen analyze`, script it all from Python/NumPy, and generate swept fixed-length frame datasets (`siggen batch`) for classifier
 training. This application generates complex baseband, not an RF carrier.
 
 <div align="center">
@@ -59,6 +59,8 @@ ctest --preset dev
 | `clang-headless` | Debug | No | Clang (Linux) | None |
 | `asan` | Debug | No | GCC (Linux) | Address + undefined behavior |
 | `tsan` | Debug | No | GCC (Linux) | Thread |
+
+`dev` and `headless` also build the shared library behind the Python package (`SIGGEN_BUILD_PYTHON`, off by default elsewhere); see [Analysis, SigMF and Python](docs/analysis-and-python.md).
 
 All profiles enable tests and project warnings. Configure, build, test, and
 workflow names match and share `build/<preset-name>`. Tests print failures and
@@ -134,7 +136,8 @@ Everything else lives in [docs/](docs/):
 - [Modulations, mapping and reproducibility](docs/modulations.md): every mapping (PSK, QAM, PAM, ASK, differential schemes, OQPSK, FSK/MSK), seeds and bit order.
 - [Noise, SNR and channel impairments](docs/noise-and-impairments.md): AWGN, SNR vs Es/N0 vs Eb/N0, CFO, phase noise, IQ imbalance, DC offset and quantization.
 - [Pulse gain, length and timing](docs/signal-timing.md): amplitude gain, filter length, delay and sample counts.
-- [Presets and I/Q export](docs/presets-and-export.md): guided lessons, preset format, CSV/binary export and metadata.
+- [Presets and I/Q export](docs/presets-and-export.md): guided lessons, preset format, CSV, binary and SigMF export and metadata.
+- [Analysis, SigMF and Python](docs/analysis-and-python.md): `siggen analyze`, reading recordings, the NumPy-based Python package and the notebooks.
 - [Architecture and validation](docs/architecture.md): source layout, tests and sanitizer workflows.
 
 ## License

@@ -90,3 +90,17 @@ values = np.fromfile("signal.iq", dtype="<f4").reshape(-1, 2)
 iq = values[:, 0] + 1j * values[:, 1]
 assert len(iq) == metadata["sample_count"]
 ```
+
+### SigMF
+
+`--format sigmf` (or **SigMF** in the export dialog) writes the same little-endian
+float32 samples as `cf32` into `<name>.sigmf-data` and a [SigMF](https://sigmf.org)
+1.0.0 description into `<name>.sigmf-meta`. Give a destination ending in `.sigmf-data`;
+the meta file is its sibling and both follow the same overwrite rules as the other
+formats. The `global` object holds `core:datatype` (`cf32_le`), `core:sample_rate`,
+`core:version`, `core:description` and `core:recorder`, followed by siggen's own
+fields in the `siggen:` namespace: `siggen:preset` (the configuration in the preset
+text format, which is what lets `siggen analyze` and the Python package re-measure the
+file) and `siggen:metadata` (the version-2 object described above). `captures` has one
+segment starting at sample 0, and `annotations` is empty. Other SigMF tools ignore
+the `siggen:` fields. Batches keep `csv` and `cf32`.
