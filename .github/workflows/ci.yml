@@ -17,7 +17,7 @@ jobs:
           submodules: recursive
 
       - name: Install build tools
-        run: sudo apt-get update && sudo apt-get install --yes cmake ninja-build g++ clang
+        run: sudo apt-get update && sudo apt-get install --yes cmake ninja-build g++ clang python3-numpy
 
       - name: Validate GCC
         run: cmake --workflow --preset headless
