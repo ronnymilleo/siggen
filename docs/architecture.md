@@ -4,24 +4,41 @@
 
 ## Architecture and validation
 
-- `library/waveform.*`: waveform descriptor table (identifiers, families,
+The code is split into three static libraries and the executable:
+
+- `app-core/` → `siggen-core-lib`, namespace `Core`: generation, analysis and file
+  I/O, with no graphics or command-line dependency.
+- `app-cli/` → `siggen-cli-lib`, namespace `Console`: CLI11 parsing and
+  configuration resolution.
+- `app-gui/` → `siggen-gui-lib`, namespace `GUI`: the GLFW/OpenGL window, the ImGui
+  layer and the generator window. Built only with `SIGGEN_BUILD_GUI=ON`.
+- `main.cpp` → `siggen`: runs a single generation, a batch, or the GUI.
+
+Core modules:
+
+- `app-core/waveform.*`: waveform descriptor table (identifiers, families,
   capabilities) shared by CLI, GUI, validation, serialization and analysis.
-- `library/generator.*`: configuration, validation, mapping and shaping.
-- `library/noise.*`: documented Box–Muller Gaussian source and complex WGN.
-- `library/batch.*`: fixed-length frame generation, seed derivation and the
+- `app-core/generator.*`: configuration, validation, mapping and shaping.
+- `app-core/noise.*`: documented Box–Muller Gaussian source and complex WGN.
+- `app-core/batch.*`: fixed-length frame generation, seed derivation and the
   manifest-writing batch writer.
-- `library/signal_processing.*`: stable RRC taps and convolution.
-- `library/signal_analysis.*`: matched observations and Welch PSD with selectable window.
-- `library/measurements.*`: power statistics (PAPR), EVM, measured SNR and eye traces.
-- `library/pipeline.*`: the staged signal (bits, symbols, zero-inserted, filtered, noisy) behind the Pipeline tab.
-- `library/impairments.*`: carrier offset, phase noise, IQ imbalance, DC offset and quantization.
-- `library/plot_export.*`: renderer that draws a `Figure` (panels, series, axes, legend) to SVG or PNG; `application/plot_figures.h` builds the figures from the plotted data.
+- `app-core/signal_processing.*`: stable RRC taps.
+- `app-core/signal_analysis.*`: matched observations and Welch PSD with selectable window.
+- `app-core/measurements.*`: power statistics (PAPR), EVM, measured SNR and eye traces.
+- `app-core/pipeline.*`: the staged signal (bits, symbols, zero-inserted, filtered, noisy) behind the Pipeline tab.
+- `app-core/impairments.*`: carrier offset, phase noise, IQ imbalance, DC offset and quantization.
+- `app-core/plot_export.*`: renderer that draws a `Figure` (panels, series, axes, legend) to SVG or PNG;
+  `app-core/plot_figures.*` builds the figures from the plotted data.
+- `app-core/preset.*`, `app-core/iq_export.*`: validated file I/O.
+- `app-core/generation_job.*`: owned worker and immutable completed snapshot.
+- `app-core/plot_data.*`: plot-ready, reduced copies of a generated signal.
 - `presets/`: guided lesson presets (`NN-name.preset`, with `#` note lines).
-- `library/preset.*`, `library/iq_export.*`: validated file I/O.
-- `application/command_line.h`, `application/cli_config.*`: CLI parsing and
+
+Command line and GUI:
+
+- `app-cli/command_line.*`, `app-cli/cli_config.*`: CLI parsing and
   defaults → preset → explicit-option resolution.
-- `application/generation_job.h`: owned worker and immutable completed snapshot.
-- `application/plot_data.h`, `application/signal_generator.*`: cached presentation
+- `app-gui/signal_generator.*`: the generator window, with cached presentation
   and UI-thread state. Analysis/cache preparation runs once on result completion;
   generation is asynchronous, while export and cache preparation are synchronous.
 
@@ -42,7 +59,7 @@ without requiring a display server by default. Optional real OpenGL captures:
 
 ```sh
 SIGGEN_CAPTURE_DIR=build/ui-captures \
-  build/dev/bin/siggen_ui_tests --gtest_filter=UI.GeneratedViewsAndPendingClosure
+  build/dev/bin/siggen-gui-tests --gtest_filter=UI.GeneratedViewsAndPendingClosure
 ```
 
 That command needs a working display and saves screenshots of each modulation's

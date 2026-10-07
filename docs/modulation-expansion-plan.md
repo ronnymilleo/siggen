@@ -41,7 +41,7 @@ modulation remain subsequent candidates; avoid an arbitrary unbounded M control.
 ## Architecture
 
 Keep C++23, ImGui/ImPlot, value types and owned asynchronous generation. Extend
-by waveform family rather than forcing every signal through `map_symbols()` and
+by waveform family rather than forcing every signal through `MapSymbols()` and
 RRC convolution.
 
 - Add a small descriptor table with stable serialized identifiers, display names,
