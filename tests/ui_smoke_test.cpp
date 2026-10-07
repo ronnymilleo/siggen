@@ -65,6 +65,7 @@ TEST(UI, InitialInvalidAndResizedFrames)
 #include <GLFW/glfw3.h>
 #define STB_IMAGE_WRITE_IMPLEMENTATION
 #include "stb_image_write.h"
+#include "plot_figures.h"
 #include <cstdlib>
 #include <filesystem>
 #include <thread>
@@ -94,6 +95,17 @@ struct SignalGeneratorTestAccess
     static const auto& error(SignalGenerator& w)
     {
         return w.error_;
+    }
+    // What the Export image dialog does once a destination is chosen.
+    static std::string export_image(SignalGenerator& w, const std::string& path, int format, bool overwrite = false)
+    {
+        w.image_figure_ = figures::waveform(w.plots_);
+        std::snprintf(w.image_path_, sizeof w.image_path_, "%s", path.c_str());
+        w.image_format_ = format;
+        w.image_width_  = 800;
+        w.image_height_ = 450;
+        w.ExportImage(overwrite);
+        return w.image_status_;
     }
     static void invalid(SignalGenerator& w)
     {
@@ -363,4 +375,43 @@ TEST(UI, EveryHelpTopicHasATitleAndExplanation)
     // The topics the controls link to: roll-off, span, SPS and the SNR / Es/N0 / Eb/N0 relation.
     EXPECT_NE(help::snr.body.find("Es/N0"), std::string_view::npos);
     EXPECT_NE(help::snr.body.find("Eb/N0"), std::string_view::npos);
+}
+
+TEST(UI, ExportImageWritesPngAndSvgAndProtectsExistingFiles)
+{
+    ImGui::CreateContext();
+    ImPlot::CreateContext();
+    auto& io       = ImGui::GetIO();
+    io.IniFilename = nullptr;
+    io.DisplaySize = ImVec2(1100, 800);
+    io.DeltaTime   = 1.f / 60;
+    unsigned char* pixels;
+    int            w, h;
+    io.Fonts->GetTexDataAsRGBA32(&pixels, &w, &h);
+    SignalGenerator window;
+    SignalGeneratorTestAccess::start(window);
+    const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(10);
+    while (SignalGeneratorTestAccess::busy(window) && std::chrono::steady_clock::now() < deadline)
+    {
+        ImGui::NewFrame();
+        ImGui::SetNextWindowPos(ImVec2(0, 0));
+        ImGui::SetNextWindowSize(io.DisplaySize);
+        window.Render();
+        ImGui::Render();
+        std::this_thread::yield();
+    }
+    ASSERT_TRUE(SignalGeneratorTestAccess::result(window));
+    const auto dir = std::filesystem::temp_directory_path() / "siggen-ui-image-export";
+    std::filesystem::remove_all(dir);
+    std::filesystem::create_directories(dir);
+    const auto png = (dir / "wave.png").string(), svg = (dir / "wave.svg").string();
+    EXPECT_EQ(SignalGeneratorTestAccess::export_image(window, png, 0), "Saved " + png);
+    EXPECT_EQ(SignalGeneratorTestAccess::export_image(window, svg, 1), "Saved " + svg);
+    EXPECT_GT(std::filesystem::file_size(png), 1000u);
+    EXPECT_GT(std::filesystem::file_size(svg), 1000u);
+    EXPECT_NE(SignalGeneratorTestAccess::export_image(window, png, 0).find("Export failed"), std::string::npos);
+    EXPECT_EQ(SignalGeneratorTestAccess::export_image(window, png, 0, true), "Saved " + png);
+    std::filesystem::remove_all(dir);
+    ImPlot::DestroyContext();
+    ImGui::DestroyContext();
 }

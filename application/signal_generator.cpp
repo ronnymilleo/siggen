@@ -1,11 +1,13 @@
 #include "signal_generator.h"
 #include "help_topics.h"
+#include "plot_figures.h"
 #include "imgui.h"
 #include "implot.h"
 #include "preset.h"
 #include <algorithm>
 #include <cmath>
 #include <cstdio>
+#include <filesystem>
 #include <spdlog/spdlog.h>
 
 namespace
@@ -290,6 +292,7 @@ void SignalGenerator::DrawContents()
     }
     ImGui::EndDisabled();
     DrawExportDialog();
+    DrawImageExportDialog();
     if (job_.busy())
     {
         ImGui::SameLine();
@@ -433,6 +436,7 @@ void SignalGenerator::DrawPlots()
     ImPlot::PushStyleVar(ImPlotStyleVar_FitPadding, ImVec2(.15f, .15f));
     if (ImGui::BeginTabItem("Waveform"))
     {
+        ExportImageButton("waveform", [&] { return figures::waveform(plots_); });
         ImGui::Text("I: blue | Q: orange | %zu plotted points (min/max reduction)", plots_.time.size());
         if (waveform_fit_)
             ImPlot::SetNextAxesToFit();
@@ -453,6 +457,7 @@ void SignalGenerator::DrawPlots()
     const bool fsk_source   = result && result->family == iq::Family::Fsk;
     if (fsk_source && ImGui::BeginTabItem("Frequency"))
     {
+        ExportImageButton("frequency", [&] { return figures::frequency(plots_); });
         ImGui::TextWrapped("Blue: frequency estimated from the phase step between consecutive samples. Orange: nominal tone of each symbol. A continuous-phase signal moves between tones without phase jumps; noise and CFO shift the estimate.");
         if (ImPlot::BeginPlot("Instantaneous frequency", ImVec2(-1, -1)))
         {
@@ -476,6 +481,11 @@ void SignalGenerator::DrawPlots()
         const auto& data = constellation_view_ == 0 ? plots_.mapped : plots_.matched;
         if (data.x.empty())
             ImGui::TextWrapped("No steady-state symbols: increase symbol count beyond twice the RRC span.");
+        else
+            ExportImageButton("constellation", [&] {
+                return figures::constellation(data, constellation_view_ == 0 ? "I/Q constellation (mapped symbols)"
+                                                                           : "I/Q constellation (matched filter)");
+            });
         if (ImPlot::BeginPlot("I/Q constellation", ImVec2(-1, -1), ImPlotFlags_Equal))
         {
             ImPlot::SetupAxes("In-phase (I)", "Quadrature (Q)", ImPlotAxisFlags_AutoFit, ImPlotAxisFlags_AutoFit);
@@ -492,8 +502,12 @@ void SignalGenerator::DrawPlots()
         if (eye_.in_phase.empty())
             ImGui::TextWrapped("No steady-state symbols: increase symbol count beyond twice the RRC span.");
         else
+        {
+            ImGui::SameLine();
+            ExportImageButton("eye", [&] { return figures::eye(eye_, eye_component_ == 1); });
             ImGui::TextWrapped("%zu overlaid matched-filter traces, two symbol periods wide. A wide-open eye at 0 means easy, error-free decisions; noise and ISI close it.",
                                eye_.in_phase.size());
+        }
         if (ImPlot::BeginPlot("Eye diagram", ImVec2(-1, -1)))
         {
             ImPlot::SetupAxes("Time (symbol periods)", eye_component_ == 0 ? "I" : "Q", ImPlotAxisFlags_AutoFit,
@@ -522,6 +536,11 @@ void SignalGenerator::DrawPlots()
         {
             window_ = static_cast<iq::Window>(window);
             UpdateSpectrum();
+        }
+        if (!spectrum_db_.empty())
+        {
+            ImGui::SameLine();
+            ExportImageButton("spectrum", [&] { return figures::spectrum(spectrum_, spectrum_db_); });
         }
         Hint("Hann is the default. Rectangular has the narrowest main lobe but the worst leakage; Blackman has the lowest sidelobes with a wider main lobe.");
         ImGui::Text("Two-sided Welch PSD | Periodic %s | %zu samples/segment | %zu segments",
@@ -555,6 +574,7 @@ void SignalGenerator::DrawPipeline(const iq::GeneratedSignal& r)
     const int   total = static_cast<int>(p.symbols.size());
     const int   sps   = p.samples_per_symbol;
     const int   bps   = p.bits_per_symbol;
+    ExportImageButton("pipeline", [&] { return figures::pipeline(p, pipeline_first_, pipeline_count_, pipeline_align_); });
     ImGui::TextWrapped("One transmission, step by step, on a shared time axis (symbol periods). I: blue | Q: orange");
     HelpButton(help::pipeline);
     bool moved = false;
@@ -746,6 +766,105 @@ void SignalGenerator::DrawExportDialog()
     if (ImGui::Button("Close"))
     {
         export_result_.reset();
+        ImGui::CloseCurrentPopup();
+    }
+    ImGui::EndPopup();
+}
+
+void SignalGenerator::ExportImageButton(const char* stem, const std::function<iq::Figure()>& build)
+{
+    if (ImGui::Button("Export image..."))
+    {
+        try
+        {
+            image_figure_ = build();
+            std::snprintf(image_path_, sizeof image_path_, "siggen-%s.%s", stem, image_format_ == 0 ? "png" : "svg");
+            image_status_.clear();
+            image_confirm_overwrite_ = false;
+            image_open_requested_    = true;
+        }
+        catch (const std::exception& e)
+        {
+            spdlog::error("Unable to prepare image: {}", e.what());
+            error_ = e.what();
+        }
+    }
+    Hint("Save this plot as a PNG or SVG image for slides and reports. The image is drawn from the plotted data, so it does not depend on the window size.");
+}
+void SignalGenerator::ExportImage(bool overwrite)
+{
+    try
+    {
+        iq::ImageStyle style;
+        style.width  = image_width_;
+        style.height = image_height_;
+        style.dark   = image_theme_ == 0;
+        iq::export_figure(image_path_, *image_figure_, image_format_ == 0 ? iq::ImageFormat::PNG : iq::ImageFormat::SVG, style, overwrite);
+        spdlog::info("Exported image {} ({}x{})", image_path_, style.width, style.height);
+        image_status_            = std::string("Saved ") + image_path_;
+        image_confirm_overwrite_ = false;
+    }
+    catch (const std::exception& e)
+    {
+        spdlog::error("Image export to {} failed: {}", image_path_, e.what());
+        image_status_ = std::string("Export failed: ") + e.what();
+    }
+}
+void SignalGenerator::DrawImageExportDialog()
+{
+    if (image_open_requested_)
+    {
+        ImGui::OpenPopup("Export image");
+        image_open_requested_ = false;
+    }
+    ImGui::SetNextWindowSize(ImVec2(540, 0), ImGuiCond_Appearing);
+    if (!ImGui::BeginPopupModal("Export image", nullptr, ImGuiWindowFlags_AlwaysAutoResize))
+        return;
+    ImGui::TextWrapped("Save the plot as an image. PNG is a raster for slides; SVG is vector and stays sharp at any size in documents.");
+    if (ImGui::InputText("Destination", image_path_, sizeof image_path_))
+        image_confirm_overwrite_ = false;
+    if (ImGui::Combo("Format", &image_format_, "PNG\0SVG\0"))
+    {
+        // Keep the name, swap the extension.
+        auto path = std::filesystem::path(image_path_);
+        path.replace_extension(image_format_ == 0 ? ".png" : ".svg");
+        std::snprintf(image_path_, sizeof image_path_, "%s", path.string().c_str());
+        image_confirm_overwrite_ = false;
+    }
+    ImGui::SetNextItemWidth(120);
+    ImGui::InputInt("Width (px)", &image_width_, 100, 400);
+    ImGui::SetNextItemWidth(120);
+    ImGui::InputInt("Height (px)", &image_height_, 100, 400);
+    image_width_  = std::clamp(image_width_, iq::MIN_IMAGE_SIZE, iq::MAX_IMAGE_SIZE);
+    image_height_ = std::clamp(image_height_, iq::MIN_IMAGE_SIZE, iq::MAX_IMAGE_SIZE);
+    ImGui::Combo("Background", &image_theme_, "Dark (matches the app)\0Light (for print)\0");
+    if (ImGui::Button("Save image"))
+    {
+        try
+        {
+            image_confirm_overwrite_ = std::filesystem::exists(image_path_);
+            if (!image_confirm_overwrite_)
+                ExportImage(false);
+        }
+        catch (const std::exception& e)
+        {
+            image_status_ = e.what();
+        }
+    }
+    if (image_confirm_overwrite_)
+    {
+        ImGui::TextWrapped("The destination exists. Replace it?");
+        if (ImGui::Button("Confirm overwrite"))
+            ExportImage(true);
+        ImGui::SameLine();
+        if (ImGui::Button("Cancel overwrite"))
+            image_confirm_overwrite_ = false;
+    }
+    if (!image_status_.empty())
+        ImGui::TextWrapped("%s", image_status_.c_str());
+    if (ImGui::Button("Close"))
+    {
+        image_figure_.reset();
         ImGui::CloseCurrentPopup();
     }
     ImGui::EndPopup();
