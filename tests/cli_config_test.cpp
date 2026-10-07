@@ -245,7 +245,7 @@ TEST(CliConfig, SnrControl) {
 TEST(CliConfig, WgnSourceOptions) {
     CommandLine cli("test");
     const char* argv[] = {"siggen", "--modulation", "wgn", "--samples", "512", "--sample-rate", "16000",
-                          "--noise-power", "2", "--noise-seed", "21", "--gain", "1.5", "--format", "cf32"};
+                          "--noise-power", "2", "--noise-seed", "21", "--gain", "1.5", "--format", "sigmf"};
     cli.app.parse(std::size(argv), argv);
     const auto resolved = resolve_config(cli);
     EXPECT_EQ(resolved.modulation, iq::Modulation::WGN);
@@ -253,9 +253,9 @@ TEST(CliConfig, WgnSourceOptions) {
     EXPECT_DOUBLE_EQ(resolved.noise_source.sample_rate_hz, 16000);
     EXPECT_DOUBLE_EQ(resolved.noise_source.noise_power, 2);
     EXPECT_EQ(resolved.noise_seed, 21u);
-    EXPECT_EQ(resolve_output(cli), "signal.iq");
+    EXPECT_EQ(resolve_output(cli), "signal.sigmf-data");
     CommandLine named("test");
-    const char* named_argv[] = {"siggen", "--format", "cf32", "--output", "custom.dat"};
+    const char* named_argv[] = {"siggen", "--format", "sigmf", "--output", "custom.dat"};
     named.app.parse(std::size(named_argv), named_argv);
     EXPECT_EQ(resolve_output(named), "custom.dat");
 }

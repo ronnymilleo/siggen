@@ -137,7 +137,7 @@ TEST(Analyze, SpectrumFindsToneAndBandwidth) {
     EXPECT_EQ(json.at("sample_count"), 8192);
 }
 
-TEST(Recording, ReadsCf32ExportsThroughTheirSidecar) {
+TEST(Recording, ReadsBatchCf32FramesThroughTheirSidecar) {
     const auto dir = scratch_dir("cf32");
     const auto signal = iq::generate(qam_config());
     iq::export_signal(dir / "tx.iq", signal, iq::ExportFormat::BinaryFloat32);

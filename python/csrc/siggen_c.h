@@ -15,7 +15,7 @@ SIGGEN_API int siggen_default_preset(char* out, size_t capacity);
 
 // Generate from preset text. Returns NULL on failure.
 SIGGEN_API siggen_signal* siggen_generate(const char* preset_text, char* error, size_t error_capacity);
-// Read a SigMF recording (.sigmf-meta/.sigmf-data) or a cf32 export. Returns NULL on failure.
+// Read a SigMF recording (.sigmf-meta/.sigmf-data) or a batch cf32 frame. Returns NULL on failure.
 SIGGEN_API siggen_signal* siggen_load(const char* path, char* error, size_t error_capacity);
 SIGGEN_API void siggen_free(siggen_signal* signal);
 
@@ -52,7 +52,7 @@ SIGGEN_API long siggen_matched_symbols(const siggen_signal* signal, float* out, 
 SIGGEN_API long siggen_psd(const float* interleaved, size_t n, double sample_rate_hz, size_t segment_length, int window,
                            double* frequency_hz, double* density, size_t capacity, char* error, size_t error_capacity);
 
-// format: 0 CSV, 1 cf32, 2 SigMF. Requires a signal that carries its configuration.
+// format: 0 CSV, 1 SigMF. Requires a signal that carries its configuration.
 SIGGEN_API int siggen_export(const siggen_signal* signal, const char* path, int format, int overwrite, char* error, size_t error_capacity);
 #ifdef __cplusplus
 }

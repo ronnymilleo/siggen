@@ -18,7 +18,7 @@ struct CommandLine
     bool        gui = false;
 
     // Single-generation export controls (incompatible with --gui and batch).
-    std::string output; // Empty selects signal.csv / signal.iq by format.
+    std::string output; // Empty selects signal.csv / signal.sigmf-data by format.
     bool        overwrite = false;
     std::string format = "csv";
 
@@ -76,11 +76,11 @@ struct CommandLine
     {
         auto* gui_option = app.add_flag("--gui", gui, "Open the GUI, optionally initialized by preset/signal options");
 
-        app.add_option("-o,--output", output, "Sample destination (default: signal.csv, signal.iq or signal.sigmf-data)")
+        app.add_option("-o,--output", output, "Sample destination (default: signal.csv or signal.sigmf-data)")
             ->excludes(gui_option);
         app.add_flag("--overwrite", overwrite, "Replace existing sample and metadata files")->excludes(gui_option);
         app.add_option("--format", format, "Single-generation output format")
-            ->check(CLI::IsMember({"csv", "cf32", "sigmf"}))
+            ->check(CLI::IsMember({"csv", "sigmf"}))
             ->excludes(gui_option);
 
         app.add_option("--preset", preset, "Load a preset before applying explicit options");
@@ -108,8 +108,8 @@ struct CommandLine
         add_signal_options(*batch);
         batch->excludes(gui_option);
 
-        analyze = app.add_subcommand("analyze", "Measure a SigMF recording or cf32 export (power, PAPR, spectrum, EVM)");
-        analyze->add_option("file", analyze_file, "SigMF .sigmf-meta/.sigmf-data, or a cf32 export with its .json sidecar")
+        analyze = app.add_subcommand("analyze", "Measure a SigMF recording or a batch cf32 frame (power, PAPR, spectrum, EVM)");
+        analyze->add_option("file", analyze_file, "SigMF .sigmf-meta/.sigmf-data, or a batch .cf32 frame with its .json sidecar")
             ->required();
         analyze->add_option("--window", analyze_window, "Welch window (default: hann)")
             ->check(CLI::IsMember({"hann", "hamming", "blackman", "rectangular"}));

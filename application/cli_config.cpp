@@ -142,11 +142,7 @@ iq::ExportFormat resolve_format(const std::string& format) {
 
 std::string resolve_output(const CommandLine& cli) {
     if (!cli.output.empty()) return cli.output;
-    switch (resolve_format(cli.format)) {
-    case iq::ExportFormat::CSV: return "signal.csv";
-    case iq::ExportFormat::SigMF: return "signal.sigmf-data";
-    default: return "signal.iq";
-    }
+    return resolve_format(cli.format) == iq::ExportFormat::CSV ? "signal.csv" : "signal.sigmf-data";
 }
 
 iq::BatchRequest resolve_batch(const CommandLine& cli) {

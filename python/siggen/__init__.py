@@ -26,7 +26,7 @@ import numpy as np
 __all__ = ["Signal", "SymbolAccuracy", "generate", "load", "psd", "default_config", "WINDOWS", "version"]
 
 WINDOWS = {"hann": 0, "hamming": 1, "blackman": 2, "rectangular": 3}
-_FORMATS = {"csv": 0, "cf32": 1, "sigmf": 2}
+_FORMATS = {"csv": 0, "sigmf": 1}
 _ERROR = 1024
 
 
@@ -318,7 +318,7 @@ class Signal:
         self._samples = None
 
     def export(self, path, format: str = "sigmf", overwrite: bool = False) -> None:
-        """Write ``csv``, ``cf32`` or ``sigmf`` exactly as ``siggen --format`` does (SigMF paths end in .sigmf-data)."""
+        """Write ``csv`` or ``sigmf`` exactly as ``siggen --format`` does (SigMF paths end in .sigmf-data)."""
         err = ctypes.create_string_buffer(_ERROR)
         if _export(self._h, os.fspath(path).encode(), _FORMATS[format], int(overwrite), err, _ERROR) < 0:
             _fail(err, "export")
@@ -334,7 +334,7 @@ def generate(preset: Optional[str] = None, **options) -> Signal:
 
 
 def load(path) -> Signal:
-    """Read a SigMF recording (``.sigmf-meta`` or ``.sigmf-data``) or a ``cf32`` export with its ``.json`` sidecar."""
+    """Read a SigMF recording (``.sigmf-meta`` or ``.sigmf-data``) or a batch ``.cf32`` frame with its ``.json`` sidecar."""
     err = ctypes.create_string_buffer(_ERROR)
     handle = _load(os.fspath(path).encode(), err, _ERROR)
     if not handle:

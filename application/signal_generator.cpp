@@ -715,7 +715,7 @@ void SignalGenerator::Export(bool overwrite)
 {
     try
     {
-        iq::export_signal(export_path_, *export_result_, static_cast<iq::ExportFormat>(export_format_), overwrite);
+        iq::export_signal(export_path_, *export_result_, export_format_ == 0 ? iq::ExportFormat::CSV : iq::ExportFormat::SigMF, overwrite);
         spdlog::info("Exported {} complex samples to {}", export_result_->samples.size(), export_path_);
         export_status_     = "Exported samples and JSON metadata.";
         confirm_overwrite_ = false;
@@ -734,7 +734,7 @@ void SignalGenerator::DrawExportDialog()
     ImGui::TextWrapped("Export the completed signal captured when this dialog opened.");
     if (ImGui::InputText("Destination", export_path_, sizeof export_path_))
         confirm_overwrite_ = false;
-    if (ImGui::Combo("Format", &export_format_, "CSV\0Binary float32 I/Q\0SigMF (cf32 + .sigmf-meta)\0"))
+    if (ImGui::Combo("Format", &export_format_, "CSV\0SigMF (cf32 + .sigmf-meta)\0"))
         confirm_overwrite_ = false;
     ImGui::TextWrapped("Metadata is written beside the samples as <destination>.json (SigMF: use a .sigmf-data destination; <name>.sigmf-meta is written beside it).");
     if (ImGui::Button("Export"))

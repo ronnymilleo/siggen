@@ -43,7 +43,7 @@ Power, PAPR and the spectrum need only the samples. **EVM and SNR need the symbo
 they appear when the file carries siggen's configuration (a siggen SigMF file) and its
 length matches it: siggen regenerates the ideal symbols from `siggen:preset` and measures
 the *file's* samples against them. If the samples were modified after export, the report
-reflects the modification. Otherwise a `note` line says why EVM is absent. A `cf32` export
+reflects the modification. Otherwise a `note` line says why EVM is absent. A batch `.cf32` frame
 is read through its `.json` sidecar and gets the sample-based measurements only. Errors
 (missing file, unsupported datatype, truncated data, malformed JSON) print a message and exit
 with status 1.
@@ -71,7 +71,7 @@ explicitly. It is built for Linux and macOS.
 import siggen
 
 tx = siggen.generate(modulation="16-QAM", sps=8, snr_db=20, cfo_hz=2)   # CLI option names
-tx.samples            # complex64 array, identical to `siggen --format cf32`
+tx.samples            # complex64 array, identical to `siggen --format sigmf`
 tx.symbols            # ideal mapped symbols (unit mean energy)
 tx.symbol_accuracy()  # SymbolAccuracy(evm_percent, evm_db, snr_after_matched_db, ...)
 obs, idx = tx.matched_symbols()   # decision observations and their symbol indices
@@ -79,7 +79,7 @@ t, i, q = tx.eye()                # eye-diagram traces
 f, d = tx.psd(window="blackman")  # Welch PSD, as in the Spectrum tab
 
 noisy = tx.with_samples(tx.samples + noise)   # same configuration, edited samples
-tx.export("tx.sigmf-data", "sigmf")           # csv, cf32 or sigmf
+tx.export("tx.sigmf-data", "sigmf")           # csv or sigmf
 rx = siggen.load("tx.sigmf-meta")             # any SigMF recording; siggen ones keep their configuration
 ```
 

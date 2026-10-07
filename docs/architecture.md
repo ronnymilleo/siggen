@@ -17,8 +17,8 @@
 - `library/impairments.*`: carrier offset, phase noise, IQ imbalance, DC offset and quantization.
 - `library/plot_export.*`: renderer that draws a `Figure` (panels, series, axes, legend) to SVG or PNG; `application/plot_figures.h` builds the figures from the plotted data.
 - `presets/`: guided lesson presets (`NN-name.preset`, with `#` note lines).
-- `library/preset.*`, `library/iq_export.*`: validated file I/O (CSV, cf32, SigMF).
-- `library/recording.*`, `library/analysis.*`: recording import (SigMF, cf32; JSON via the vendored nlohmann/json) and the report behind `siggen analyze`.
+- `library/preset.*`, `library/iq_export.*`: validated file I/O (CSV, SigMF; raw cf32 for batches).
+- `library/recording.*`, `library/analysis.*`: recording import (SigMF, batch cf32; JSON via the vendored nlohmann/json) and the report behind `siggen analyze`.
 - `python/`: C interface (`csrc/siggen_c.*`), the `siggen` Python package, its tests and the notebooks.
 - `application/command_line.h`, `application/cli_config.*`: CLI parsing and
   defaults → preset → explicit-option resolution.

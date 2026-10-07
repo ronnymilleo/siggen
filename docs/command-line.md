@@ -12,7 +12,7 @@ current directory, then exits. Use `--gui` to open the desktop interface instead
 ./build/dev/bin/siggen
 ./build/dev/bin/siggen --output captures/example.csv
 ./build/dev/bin/siggen --output signal.csv --overwrite
-./build/dev/bin/siggen --modulation 64-QAM --symbols 512 --sps 4 --format cf32
+./build/dev/bin/siggen --modulation 64-QAM --symbols 512 --sps 4 --format sigmf
 ./build/dev/bin/siggen --modulation qpsk --snr-db 10 --noise-seed 7 -o noisy.csv
 ./build/dev/bin/siggen --modulation wgn --samples 8192 --sample-rate 16000 --noise-power 2
 ./build/dev/bin/siggen --preset custom.preset --gain 2 --output preset.csv
@@ -36,8 +36,8 @@ are `--samples`, `--sample-rate`, `--noise-power`, `--noise-seed`, and
 impairment options for linear waveforms are `--cfo-hz`, `--phase-noise-hz`,
 `--iq-gain-db`, `--iq-phase-deg`, `--dc-i`, `--dc-q`, `--adc-bits`, and
 `--impairment-seed` (see [Noise, SNR and channel impairments](noise-and-impairments.md)). Export
-options are `--format csv|cf32|sigmf`, `--output`/`-o`, and `--overwrite`. Without an
-output path, CSV uses `signal.csv`, binary uses `signal.iq` and SigMF uses `signal.sigmf-data` (plus `signal.sigmf-meta`).
+options are `--format csv|sigmf`, `--output`/`-o`, and `--overwrite`. Without an
+output path, CSV uses `signal.csv` and SigMF uses `signal.sigmf-data` (plus `signal.sigmf-meta`).
 
 Options incompatible with the selected waveform are rejected: noise-source
 options require `--modulation WGN`, and linear options (including `--snr-db`)
@@ -61,7 +61,7 @@ disabled.
 ### Analyzing a recording
 
 `siggen analyze <file>` measures a SigMF recording (`.sigmf-meta` or `.sigmf-data`) or a
-`cf32` export (with its `.json` sidecar) without opening the GUI, using the same
+batch `.cf32` frame (with its `.json` sidecar) without opening the GUI, using the same
 estimators: sample count and rate, mean power, PAPR, the strongest spectral bin, the
 99 % occupied bandwidth and, for a recording made by siggen, the waveform, EVM and
 SNR after the matched filter. `--window hann|hamming|blackman|rectangular` and

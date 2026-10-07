@@ -4,7 +4,6 @@ cmake_minimum_required(VERSION 3.28)
 file(MAKE_DIRECTORY "${WORK_DIR}")
 file(REMOVE "${WORK_DIR}/signal.csv" "${WORK_DIR}/signal.csv.json"
     "${WORK_DIR}/custom.csv" "${WORK_DIR}/custom.csv.json"
-    "${WORK_DIR}/signal.iq" "${WORK_DIR}/signal.iq.json"
     "${WORK_DIR}/wgn.csv" "${WORK_DIR}/wgn.csv.json"
     "${WORK_DIR}/awgn.csv" "${WORK_DIR}/awgn.csv.json"
     "${WORK_DIR}/msk.csv" "${WORK_DIR}/msk.csv.json"
@@ -33,7 +32,7 @@ run(success --version)
 run(failure --unknown)
 run(failure --log-level invalid)
 run(failure --gui --output custom.csv)
-run(failure --gui --format cf32)
+run(failure --gui --format sigmf)
 run(failure --modulation WGN --symbols 10)
 run(failure --modulation GFSK)
 run(failure --gain 2 batch --output-dir rejected-batch)
@@ -77,18 +76,8 @@ run(success --output custom.csv --overwrite --log-level off)
 if(NOT last_output STREQUAL "")
     message(FATAL_ERROR "Log level off did not silence output")
 endif()
-# Binary format uses signal.iq by default.
-run(success --format cf32)
-file(READ "${WORK_DIR}/signal.iq.json" binary_metadata)
-string(JSON binary_format GET "${binary_metadata}" format)
-string(JSON binary_count GET "${binary_metadata}" sample_count)
-if(NOT binary_format STREQUAL "cf32_le" OR NOT binary_count EQUAL 2121)
-    message(FATAL_ERROR "Unexpected binary export metadata")
-endif()
-file(SIZE "${WORK_DIR}/signal.iq" binary_size)
-if(NOT binary_size EQUAL 16968)
-    message(FATAL_ERROR "Binary sample size mismatch: ${binary_size}")
-endif()
+# The removed cf32 format is rejected for single generation (batches keep it).
+run(failure --format cf32)
 # WGN source produces the configured sample count and noise family metadata.
 run(success --modulation wgn --samples 512 --output wgn.csv)
 file(READ "${WORK_DIR}/wgn.csv.json" wgn_metadata)

@@ -17,7 +17,7 @@ struct Recording {
     std::optional<GenerationConfig> config;
 };
 // Reads a SigMF recording given its `.sigmf-meta` or `.sigmf-data` path, or a
-// siggen `cf32` export given its sample file (metadata from `<path>.json`).
+// siggen batch `cf32` frame given its sample file (metadata from `<path>.json`).
 // Supports cf32_le and ci16_le (scaled by 1/32768). Throws std::runtime_error
 // or std::invalid_argument with a descriptive message otherwise.
 Recording read_recording(const std::filesystem::path& path);

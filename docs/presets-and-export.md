@@ -61,12 +61,16 @@ paths and requires explicit confirmation to overwrite. Extension selection is
 manual. Exporting while generation is pending exports the captured completed
 result, even if a newer result finishes while the dialog is open.
 
-CSV is UTF-8/ASCII text with header `time_s,i,q`, followed by one complex sample
-per row. Decimal precision preserves the stored float32 components and double
-timestamps on round trip. Binary is headerless little-endian IEEE-754 float32,
-interleaved as `I0,Q0,I1,Q1,...`, eight bytes per complex sample.
+Two formats are available. CSV is UTF-8/ASCII text with header `time_s,i,q`,
+followed by one complex sample per row; decimal precision preserves the stored
+float32 components and double timestamps on round trip. SigMF is binary: the
+samples are headerless little-endian IEEE-754 float32 (`cf32_le`), interleaved as
+`I0,Q0,I1,Q1,...`, eight bytes per complex sample, described by a JSON file (see
+below). Batches (`siggen batch`) write the same raw float32 as `.cf32` frames with a
+`.json` sidecar, or CSV.
 
-Both formats write `<destination>.json`. Its version-2 object records the
+CSV writes `<destination>.json`; SigMF writes `<name>.sigmf-meta`. The
+version-2 sidecar object (also carried inside the SigMF metadata) records the
 `format` (`csv` or `cf32_le`), `waveform`, `family` (`linear` or `noise`),
 `sample_count`, `sample_rate_hz`, `scale` (gain already applied),
 `sample_units`, and `timing`. Linear results add `symbol_energy`, the complete
@@ -79,28 +83,28 @@ are reported. The two-file operation is not atomic; a storage failure can leave
 partial files, including after confirmed replacement. Retry after correcting the
 destination.
 
-Example binary import with NumPy:
+Example SigMF import with NumPy (or use `siggen.load`, see
+[Analysis, SigMF and Python](analysis-and-python.md)):
 
 ```python
 import json
 import numpy as np
-with open("signal.iq.json", encoding="utf-8") as f:
+with open("signal.sigmf-meta", encoding="utf-8") as f:
     metadata = json.load(f)
-values = np.fromfile("signal.iq", dtype="<f4").reshape(-1, 2)
+values = np.fromfile("signal.sigmf-data", dtype="<f4").reshape(-1, 2)
 iq = values[:, 0] + 1j * values[:, 1]
-assert len(iq) == metadata["sample_count"]
+assert len(iq) == metadata["global"]["siggen:metadata"]["sample_count"]
 ```
 
 ### SigMF
 
-`--format sigmf` (or **SigMF** in the export dialog) writes the same little-endian
-float32 samples as `cf32` into `<name>.sigmf-data` and a [SigMF](https://sigmf.org)
+`--format sigmf` (or **SigMF** in the export dialog) writes little-endian
+float32 I/Q samples into `<name>.sigmf-data` and a [SigMF](https://sigmf.org)
 1.0.0 description into `<name>.sigmf-meta`. Give a destination ending in `.sigmf-data`;
-the meta file is its sibling and both follow the same overwrite rules as the other
-formats. The `global` object holds `core:datatype` (`cf32_le`), `core:sample_rate`,
+the meta file is its sibling and both follow the same overwrite rules as CSV. The `global` object holds `core:datatype` (`cf32_le`), `core:sample_rate`,
 `core:version`, `core:description` and `core:recorder`, followed by siggen's own
 fields in the `siggen:` namespace: `siggen:preset` (the configuration in the preset
 text format, which is what lets `siggen analyze` and the Python package re-measure the
 file) and `siggen:metadata` (the version-2 object described above). `captures` has one
 segment starting at sample 0, and `annotations` is empty. Other SigMF tools ignore
-the `siggen:` fields. Batches keep `csv` and `cf32`.
+the `siggen:` fields.

@@ -12,7 +12,7 @@
 // unknown names or options incompatible with the selected waveform family.
 iq::GenerationConfig resolve_config(const CommandLine& cli);
 iq::ExportFormat resolve_format(const std::string& format);
-// Explicit --output, else signal.csv, signal.iq or signal.sigmf-data by format.
+// Explicit --output, else signal.csv or signal.sigmf-data by format.
 std::string resolve_output(const CommandLine& cli);
 // Batch request: shared preset/overrides plus validated sweep axes.
 iq::BatchRequest resolve_batch(const CommandLine& cli);
