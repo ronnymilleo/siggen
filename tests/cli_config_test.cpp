@@ -368,3 +368,37 @@ TEST(CliConfig, FskOptionsResolveAndRejectInapplicableOnes) {
     batch.app.parse(std::size(mixed), mixed);
     EXPECT_EQ(resolve_batch(batch).base.tone_spacing_hz, 800);
 }
+
+TEST(CliConfig, BerResolvesPointsAndStoppingRules) {
+    CommandLine cli("test");
+    const char* args[] = {"siggen", "ber", "--modulation", "16-QAM", "--sps", "4", "--eb-n0-db=2,4,6", "--min-errors", "50",
+                          "--max-bits", "5000", "--block-symbols", "256"};
+    cli.app.parse(static_cast<int>(std::size(args)), args);
+    ASSERT_TRUE(cli.ber_selected());
+    const auto request = resolve_ber(cli);
+    EXPECT_EQ(request.config.modulation, iq::Modulation::QAM16);
+    EXPECT_EQ(request.config.samples_per_symbol, 4);
+    EXPECT_FALSE(request.config.awgn.enabled);
+    EXPECT_EQ(request.settings.eb_n0_db, (std::vector<double>{2, 4, 6}));
+    EXPECT_EQ(request.settings.min_errors, 50u);
+    EXPECT_EQ(request.settings.max_bits, 5000u);
+    EXPECT_EQ(request.settings.block_symbols, 256);
+}
+
+TEST(CliConfig, BerDefaultsAndRejections) {
+    {
+        CommandLine cli("test");
+        const char* args[] = {"siggen", "ber"};
+        cli.app.parse(static_cast<int>(std::size(args)), args);
+        EXPECT_EQ(resolve_ber(cli).settings.eb_n0_db.size(), 6u);
+    }
+    for (const auto& args : std::vector<std::vector<const char*>>{
+             {"siggen", "ber", "--modulation", "WGN"}, {"siggen", "ber", "--modulation", "MSK"},
+             {"siggen", "ber", "--snr-db", "5"}, {"siggen", "ber", "--bits", "1010"}, {"siggen", "ber", "--symbols", "100"},
+             {"siggen", "ber", "--min-errors", "0"}, {"siggen", "ber", "--block-symbols", "8"},
+             {"siggen", "--gain", "2", "ber"}}) {
+        CommandLine cli("test");
+        cli.app.parse(static_cast<int>(args.size()), args.data());
+        EXPECT_THROW(resolve_ber(cli), std::invalid_argument);
+    }
+}

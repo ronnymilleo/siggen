@@ -161,5 +161,32 @@ class FileTests(unittest.TestCase):
                 np.testing.assert_array_equal(siggen.load(out).samples, siggen.generate(**options).samples, str(cli_args))
 
 
+class BerTest(unittest.TestCase):
+    def test_noiseless_signal_has_no_errors(self):
+        errors = siggen.generate(modulation="16-QAM", symbols=512, snr_db=None).bit_errors()
+        self.assertGreater(errors.bit_count, 1000)
+        self.assertEqual(errors.bit_errors, 0)
+
+    def test_noise_raises_errors_and_not_available_for_fsk(self):
+        noisy = siggen.generate(modulation="QPSK", symbols=4096, snr_db=-2).bit_errors()
+        self.assertGreater(noisy.ber, 0.01)
+        self.assertIsNone(siggen.generate(modulation="2-FSK").bit_errors())
+
+    def test_theory_matches_known_values(self):
+        self.assertAlmostEqual(siggen.theoretical_ber("BPSK", 9.6), 1e-5, delta=2e-6)
+        values = siggen.theoretical_ber("QPSK", [0, 4, 8])
+        self.assertTrue(np.all(np.diff(values) < 0))
+        self.assertTrue(np.isnan(siggen.theoretical_ber("8-DPSK", 5)))
+        with self.assertRaises(ValueError):
+            siggen.theoretical_ber("nope", 5)
+
+    def test_curve_follows_theory(self):
+        curve = siggen.ber_curve([2, 5], modulation="QPSK", min_errors=300, max_bits=500_000)
+        np.testing.assert_allclose(curve.ber, curve.theory, rtol=0.25)
+        self.assertEqual(len(curve.snr_db), 2)
+        with self.assertRaises(ValueError):
+            siggen.ber_curve([5], modulation="MSK")
+
+
 if __name__ == "__main__":
     unittest.main()

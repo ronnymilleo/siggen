@@ -220,3 +220,21 @@ TEST(PlotFigures, BuiltFromARealSignal) {
     // A request beyond the signal is clamped, not an error.
     EXPECT_NO_THROW(figures::pipeline(stages, 1000, 1000, false));
 }
+
+TEST(PlotExport, LogarithmicAxisDrawsDecadeTicksAndSkipsNonPositiveValues) {
+    iq::Panel panel;
+    panel.y_log = true;
+    panel.x_label = "Eb/N0 (dB)";
+    panel.y_label = "BER";
+    iq::Series s;
+    s.x = {0, 1, 2, 3};
+    s.y = {0.1, 0.01, 0.0, 1e-4}; // The zero cannot be shown on a log axis.
+    panel.series.push_back(s);
+    const iq::Figure figure{"BER", {panel}};
+    const auto svg = iq::render_svg(figure);
+    EXPECT_NE(svg.find("1e-1"), std::string::npos);
+    EXPECT_NE(svg.find("1e-4"), std::string::npos);
+    EXPECT_EQ(svg.find("nan"), std::string::npos);
+    panel.y_limits = std::array<double, 2>{1e-5, 1};
+    EXPECT_NO_THROW(iq::render_png(iq::Figure{"BER", {panel}}));
+}

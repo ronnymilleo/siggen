@@ -116,10 +116,31 @@ struct CommandLine
         analyze->add_option("--segment", analyze_segment, "Welch segment length in samples (default: 1024)");
         analyze->add_flag("--json", analyze_json, "Print the report as JSON");
         analyze->excludes(gui_option);
+
+        ber = app.add_subcommand("ber", "Measure bit error rate against Eb/N0 with the ideal reference receiver");
+        ber->add_option("--eb-n0-db", ber_eb_n0_db, "Eb/N0 points in dB, e.g. --eb-n0-db=0,2,4,6 (default: 0 to 10 in steps of 2)")
+            ->delimiter(',')
+            ->expected(-1);
+        ber->add_option("--min-errors", ber_min_errors, "Stop a point after this many bit errors (default: 100)");
+        ber->add_option("--max-bits", ber_max_bits, "Stop a point after this many bits (default: 2000000)");
+        ber->add_option("--block-symbols", ber_block_symbols, "Symbols generated per block (default: 4096)");
+        ber->add_flag("--json", ber_json, "Print the curve as JSON");
+        ber->add_option("--preset", preset, "Load a preset before applying explicit options");
+        add_signal_options(*ber);
+        ber->excludes(gui_option);
     }
+
+    // Ber subcommand state.
+    CLI::App*                ber = nullptr;
+    std::vector<double>      ber_eb_n0_db;
+    std::size_t              ber_min_errors = 100;
+    std::size_t              ber_max_bits = 2000000;
+    int                      ber_block_symbols = 4096;
+    bool                     ber_json = false;
 
     bool batch_selected() const { return batch != nullptr && batch->parsed(); }
     bool analyze_selected() const { return analyze != nullptr && analyze->parsed(); }
+    bool ber_selected() const { return ber != nullptr && ber->parsed(); }
 
 private:
     // Signal and noise options shared by single generation and the batch sweep.

@@ -1,4 +1,5 @@
 #pragma once
+#include "ber_job.h"
 #include "generation_job.h"
 #include "imgui_window_layer.h"
 #include "iq_export.h"
@@ -42,7 +43,16 @@ private:
     int                                        pipeline_count_ = 12;
     bool                                       pipeline_align_ = true;
     bool                                       pipeline_fit_   = true;
+    std::optional<iq::BitErrors>               errors_;
+    BerJob                                     ber_job_;
+    double                                     ber_from_       = 0;
+    double                                     ber_to_         = 12;
+    double                                     ber_step_       = 1;
+    int                                        ber_min_errors_ = 100;
+    int                                        ber_max_kbits_  = 1000;
+    bool                                       ber_fit_        = true;
     std::string                                preset_notes_;
+    void                                       DrawBer(const iq::GeneratedSignal& result);
     void                                       UpdateSpectrum();
     void                                       DrawMeasurements(const iq::GeneratedSignal& result);
     void                                       DrawPlots();

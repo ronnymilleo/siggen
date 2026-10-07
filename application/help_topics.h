@@ -61,5 +61,12 @@ inline constexpr Topic pipeline{
     "5. With noise: AWGN and channel impairments are added to the clean signal of row 4, giving the signal that is exported.\n\n"
     "The filter delays row 4 by span / 2 symbols; the 'Compensate filter delay' option shifts rows 4 and 5 back so each pulse lines up with its symbol."};
 
-inline constexpr Topic all[] = {symbol_rate, sps, pulse, roll_off, span, snr, pipeline};
+inline constexpr Topic ber{
+    "ber", "Bit error rate (BER)",
+    "The fraction of received bits that a receiver gets wrong. It is the number a link finally cares about, and it is plotted against Eb/N0 so that different modulations are compared fairly.\n\n"
+    "The receiver here is ideal on purpose: it knows the symbol timing and the amplitude, filters with the matching pulse and decides on the nearest constellation point. It does no carrier recovery, so a carrier offset breaks coherent schemes while the differential ones (DBPSK, DQPSK, pi/4-DQPSK, 8-DPSK) keep working until the offset eats their margin.\n\n"
+    "The orange line is the textbook curve for the same ideal receiver. Measured points follow it closely; the scatter at low BER is statistics, since a point with 100 errors is only good to about 10 %. Points where no error was seen are drawn as an upper bound.\n\n"
+    "BPSK and QPSK share one curve; each extra bit per symbol of a larger constellation costs Eb/N0. FSK, MSK and noise have no reference receiver yet; 8-DPSK and 32-QAM have no curve."};
+
+inline constexpr Topic all[] = {symbol_rate, sps, pulse, roll_off, span, snr, pipeline, ber};
 }

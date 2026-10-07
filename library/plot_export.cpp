@@ -1,6 +1,7 @@
 #include "plot_export.h"
 #include <algorithm>
 #include <cmath>
+#include <limits>
 #include <cstdio>
 #include <cstring>
 #include <filesystem>
@@ -207,7 +208,15 @@ void draw_panel(Canvas& c, const Theme& th, const Panel& panel, Axes a, double k
     }
     c.fill_rect(a.x0, a.y0, a.w, a.h, th.plot_background, 1);
     const auto xt = nice_ticks(a.xlo, a.xhi, std::clamp(static_cast<int>(a.w / (95 * k)), 3, 12));
-    const auto yt = nice_ticks(a.ylo, a.yhi, std::clamp(static_cast<int>(a.h / (55 * k)), 2, 10));
+    std::vector<double> yt;
+    if (panel.y_log) {
+        // The axes hold log10(y); put a tick at each decade, thinned when the range spans many.
+        const int first = static_cast<int>(std::ceil(a.ylo - 1e-9)), last = static_cast<int>(std::floor(a.yhi + 1e-9));
+        const int stride = std::max(1, (last - first + 1) / std::clamp(static_cast<int>(a.h / (40 * k)), 2, 10));
+        for (int d = first; d <= last; d += stride) yt.push_back(d);
+    } else {
+        yt = nice_ticks(a.ylo, a.yhi, std::clamp(static_cast<int>(a.h / (55 * k)), 2, 10));
+    }
     for (double t : xt) c.line(a.px(t), a.y0, a.px(t), a.y0 + a.h, th.grid, th.grid_alpha, std::max(1.0, k));
     for (double t : yt) c.line(a.x0, a.py(t), a.x0 + a.w, a.py(t), th.grid, th.grid_alpha, std::max(1.0, k));
     if (panel.zero_line && a.ylo < 0 && a.yhi > 0) c.line(a.x0, a.py(0), a.x0 + a.w, a.py(0), th.muted, 0.6, std::max(1.2, 1.5 * k));
@@ -224,7 +233,8 @@ void draw_panel(Canvas& c, const Theme& th, const Panel& panel, Axes a, double k
     }
     for (double t : yt) {
         c.line(a.x0 - 5 * k, a.py(t), a.x0, a.py(t), th.muted, 0.7, fw);
-        c.text(a.x0 - 9 * k, a.py(t) + ft * 0.35, format_tick(t, ystep), ft, th.muted, Anchor::End, false);
+        c.text(a.x0 - 9 * k, a.py(t) + ft * 0.35, panel.y_log ? "1e" + std::to_string(static_cast<int>(std::lround(t))) : format_tick(t, ystep), ft,
+               th.muted, Anchor::End, false);
     }
     if (!panel.x_label.empty())
         c.text(a.x0 + a.w / 2, a.y0 + a.h + 5 * k + ft * 1.05 + 8 * k + fl, panel.x_label, fl, th.muted, Anchor::Middle, false);
@@ -279,15 +289,22 @@ void draw_figure(Canvas& c, const Figure& fig, const ImageStyle& st) {
     for (const auto& p : fig.panels) {
         y += p.title.empty() ? 10 * k : 34 * k;
         Axes a{left, y, W - left - right, plot_h, 0, 1, 0, 1};
+        Panel shown = p;
+        if (p.y_log) { // Draw log10(y) on a linear axis; values that are not positive vanish.
+            for (auto& s : shown.series)
+                for (auto& v : s.y) v = v > 0 ? std::log10(v) : std::numeric_limits<double>::quiet_NaN();
+            if (p.y_limits) shown.y_limits = std::array<double, 2>{std::log10(std::max((*p.y_limits)[0], 1e-300)), std::log10(std::max((*p.y_limits)[1], 1e-300))};
+        }
         double lo, hi;
-        bounds_of(p, true, lo, hi);
+        bounds_of(shown, true, lo, hi);
         auto xr = padded(lo, hi);
-        bounds_of(p, false, lo, hi);
+        bounds_of(shown, false, lo, hi);
         auto yr = padded(lo, hi);
         if (p.x_limits) xr = *p.x_limits;
-        if (p.y_limits) yr = *p.y_limits;
+        if (p.y_log && !p.y_limits) yr = {std::floor(lo), std::max(std::ceil(hi), std::floor(lo) + 1)};
+        if (shown.y_limits) yr = *shown.y_limits;
         a.xlo = xr[0]; a.xhi = xr[1]; a.ylo = yr[0]; a.yhi = yr[1];
-        draw_panel(c, th, p, a, k, p.equal_aspect);
+        draw_panel(c, th, shown, a, k, p.equal_aspect);
         y += plot_h + tick_row + (p.x_label.empty() ? 0 : 28 * k);
     }
 }

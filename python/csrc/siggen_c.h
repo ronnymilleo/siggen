@@ -39,6 +39,16 @@ SIGGEN_API int siggen_power_statistics(const siggen_signal* signal, double* out)
 // out[5] = symbol count, EVM (fraction), EVM (dB), SNR after matched filter (dB), 10 log10(SPS).
 // Returns 1 when available, 0 when the signal has no constellation or no configuration, -1 on failure.
 SIGGEN_API int siggen_symbol_accuracy(const siggen_signal* signal, double* out, char* error, size_t error_capacity);
+// Reference-demodulator result: out[4] = symbols compared, symbol errors, bits compared, bit errors.
+// Returns 1 when available, 0 when the waveform has no reference receiver or the signal carries no bits, -1 on failure.
+// Like EVM, it needs the generated length (the samples may have noise added in NumPy, not be resized).
+SIGGEN_API int siggen_bit_errors(const siggen_signal* signal, double* out, char* error, size_t error_capacity);
+// Textbook BER of an ideal receiver; returns 1 and fills *out, or 0 when the waveform has no closed form here.
+SIGGEN_API int siggen_theoretical_ber(const char* waveform, double eb_n0_db, double* out, char* error, size_t error_capacity);
+// Eb/N0 sweep from preset text. out holds 5 doubles per point: Eb/N0, SNR, bits, bit errors, theory (NaN when none).
+// Returns the point count (or -1); the arrays are filled when `out` is non-NULL.
+SIGGEN_API long siggen_ber_curve(const char* preset_text, const double* eb_n0_db, size_t count, size_t min_errors, size_t max_bits,
+                                 int block_symbols, double* out, char* error, size_t error_capacity);
 // Eye diagram traces: fills `time` (points) and `i`/`q` (traces * points); returns trace count, or -1.
 SIGGEN_API long siggen_eye(const siggen_signal* signal, size_t max_traces, double* time, size_t time_capacity,
                            double* i, double* q, size_t trace_capacity, size_t* points);

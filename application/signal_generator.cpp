@@ -4,6 +4,7 @@
 #include "imgui.h"
 #include "implot.h"
 #include "preset.h"
+#include "theory.h"
 #include <algorithm>
 #include <cmath>
 #include <cstdio>
@@ -78,6 +79,12 @@ SignalGenerator::SignalGenerator(iq::GenerationConfig config)
 }
 void SignalGenerator::DrawContents()
 {
+    if (ber_job_.poll())
+    {
+        ber_fit_ = true;
+        if (!ber_job_.error().empty())
+            error_ = ber_job_.error();
+    }
     try
     {
         if (job_.poll())
@@ -99,6 +106,7 @@ void SignalGenerator::DrawContents()
             plots_        = make_plot_data(r);
             power_        = iq::power_statistics(r.samples);
             accuracy_     = iq::symbol_accuracy(r);
+            errors_       = iq::bit_errors(r);
             eye_          = r.family == iq::Family::Linear ? iq::eye_diagram(r) : iq::EyeDiagram{};
             pipeline_.reset();
             if (r.family == iq::Family::Linear)
@@ -423,6 +431,21 @@ void SignalGenerator::DrawMeasurements(const iq::GeneratedSignal& r)
         Metric("EVM", num("%.4g dB", accuracy_->evm_db));
         Metric("SNR after matched filter", num("%.4g dB", accuracy_->snr_after_matched_db));
         Hint("-EVM in dB. Matched filtering averages noise over about SPS samples, so this exceeds the sample-level SNR by 10 log10(SPS).");
+        if (errors_)
+        {
+            const auto ratios = iq::snr_to_energy_ratios(accuracy_->snr_after_matched_db - accuracy_->expected_offset_db, r.config.samples_per_symbol,
+                                                         iq::bits_per_symbol(r.config.modulation));
+            Metric("BER", errors_->bit_errors ? num("%.3g", errors_->ber()) : std::string("0"), true);
+            Hint("Bit error rate of the ideal reference receiver: perfect timing, known gain, matched filter and no carrier recovery. Edge symbols are excluded, as for EVM.");
+            Metric("Bit errors", std::to_string(errors_->bit_errors) + " / " + std::to_string(errors_->bit_count));
+            Metric("SER", num("%.3g", errors_->ser()));
+            Metric("Eb/N0 (measured)", num("%.4g dB", ratios.eb_n0_db));
+            if (const auto theory = iq::theoretical_ber(r.config.modulation, ratios.eb_n0_db))
+            {
+                Metric("Theory BER", num("%.3g", *theory));
+                Hint("Textbook BER of an ideal receiver at the measured Eb/N0. A short signal has few bits, so the measured value scatters around it; the BER tab sweeps many.");
+            }
+        }
         if (r.noise.awgn_applied)
             ImGui::TextWrapped("Requested sample SNR %.4g dB + 10 log10(SPS) = %.4g dB expected after the matched filter. The measured value varies with the noise realization.",
                                r.noise.requested_snr_db, r.noise.requested_snr_db + accuracy_->expected_offset_db);
@@ -528,6 +551,11 @@ void SignalGenerator::DrawPlots()
         DrawPipeline(*result);
         ImGui::EndTabItem();
     }
+    if (!noise_source && !fsk_source && result && iq::has_reference_demodulator(result->config.modulation) && ImGui::BeginTabItem("BER"))
+    {
+        DrawBer(*result);
+        ImGui::EndTabItem();
+    }
     if (ImGui::BeginTabItem("Spectrum"))
     {
         int window = static_cast<int>(window_);
@@ -566,6 +594,116 @@ void SignalGenerator::DrawPlots()
     }
     ImPlot::PopStyleVar();
     ImGui::EndTabBar();
+}
+
+void SignalGenerator::DrawBer(const iq::GeneratedSignal& r)
+{
+    const bool busy = ber_job_.busy();
+    ImGui::TextUnformatted("Bit error rate against Eb/N0");
+    HelpButton(help::ber);
+    ImGui::TextWrapped("Measured with the ideal reference receiver on the settings of the displayed signal (waveform, pulse, rate and impairments); the sweep sets the noise itself.");
+    ImGui::BeginDisabled(busy);
+    ImGui::SetNextItemWidth(130);
+    ImGui::InputDouble("From (dB)", &ber_from_, 1, 5, "%.4g");
+    ImGui::SameLine(0, 28);
+    ImGui::SetNextItemWidth(130);
+    ImGui::InputDouble("To (dB)", &ber_to_, 1, 5, "%.4g");
+    ImGui::SetNextItemWidth(130);
+    ImGui::InputDouble("Step (dB)", &ber_step_, .5, 1, "%.4g");
+    ImGui::SameLine(0, 28);
+    ImGui::SetNextItemWidth(130);
+    ImGui::InputInt("Errors per point", &ber_min_errors_, 50, 500);
+    Hint("A point stops after this many bit errors: the more, the smoother the curve (relative uncertainty is about 1 / sqrt(errors)).");
+    ImGui::SetNextItemWidth(130);
+    ImGui::InputInt("Max kbit per point", &ber_max_kbits_, 100, 1000);
+    Hint("A point also stops after this many thousand bits, so low-BER points finish. A point without errors is drawn as an upper bound.");
+    ber_step_       = std::clamp(ber_step_, 0.05, 20.0);
+    ber_from_       = std::clamp(ber_from_, -30.0, 40.0);
+    ber_to_         = std::clamp(ber_to_, -30.0, 40.0);
+    ber_min_errors_ = std::clamp(ber_min_errors_, 10, 10000);
+    ber_max_kbits_  = std::clamp(ber_max_kbits_, 10, 100000);
+    if (ImGui::Button("Measure curve"))
+    {
+        iq::BerSweepSettings settings;
+        for (double db = std::min(ber_from_, ber_to_); db <= std::max(ber_from_, ber_to_) + 1e-9 && settings.eb_n0_db.size() < 200; db += ber_step_)
+            settings.eb_n0_db.push_back(db);
+        settings.min_errors = static_cast<std::size_t>(ber_min_errors_);
+        settings.max_bits   = static_cast<std::size_t>(ber_max_kbits_) * 1000;
+        ber_job_.start(r.config, settings);
+    }
+    ImGui::EndDisabled();
+    if (busy)
+    {
+        ImGui::SameLine();
+        if (ImGui::Button("Cancel"))
+            ber_job_.cancel();
+        ImGui::SameLine();
+        ImGui::Text("Measuring: %d / %d points", ber_job_.done(), ber_job_.total());
+    }
+    const auto& points = ber_job_.points();
+    if (points.empty())
+    {
+        ImGui::TextDisabled(busy ? "Waiting for the first point..." : "No curve yet. Select Measure curve.");
+        return;
+    }
+    const auto& swept = ber_job_.config();
+    const auto  plot  = figures::make_ber_plot(points, swept.modulation);
+    std::optional<std::array<double, 2>> current;
+    if (errors_ && accuracy_ && errors_->bit_errors > 0 && r.config.modulation == swept.modulation)
+        current = std::array<double, 2>{iq::snr_to_energy_ratios(accuracy_->snr_after_matched_db - accuracy_->expected_offset_db,
+                                                                  r.config.samples_per_symbol, iq::bits_per_symbol(r.config.modulation)).eb_n0_db,
+                                        errors_->ber()};
+    if (!busy)
+    {
+        ImGui::SameLine();
+        ExportImageButton("ber", [&] { return figures::ber(points, swept.modulation, current); });
+    }
+    if (swept != r.config)
+        ImGui::TextColored(ImVec4(.95f, .75f, .30f, 1.f), "This curve was measured for %s with other settings than the displayed signal.", iq::modulation_name(swept.modulation));
+    if (iq::is_differential(swept.modulation))
+        ImGui::TextWrapped("Differential scheme: each decision uses two observations, so it needs about 1 dB more Eb/N0 than its coherent twin (more for DBPSK at low Eb/N0), but it survives a carrier offset.");
+    else if (swept.impairments.cfo_hz != 0)
+        ImGui::TextWrapped("A carrier offset is set: this receiver has no carrier recovery, so a coherent scheme fails at every Eb/N0. Compare a differential scheme.");
+    double floor_ber = 1, first_db = points.front().eb_n0_db, last_db = points.front().eb_n0_db;
+    for (const auto& pt : points)
+    {
+        if (pt.errors.bit_count > 0)
+            floor_ber = std::min(floor_ber, 1.0 / static_cast<double>(pt.errors.bit_count));
+        first_db = std::min(first_db, pt.eb_n0_db);
+        last_db  = std::max(last_db, pt.eb_n0_db);
+    }
+    const double y_low = std::pow(10.0, std::floor(std::log10(std::max(floor_ber, 1e-12))));
+    if (ImPlot::BeginPlot("BER", ImVec2(-1, std::max(ImGui::GetContentRegionAvail().y, 340.f))))
+    {
+        ImPlot::SetupAxes("Eb/N0 (dB)", "Bit error rate");
+        ImPlot::SetupLegend(ImPlotLocation_SouthWest);
+        ImPlot::SetupAxisScale(ImAxis_Y1, ImPlotScale_Log10);
+        ImPlot::SetupAxisLimits(ImAxis_X1, first_db - .5, last_db + .5, ber_fit_ ? ImPlotCond_Always : ImPlotCond_Once);
+        ImPlot::SetupAxisLimits(ImAxis_Y1, y_low, 1.0, ber_fit_ ? ImPlotCond_Always : ImPlotCond_Once);
+        ber_fit_ = false;
+        if (!plot.theory_x.empty())
+        {
+            ImPlot::SetNextLineStyle(ImVec4(1.f, .55f, .15f, 1.f), 2.f);
+            ImPlot::PlotLine("Theory (ideal receiver)", plot.theory_x.data(), plot.theory_y.data(), static_cast<int>(plot.theory_x.size()));
+        }
+        if (!plot.x.empty())
+        {
+            ImPlot::SetNextLineStyle(ImVec4(.2f, .6f, 1.f, .6f), 1.5f);
+            ImPlot::SetNextMarkerStyle(ImPlotMarker_Circle, 4, ImVec4(.2f, .6f, 1.f, 1.f));
+            ImPlot::PlotLine("Measured", plot.x.data(), plot.y.data(), static_cast<int>(plot.x.size()));
+        }
+        if (!plot.bound_x.empty())
+        {
+            ImPlot::SetNextMarkerStyle(ImPlotMarker_Down, 5, ImVec4(.55f, .6f, .65f, 1.f));
+            ImPlot::PlotScatter("No errors seen (BER below this)", plot.bound_x.data(), plot.bound_y.data(), static_cast<int>(plot.bound_x.size()));
+        }
+        if (current)
+        {
+            ImPlot::SetNextMarkerStyle(ImPlotMarker_Diamond, 8, ImVec4(.43f, .86f, .55f, 1.f));
+            ImPlot::PlotScatter("Displayed signal", &(*current)[0], &(*current)[1], 1);
+        }
+        ImPlot::EndPlot();
+    }
 }
 
 void SignalGenerator::DrawPipeline(const iq::GeneratedSignal& r)
