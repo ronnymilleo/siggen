@@ -1,11 +1,11 @@
----
-BasedOnStyle: Microsoft
-AccessModifierOffset: -4
-PointerAlignment: Left
-ReferenceAlignment: Left
-AlignConsecutiveAssignments: true
-AlignConsecutiveBitFields: true
-AlignConsecutiveDeclarations: true
-AlignConsecutiveMacros: true
+BasedOnStyle: LLVM
+IndentWidth: 4
 ColumnLimit: 120
----
+NamespaceIndentation: None
+AccessModifierOffset: -4
+AllowShortFunctionsOnASingleLine: InlineOnly
+AllowShortBlocksOnASingleLine: Never
+AllowShortEnumsOnASingleLine: false
+AllowShortLoopsOnASingleLine: false
+AllowShortIfStatementsOnASingleLine: Never
+InsertBraces: true

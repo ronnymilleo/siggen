@@ -1,32 +1,28 @@
-/***********************************************************************************************************************
- *
- * @file WindowManager.cpp
- * @brief
- *
- **********************************************************************************************************************/
-
-/***********************************************************************************************************************
- *                                                   DEPENDENCIES
- **********************************************************************************************************************/
+/**
+ * @file    window_manager.cpp
+ * @brief   Owns the ImGui windows of the application and draws them each frame.
+ */
 
 #include "window_manager.h"
+
 #include "signal_generator.h"
 
-/***********************************************************************************************************************
- *                                                METHOD DEFINITIONS
- **********************************************************************************************************************/
+namespace GUI {
 
-WindowManager::WindowManager(const iq::GenerationConfig& config) : m_signalGeneratorWindow(config)
-{
+/**
+ * @brief   Creates the application windows.
+ * @param[in] config  Initial settings of the signal generator.
+ */
+WindowManager::WindowManager(const Core::GenerationConfig &config) : m_SignalGeneratorWindow(config) {
 }
 
 WindowManager::~WindowManager() = default;
 
-void WindowManager::Render()
-{
-    m_signalGeneratorWindow.Render();
+/**
+ * @brief   Draws every window. Call once per frame, between ImGuiLayer::NewFrame() and ImGuiLayer::Render().
+ */
+void WindowManager::Render() {
+    m_SignalGeneratorWindow.Render();
 }
 
-/***********************************************************************************************************************
- *                                                    END OF FILE
- **********************************************************************************************************************/
+} // namespace GUI

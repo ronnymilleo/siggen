@@ -1,26 +1,40 @@
-#pragma once
+/**
+ * @file    pipeline.h
+ * @brief   The intermediate stages of a linear signal, from data bits to transmitted samples.
+ */
+
+#ifndef SIGGEN_PIPELINE_H
+#define SIGGEN_PIPELINE_H
+
 #include "generator.h"
 #include <complex>
 #include <cstddef>
 #include <string>
 #include <vector>
 
-namespace iq {
-// Every stage between the data bits and the transmitted samples of a linear
-// signal, kept on one time base (stage index k * SPS) for the step-by-step view.
+namespace Core {
+
+/**
+ * @struct  PipelineStages
+ * @brief   Every stage between the data bits and the transmitted samples of a linear signal.
+ * @details All stages share one time base (stage index k * SPS) for the step-by-step view.
+ */
 struct PipelineStages {
-    std::string bits;                          // Transmitted bits.
-    int bits_per_symbol = 0;
-    int samples_per_symbol = 0;
-    double sample_rate_hz = 0;
-    std::size_t filter_delay_samples = 0;      // Group delay of the pulse filter.
-    std::size_t quadrature_delay_samples = 0; // OQPSK half-symbol lag of Q.
-    std::vector<std::complex<float>> symbols;   // Mapped symbols with amplitude gain applied.
-    std::vector<std::complex<float>> upsampled; // Zeros inserted: one impulse per symbol every SPS samples.
-    std::vector<std::complex<float>> shaped;    // Pulse-filter output, before AWGN and impairments.
-    std::vector<std::complex<float>> received;  // Final samples: shaped plus AWGN and impairments.
-    bool degraded = false;                      // True when AWGN or impairments make received differ from shaped.
+    std::string Bits; // Transmitted bits
+    int BitsPerSymbol = 0;
+    int SamplesPerSymbol = 0;
+    double SampleRateHz = 0;
+    std::size_t FilterDelaySamples = 0;         // Group delay of the pulse filter
+    std::size_t QuadratureDelaySamples = 0;     // OQPSK half-symbol lag of Q
+    std::vector<std::complex<float>> Symbols;   // Mapped symbols with amplitude gain applied
+    std::vector<std::complex<float>> Upsampled; // Zeros inserted: one impulse per symbol every SPS samples
+    std::vector<std::complex<float>> Shaped;    // Pulse-filter output, before AWGN and impairments
+    std::vector<std::complex<float>> Received;  // Final samples: shaped plus AWGN and impairments
+    bool Degraded = false;                      // True when AWGN or impairments make received differ from shaped
 };
-// Throws std::invalid_argument for noise and FSK signals, which have no symbol/filter pipeline.
-PipelineStages pipeline_stages(const GeneratedSignal& signal);
-}
+
+PipelineStages BuildPipelineStages(const GeneratedSignal &signal);
+
+} // namespace Core
+
+#endif // SIGGEN_PIPELINE_H

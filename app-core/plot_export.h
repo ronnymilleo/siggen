@@ -1,4 +1,13 @@
-#pragma once
+/**
+ * @file    plot_export.h
+ * @brief   Renders plots described as data into SVG documents or PNG images.
+ * @details A figure is drawn the same way into either format, so it can go straight into a slide or a report. It
+ *          does not depend on the GUI: the application builds a Figure from the data it plots.
+ */
+
+#ifndef SIGGEN_PLOT_EXPORT_H
+#define SIGGEN_PLOT_EXPORT_H
+
 #include <array>
 #include <cstdint>
 #include <filesystem>
@@ -6,61 +15,94 @@
 #include <string>
 #include <vector>
 
-namespace iq {
-// A plot described as data, drawn the same way into an SVG document or a PNG
-// raster so a figure can go straight into a slide or a report. It does not
-// depend on the GUI: the application builds a Figure from the data it plots.
+namespace Core {
+
+/**
+ * @struct  Rgb
+ * @brief   An 8-bit sRGB colour.
+ */
 struct Rgb {
-    std::uint8_t r = 0, g = 0, b = 0;
+    std::uint8_t R = 0, G = 0, B = 0;
 };
 
+/**
+ * @enum    SeriesKind
+ * @brief   How a series is drawn: connected line, markers, steps that hold each value, or stems from y = 0.
+ */
+enum class SeriesKind {
+    Line,
+    Scatter,
+    Stairs,
+    Stems
+};
+
+/**
+ * @struct  Series
+ * @brief   One data series of a panel.
+ */
 struct Series {
-    enum class Kind { Line, Scatter, Stairs, Stems };
-    Kind kind = Kind::Line;
-    std::string label;          // Empty: no legend entry.
-    std::vector<double> x, y;
-    Rgb color{51, 153, 255};
-    double alpha = 1.0;
-    double width = 2.0;         // Line width in pixels at 1600x900; markers scale with it.
+    Core::SeriesKind Kind = Core::SeriesKind::Line;
+    std::string Label; // Empty: no legend entry
+    std::vector<double> X, Y;
+    Rgb Color{51, 153, 255};
+    double Alpha = 1.0;
+    double Width = 2.0; // Line width in pixels at 1600x900; markers scale with it
 };
 
+/**
+ * @struct  Panel
+ * @brief   One set of axes with its series.
+ */
 struct Panel {
-    std::string title, x_label, y_label;
-    std::vector<Series> series;
-    std::optional<std::array<double, 2>> x_limits, y_limits; // Empty: fit the data.
-    bool equal_aspect = false;  // Same pixels per unit on both axes (constellations).
-    bool zero_line = false;     // Emphasise y = 0.
+    std::string Title, XLabel, YLabel;
+    std::vector<Core::Series> Series;
+    std::optional<std::array<double, 2>> XLimits, YLimits; // Empty: fit the data
+    bool EqualAspect = false;                              // Same pixels per unit on both axes (constellations)
+    bool ZeroLine = false;                                 // Emphasise y = 0
 };
 
+/**
+ * @struct  Figure
+ * @brief   A titled stack of panels.
+ */
 struct Figure {
-    std::string title;
-    std::vector<Panel> panels; // Stacked top to bottom; each has its own axes.
+    std::string Title;
+    std::vector<Panel> Panels; // Stacked top to bottom; each has its own axes
 };
 
+/**
+ * @struct  ImageStyle
+ * @brief   Output size in pixels and colour theme.
+ */
 struct ImageStyle {
-    int width = 1600;
-    int height = 900;
-    bool dark = true;          // Dark is the application's own look; light (white) suits print.
+    int Width = 1600;
+    int Height = 900;
+    bool Dark = true; // Dark is the application's own look; light (white) suits print
 };
 
-enum class ImageFormat { PNG, SVG };
+/**
+ * @enum    ImageFormat
+ * @brief   Image file formats ExportFigure() writes.
+ */
+enum class ImageFormat {
+    PNG,
+    SVG
+};
 
-constexpr int MIN_IMAGE_SIZE = 200;
-constexpr int MAX_IMAGE_SIZE = 8192;
+constexpr int MinImageSize = 200;
+constexpr int MaxImageSize = 8192;
 
-// Throws std::invalid_argument for a size outside [MIN_IMAGE_SIZE, MAX_IMAGE_SIZE] or an empty figure.
-std::string render_svg(const Figure& figure, const ImageStyle& style = {});
-// RGB bytes, row-major, width * height * 3, antialiased.
-std::vector<std::uint8_t> render_rgb(const Figure& figure, const ImageStyle& style = {});
-std::vector<std::uint8_t> render_png(const Figure& figure, const ImageStyle& style = {});
+// Rendering
+std::string RenderSvg(const Figure &figure, const ImageStyle &style = {});
+std::vector<std::uint8_t> RenderRgb(const Figure &figure, const ImageStyle &style = {});
+std::vector<std::uint8_t> RenderPng(const Figure &figure, const ImageStyle &style = {});
+void ExportFigure(const std::filesystem::path &destination, const Figure &figure, ImageFormat format,
+                  const ImageStyle &style = {}, bool overwrite = false);
 
-// Writes the figure; refuses to replace an existing file unless `overwrite`
-// (exclusive creation guards against a file appearing after a UI check).
-void export_figure(const std::filesystem::path& destination, const Figure& figure, ImageFormat format,
-                   const ImageStyle& style = {}, bool overwrite = false);
+// Axis ticks
+std::vector<double> NiceTicks(double lo, double hi, int target_count = 6);
+std::string FormatTick(double value, double step);
 
-// "Nice" tick positions (1, 2 or 5 times a power of ten) covering [lo, hi], inside the range.
-std::vector<double> nice_ticks(double lo, double hi, int target_count = 6);
-// Tick label for a value on an axis whose ticks are `step` apart.
-std::string format_tick(double value, double step);
-}
+} // namespace Core
+
+#endif // SIGGEN_PLOT_EXPORT_H

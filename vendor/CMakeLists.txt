@@ -1,8 +1,6 @@
 # =============================================================================
-# Vendor libraries setup
+# spdlog
 # =============================================================================
-
-cmake_minimum_required(VERSION 3.28)
 
 set(SPDLOG_BUILD_SHARED OFF CACHE BOOL "Build shared spdlog")
 set(SPDLOG_BUILD_EXAMPLE OFF CACHE BOOL "Build spdlog examples")
@@ -12,6 +10,10 @@ set(SPDLOG_BUILD_TESTS_HO OFF CACHE BOOL "Build header-only spdlog tests")
 set(SPDLOG_BUILD_BENCH OFF CACHE BOOL "Build spdlog benchmarks")
 set(SPDLOG_INSTALL OFF CACHE BOOL "Install spdlog")
 add_subdirectory(spdlog)
+
+# =============================================================================
+# CLI11
+# =============================================================================
 
 set(CLI11_BUILD_DOCS OFF CACHE BOOL "Build CLI11 documentation")
 set(CLI11_BUILD_TESTS OFF CACHE BOOL "Build CLI11 tests")
@@ -24,6 +26,10 @@ if(NOT SIGGEN_BUILD_GUI)
     return()
 endif()
 
+# =============================================================================
+# GLFW
+# =============================================================================
+
 find_package(OpenGL REQUIRED)
 
 # Normal variable: keep GLFW static without changing the parent/cache policy.
@@ -33,6 +39,10 @@ set(GLFW_BUILD_TESTS OFF CACHE BOOL "Build GLFW tests")
 set(GLFW_BUILD_DOCS OFF CACHE BOOL "Build GLFW documentation")
 set(GLFW_INSTALL OFF CACHE BOOL "Install GLFW")
 add_subdirectory(glfw)
+
+# =============================================================================
+# imgui
+# =============================================================================
 
 add_library(imgui STATIC
     ${CMAKE_CURRENT_SOURCE_DIR}/imgui/imgui.cpp
@@ -55,6 +65,12 @@ target_link_libraries(imgui
         OpenGL::GL
 )
 
+target_compile_definitions(imgui PUBLIC IMGUI_DEFINE_MATH_OPERATORS)
+
+# =============================================================================
+# implot
+# =============================================================================
+
 add_library(implot STATIC
     ${CMAKE_CURRENT_SOURCE_DIR}/implot/implot.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/implot/implot_items.cpp
@@ -69,7 +85,3 @@ target_link_libraries(implot
     PUBLIC
         imgui
 )
-
-# =============================================================================
-# End of file
-# =============================================================================

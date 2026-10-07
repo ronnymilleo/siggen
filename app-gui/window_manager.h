@@ -1,35 +1,31 @@
-/***********************************************************************************************************************
- *
- * @file WindowManager.h
- * @brief
- *
- **********************************************************************************************************************/
+/**
+ * @file    window_manager.h
+ * @brief   Owns the ImGui windows of the application and draws them each frame.
+ */
 
-#pragma once
-
-/***********************************************************************************************************************
- * DEPENDENCIES
- **********************************************************************************************************************/
+#ifndef SIGGEN_WINDOW_MANAGER_H
+#define SIGGEN_WINDOW_MANAGER_H
 
 #include "imgui_window_layer.h"
 #include "signal_generator.h"
 
-/***********************************************************************************************************************
- * CLASS
- **********************************************************************************************************************/
+namespace GUI {
 
-class WindowManager
-{
+/**
+ * @class   WindowManager
+ * @brief   Holds the application windows; today only the signal generator.
+ */
+class WindowManager {
 public:
-    explicit WindowManager(const iq::GenerationConfig& config = {});
+    explicit WindowManager(const Core::GenerationConfig &config = {});
     virtual ~WindowManager();
 
     void Render();
 
 private:
-    SignalGenerator m_signalGeneratorWindow;
+    SignalGenerator m_SignalGeneratorWindow;
 };
 
-/***********************************************************************************************************************
- * END OF FILE
- **********************************************************************************************************************/
+} // namespace GUI
+
+#endif // SIGGEN_WINDOW_MANAGER_H

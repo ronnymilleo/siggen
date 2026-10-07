@@ -1,4 +1,10 @@
+/**
+ * @file    waveform.cpp
+ * @brief   The waveforms the generator supports and the capability table that describes each of them.
+ */
+
 #include "waveform.h"
+
 #include <algorithm>
 #include <array>
 #include <cctype>
@@ -7,9 +13,11 @@
 #include <string>
 #include <string_view>
 
-namespace iq {
+namespace Core {
+
 namespace {
-constexpr std::array<WaveformDescriptor, 19> descriptors{{
+
+constexpr std::array<WaveformDescriptor, 19> Descriptors{{
     {Modulation::BPSK, "BPSK", Family::Linear, 1, true, true, true, 0},
     {Modulation::QPSK, "QPSK", Family::Linear, 2, true, true, true, 1},
     {Modulation::PSK8, "8-PSK", Family::Linear, 3, true, true, true, 2},
@@ -30,47 +38,136 @@ constexpr std::array<WaveformDescriptor, 19> descriptors{{
     {Modulation::DPSK8, "8-DPSK", Family::Linear, 3, true, true, true, 17},
     {Modulation::ASK4, "4-ASK", Family::Linear, 2, true, true, true, 18},
 }};
-std::string ascii_lower(std::string_view text) {
+
+std::string AsciiLower(std::string_view text) {
     std::string lowered(text);
     std::transform(lowered.begin(), lowered.end(), lowered.begin(),
                    [](unsigned char c) { return static_cast<char>(std::tolower(c)); });
     return lowered;
 }
+
+} // namespace
+
+/**
+ * @brief   Returns the capability table.
+ * @return  One descriptor per supported waveform.
+ */
+std::span<const WaveformDescriptor> Waveforms() {
+    return Descriptors;
 }
-std::span<const WaveformDescriptor> waveforms() { return descriptors; }
-const WaveformDescriptor& waveform_descriptor(Modulation modulation) {
-    for (const auto& entry : descriptors)
-        if (entry.modulation == modulation) return entry;
+
+/**
+ * @brief   Looks up the capabilities of a waveform.
+ * @param[in] modulation  Waveform to look up.
+ * @return  Its descriptor.
+ * @note    Throws std::invalid_argument for a value outside the table.
+ */
+const WaveformDescriptor &GetWaveformDescriptor(Modulation modulation) {
+    for (const auto &entry : Descriptors) {
+        if (entry.Modulation == modulation) {
+            return entry;
+        }
+    }
     throw std::invalid_argument("Unsupported waveform");
 }
-Family waveform_family(Modulation modulation) { return waveform_descriptor(modulation).family; }
-const char* family_name(Family family) {
+
+/**
+ * @brief   Returns how a waveform is generated.
+ * @param[in] modulation  Waveform to look up.
+ * @return  Its family.
+ */
+Family WaveformFamily(Modulation modulation) {
+    return GetWaveformDescriptor(modulation).Family;
+}
+
+/**
+ * @brief   Returns the lowercase family identifier used in export and batch metadata.
+ * @param[in] family  Family to name.
+ * @return  "linear", "noise" or "fsk".
+ */
+const char *FamilyName(Family family) {
     switch (family) {
-        case Family::Linear: return "linear";
-        case Family::Noise: return "noise";
-        case Family::Fsk: return "fsk";
+    case Family::Linear:
+        return "linear";
+    case Family::Noise:
+        return "noise";
+    case Family::Fsk:
+        return "fsk";
     }
     return "linear";
 }
-int bits_per_symbol(Modulation modulation) { return waveform_descriptor(modulation).bits_per_symbol; }
-const char* modulation_name(Modulation modulation) { return waveform_descriptor(modulation).canonical_name.data(); }
-int waveform_id(Modulation modulation) {
-    return waveform_descriptor(modulation).stable_id;
+
+/**
+ * @brief   Returns the number of bits each symbol of a waveform carries.
+ * @param[in] modulation  Waveform to look up.
+ * @return  Bits per symbol; zero for noise sources.
+ */
+int BitsPerSymbol(Modulation modulation) {
+    return GetWaveformDescriptor(modulation).BitsPerSymbol;
 }
-bool is_valid(Modulation modulation) {
-    return std::any_of(descriptors.begin(), descriptors.end(),
-                       [&](const auto& entry) { return entry.modulation == modulation; });
+
+/**
+ * @brief   Returns the canonical name of a waveform, as used by the CLI and presets.
+ * @param[in] modulation  Waveform to name.
+ * @return  The canonical name, such as "16-QAM".
+ */
+const char *ModulationName(Modulation modulation) {
+    return GetWaveformDescriptor(modulation).CanonicalName.data();
 }
-bool parse_modulation(std::string_view text, Modulation& out) {
-    const auto lowered = ascii_lower(text);
-    for (const auto& entry : descriptors)
-        if (ascii_lower(entry.canonical_name) == lowered) { out = entry.modulation; return true; }
+
+/**
+ * @brief   Returns the stable serialized and seed-derivation identifier of a waveform.
+ * @param[in] modulation  Waveform to look up.
+ * @return  An identifier independent of the enum and table order.
+ */
+int WaveformId(Modulation modulation) {
+    return GetWaveformDescriptor(modulation).StableId;
+}
+
+/**
+ * @brief   Checks whether a value names a supported waveform.
+ * @param[in] modulation  Value to check, possibly read from untrusted input.
+ * @return  True when the capability table has an entry for it.
+ */
+bool IsValid(Modulation modulation) {
+    return std::any_of(Descriptors.begin(), Descriptors.end(),
+                       [&](const auto &entry) { return entry.Modulation == modulation; });
+}
+
+/**
+ * @brief   Finds a waveform by its canonical name, ignoring ASCII case.
+ * @param[in]  text  Name to look up.
+ * @param[out] out   Set to the waveform on success; left unchanged otherwise.
+ * @return  True when the name matched.
+ */
+bool ParseModulation(std::string_view text, Modulation &out) {
+    const auto lowered = AsciiLower(text);
+    for (const auto &entry : Descriptors) {
+        if (AsciiLower(entry.CanonicalName) == lowered) {
+            out = entry.Modulation;
+            return true;
+        }
+    }
     return false;
 }
-bool parse_pulse(std::string_view text, Pulse& out) {
-    const auto lowered = ascii_lower(text);
-    if (lowered == "rrc" || lowered == "root-raised cosine") { out = Pulse::RRC; return true; }
-    if (lowered == "rectangular" || lowered == "rect") { out = Pulse::Rectangular; return true; }
+
+/**
+ * @brief   Reads a pulse shape name, ignoring ASCII case.
+ * @param[in]  text  "rrc", "root-raised cosine", "rectangular" or "rect".
+ * @param[out] out   Set to the pulse on success; left unchanged otherwise.
+ * @return  True when the name matched.
+ */
+bool ParsePulse(std::string_view text, Pulse &out) {
+    const auto lowered = AsciiLower(text);
+    if (lowered == "rrc" || lowered == "root-raised cosine") {
+        out = Pulse::RRC;
+        return true;
+    }
+    if (lowered == "rectangular" || lowered == "rect") {
+        out = Pulse::Rectangular;
+        return true;
+    }
     return false;
 }
-}
+
+} // namespace Core

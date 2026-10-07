@@ -1,50 +1,28 @@
-/***********************************************************************************************************************
- *
- * @file ImGuiWindow.h
- * @brief ImGuiWindow class prototype.
- *
- **********************************************************************************************************************/
+/**
+ * @file    imgui_window_layer.h
+ * @brief   Base class for an ImGui window that fills the native window.
+ */
 
-#pragma once
+#ifndef SIGGEN_IMGUI_WINDOW_LAYER_H
+#define SIGGEN_IMGUI_WINDOW_LAYER_H
 
-/***********************************************************************************************************************
- * DEPENDENCIES
- **********************************************************************************************************************/
-
-#define IMGUI_DEFINE_MATH_OPERATORS
 #include "imgui.h"
 #include <string>
 
-/***********************************************************************************************************************
- * MACROS AND TYPEDEFS
- **********************************************************************************************************************/
+namespace GUI {
 
-/***********************************************************************************************************************
- * CLASS
- **********************************************************************************************************************/
-
-class ImGuiWindowLayer
-{
+/**
+ * @class   ImGuiWindowLayer
+ * @brief   An ImGui window pinned to the work area of the main viewport, around the content of a derived class.
+ * @details Derived classes implement DrawContents() with the window content only. The title doubles as the ImGui
+ *          ID of the window.
+ */
+class ImGuiWindowLayer {
 public:
-    explicit ImGuiWindowLayer(const std::string& title) : m_WindowTitle{title}
-    {
-    }
+    explicit ImGuiWindowLayer(const std::string &title);
     virtual ~ImGuiWindowLayer() = default;
-    virtual void Render()
-    {
-        const auto* viewport = ImGui::GetMainViewport();
-        // Always follow the native window, including after resize or loading an
-        // old imgui.ini that placed the generator in a detached viewport.
-        ImGui::SetNextWindowPos(viewport->WorkPos);
-        ImGui::SetNextWindowSize(viewport->WorkSize);
-        ImGui::SetNextWindowViewport(viewport->ID);
-        constexpr auto flags = ImGuiWindowFlags_NoTitleBar | ImGuiWindowFlags_NoResize |
-                               ImGuiWindowFlags_NoCollapse | ImGuiWindowFlags_NoMove |
-                               ImGuiWindowFlags_NoDocking | ImGuiWindowFlags_NoSavedSettings;
-        if (ImGui::Begin(m_WindowTitle.c_str(), nullptr, flags))
-            DrawContents();
-        ImGui::End();
-    }
+
+    virtual void Render();
 
 protected:
     virtual void DrawContents() = 0;
@@ -53,6 +31,6 @@ private:
     std::string m_WindowTitle;
 };
 
-/***********************************************************************************************************************
- * END OF FILE
- **********************************************************************************************************************/
+} // namespace GUI
+
+#endif // SIGGEN_IMGUI_WINDOW_LAYER_H

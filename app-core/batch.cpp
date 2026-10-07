@@ -1,18 +1,21 @@
+/**
+ * @file    batch.cpp
+ * @brief   Generates sweeps of fixed-length frames over waveforms, seeds and SNRs into a dataset directory.
+ * @details The output directory holds one sample file and one JSON sidecar per frame, plus manifest.jsonl: a
+ *          header record, one record per completed frame and a final summary record.
+ */
+
 #include "batch.h"
+
 #include "impairments.h"
 #include "noise.h"
 #include "signal_processing.h"
-#include <algorithm>
 #include <cmath>
-#include <complex>
 #include <cstddef>
-#include <cstdint>
-#include <filesystem>
 #include <fstream>
 #include <initializer_list>
 #include <iomanip>
 #include <limits>
-#include <optional>
 #include <random>
 #include <set>
 #include <span>
@@ -20,373 +23,623 @@
 #include <stdexcept>
 #include <string>
 #include <utility>
-#include <vector>
 
-namespace iq {
+namespace Core {
+
 namespace {
-// Fixed stream tags for seed derivation; documented in batch.h.
-constexpr std::uint32_t STREAM_TAG_DATA = 1;
-constexpr std::uint32_t STREAM_TAG_NOISE = 2;
-constexpr std::uint32_t STREAM_TAG_IMPAIRMENT = 3;
-std::uint32_t derive_seed(std::initializer_list<std::uint32_t> material) {
+
+// Fixed stream tags for seed derivation
+constexpr std::uint32_t StreamTagData = 1;
+constexpr std::uint32_t StreamTagNoise = 2;
+constexpr std::uint32_t StreamTagImpairment = 3;
+
+constexpr std::size_t MaxFrameSymbols = 65536;
+
+/**
+ * @struct  FrameLocation
+ * @brief   Where a frame sits in the sweep: its axis values and its indices.
+ */
+struct FrameLocation {
+    Modulation Waveform{};
+    std::uint32_t Seed = 0;
+    std::optional<double> SnrDb; // Empty when the base noise setting applies, and always for noise sources
+    std::size_t PointIndex = 0;
+    std::size_t FrameIndex = 0;
+};
+
+// region Frames
+
+std::uint32_t DeriveSeed(std::initializer_list<std::uint32_t> material) {
     std::seed_seq sequence(material.begin(), material.end());
     std::mt19937 engine(sequence);
     return engine();
 }
-std::vector<Modulation> effective_waveforms(const BatchRequest& r) {
-    return r.waveforms.empty() ? std::vector<Modulation>{r.base.modulation} : r.waveforms;
+
+std::size_t PayloadSymbols(const int frame_size, const std::size_t samples_per_symbol) {
+    return (static_cast<std::size_t>(frame_size) + samples_per_symbol - 1) / samples_per_symbol;
 }
-std::vector<std::uint32_t> effective_seeds(const BatchRequest& r) {
-    return r.seeds.empty() ? std::vector<std::uint32_t>{r.base.seed} : r.seeds;
+
+// RRC frames carry one filter span of extra symbols on each side, so the crop avoids the filter transients
+std::size_t GuardSymbols(const GenerationConfig &config) {
+    return UsesRrc(config) ? static_cast<std::size_t>(config.SpanSymbols) : 0;
 }
-const char* format_name(ExportFormat format) {
+
+FrameResult GenerateNoiseFrame(GenerationConfig &config, const int frame_size, FrameResult frame) {
+    config.NoiseSource.SampleCount = frame_size;
+    auto full = Generate(config);
+    frame.Samples = std::move(full.Samples);
+    frame.SampleRateHz = full.SampleRateHz;
+    frame.Noise = NoiseRecord{false, 0, 0, 0, 0, config.NoiseSource.NoisePower, frame.NoiseSeed};
+    return frame;
+}
+
+/**
+ * @brief   Generates a symbol frame with guard symbols and crops it to the requested size.
+ * @param[in,out] config        Clean configuration of the frame; receives the data seed and the symbol count.
+ * @param[in]     frame_size    Samples in the frame.
+ * @param[in]     frame         Frame with its derived seeds set.
+ * @return  The cropped clean frame, without AWGN or impairments.
+ */
+FrameResult GenerateSymbolFrame(GenerationConfig &config, const int frame_size, FrameResult frame) {
+    config.Seed = frame.DataSeed;
+    const auto samples_per_symbol = static_cast<std::size_t>(config.SamplesPerSymbol);
+    const auto guard = GuardSymbols(config);
+    config.SymbolCount = static_cast<int>(PayloadSymbols(frame_size, samples_per_symbol) + 2 * guard);
+    auto full = Generate(config);
+    frame.CropOffset = guard * samples_per_symbol + full.FilterDelaySamples;
+    frame.FilterDelaySamples = full.FilterDelaySamples;
+    frame.SampleRateHz = full.SampleRateHz;
+    frame.Samples.assign(full.Samples.begin() + static_cast<std::ptrdiff_t>(frame.CropOffset),
+                         full.Samples.begin() +
+                             static_cast<std::ptrdiff_t>(frame.CropOffset + static_cast<std::size_t>(frame_size)));
+    return frame;
+}
+
+// endregion
+
+// region Batch validation
+
+std::vector<Modulation> EffectiveWaveforms(const BatchRequest &request) {
+    return request.Waveforms.empty() ? std::vector<Modulation>{request.Base.Modulation} : request.Waveforms;
+}
+
+std::vector<std::uint32_t> EffectiveSeeds(const BatchRequest &request) {
+    return request.Seeds.empty() ? std::vector<std::uint32_t>{request.Base.Seed} : request.Seeds;
+}
+
+// WGN ignores the SNR axis: one point per seed at the configured power
+std::size_t PointsPerSeed(const Modulation waveform, const BatchRequest &request) {
+    return (WaveformFamily(waveform) == Family::Noise || request.SnrsDb.empty()) ? 1 : request.SnrsDb.size();
+}
+
+void ValidateBatchSettings(const BatchRequest &request) {
+    if (request.FramesPerPoint < 1) {
+        throw std::invalid_argument("Frames per point must be at least 1");
+    }
+    if (request.Format != ExportFormat::CSV && request.Format != ExportFormat::BinaryFloat32) {
+        throw std::invalid_argument("Unsupported batch format");
+    }
+    if (request.OutputDir.empty()) {
+        throw std::invalid_argument("Batch output directory is empty");
+    }
+    if (request.Base.DataSource == DataSource::Explicit) {
+        throw std::invalid_argument("Batch generation requires seeded random data");
+    }
+    if (std::filesystem::exists(request.OutputDir)) {
+        throw std::runtime_error("Batch output directory already exists: " + request.OutputDir.string());
+    }
+}
+
+void ValidateSweepAxes(const std::vector<Modulation> &waveforms, const std::vector<std::uint32_t> &seeds,
+                       const std::vector<double> &snrs_db) {
+    std::set<int> waveform_ids;
+    for (const auto waveform : waveforms) {
+        if (!IsValid(waveform)) {
+            throw std::invalid_argument("Unsupported modulation");
+        }
+        if (!waveform_ids.insert(WaveformId(waveform)).second) {
+            throw std::invalid_argument(std::string("Duplicate waveform in sweep: ") + ModulationName(waveform));
+        }
+    }
+    std::set<std::uint32_t> unique_seeds;
+    for (const auto seed : seeds) {
+        if (!unique_seeds.insert(seed).second) {
+            throw std::invalid_argument("Duplicate seed in sweep: " + std::to_string(seed));
+        }
+    }
+    std::set<double> unique_snrs;
+    for (const auto snr : snrs_db) {
+        if (!std::isfinite(snr)) {
+            throw std::invalid_argument("SNR values must be finite");
+        }
+        if (!unique_snrs.insert(snr).second) {
+            throw std::invalid_argument("Duplicate SNR in sweep: " + std::to_string(snr));
+        }
+    }
+}
+
+// SnrPowerRatio() throws for SNRs whose power ratio is out of range
+void ValidateAwgnSettings(const Modulation waveform, const BatchRequest &request) {
+    if (!GetWaveformDescriptor(waveform).AwgnSupported || (request.SnrsDb.empty() && !request.Base.Awgn.Enabled)) {
+        return;
+    }
+    if (request.Base.AmplitudeGain == 0) {
+        throw std::invalid_argument("AWGN reference power must be positive");
+    }
+    if (request.SnrsDb.empty()) {
+        SnrPowerRatio(request.Base.Awgn.SnrDb);
+    } else {
+        for (const auto snr : request.SnrsDb) {
+            SnrPowerRatio(snr);
+        }
+    }
+}
+
+// endregion
+
+// region Output records
+
+const char *FormatName(const ExportFormat format) {
     return format == ExportFormat::CSV ? "csv" : "cf32_le";
 }
-const char* format_extension(ExportFormat format) {
+
+const char *FormatExtension(const ExportFormat format) {
     return format == ExportFormat::CSV ? ".csv" : ".cf32";
 }
-std::string frame_basename(std::size_t point_index, std::size_t frame_index) {
+
+std::string FrameBasename(const std::size_t point_index, const std::size_t frame_index) {
     std::ostringstream out;
-    out << "frame_" << std::setw(6) << std::setfill('0') << point_index << '_'
-        << std::setw(6) << std::setfill('0') << frame_index;
+    out << "frame_" << std::setw(6) << std::setfill('0') << point_index << '_' << std::setw(6) << std::setfill('0')
+        << frame_index;
     return out.str();
 }
-std::ostringstream json_stream() {
+
+std::ostringstream JsonStream() {
     std::ostringstream out;
     out.imbue(std::locale::classic());
     out << std::setprecision(std::numeric_limits<double>::max_digits10);
     return out;
 }
-}
-std::uint32_t derive_data_seed(std::uint32_t base_seed, Modulation waveform, std::size_t frame_index) {
-    return derive_seed({base_seed, static_cast<std::uint32_t>(waveform_id(waveform)),
-                        static_cast<std::uint32_t>(frame_index), STREAM_TAG_DATA});
-}
-std::uint32_t derive_noise_seed(std::uint32_t base_seed, Modulation waveform, std::size_t frame_index,
-                                std::uint32_t configured_noise_seed) {
-    return derive_seed({base_seed, static_cast<std::uint32_t>(waveform_id(waveform)),
-                        static_cast<std::uint32_t>(frame_index), STREAM_TAG_NOISE, configured_noise_seed});
-}
-std::uint32_t derive_impairment_seed(std::uint32_t base_seed, Modulation waveform, std::size_t frame_index,
-                                     std::uint32_t configured_impairment_seed) {
-    return derive_seed({base_seed, static_cast<std::uint32_t>(waveform_id(waveform)),
-                        static_cast<std::uint32_t>(frame_index), STREAM_TAG_IMPAIRMENT, configured_impairment_seed});
-}
-void validate_frame_request(const GenerationConfig& base, Modulation waveform, int frame_size) {
-    if (!is_valid(waveform)) throw std::invalid_argument("Unsupported modulation");
-    if (frame_size < 1 || static_cast<std::size_t>(frame_size) > MAX_SIGNAL_SAMPLES)
-        throw std::invalid_argument("Frame size must be 1–4194304 samples");
-    auto config = base;
-    config.modulation = waveform;
-    config.data_source = DataSource::Random;
-    config.bits.clear();
-    if (waveform_family(waveform) == Family::Noise) {
-        config.noise_source.sample_count = frame_size;
-        // WGN ignores the SNR axis entirely; any base AWGN setting is inactive.
-        config.awgn.enabled = false;
-        config.impairments = {};
-        validate(config);
-        return;
-    }
-    // Validate pulse/rate/gain ranges with a trivial length before frame arithmetic.
-    config.symbol_count = 1;
-    validate(config);
-    const auto sps = static_cast<std::size_t>(config.samples_per_symbol);
-    const auto payload = (static_cast<std::size_t>(frame_size) + sps - 1) / sps;
-    const auto guard = uses_rrc(config) ? static_cast<std::size_t>(config.span_symbols) : 0;
-    const auto symbols = payload + 2 * guard;
-    if (symbols > 65536) throw std::length_error("Frame generation exceeds symbol limit including guards");
-    config.symbol_count = static_cast<int>(symbols);
-    validate(config);
-    const auto taps = uses_rrc(config)
-                          ? static_cast<std::size_t>(config.span_symbols) * sps + 1 : sps;
-    const auto full_size = (symbols - 1) * sps + taps + quadrature_delay_samples(config);
-    const auto offset = guard * sps + (uses_rrc(config) ? (taps - 1) / 2 : 0);
-    if (offset + static_cast<std::size_t>(frame_size) > full_size)
-        throw std::length_error("Frame crop exceeds generated buffer");
-}
-FrameResult generate_frame(const GenerationConfig& base, int frame_size, std::size_t frame_index,
-                           const std::optional<double>& snr_db) {
-    validate_frame_request(base, base.modulation, frame_size);
-    FrameResult frame;
-    frame.data_seed = derive_data_seed(base.seed, base.modulation, frame_index);
-    frame.noise_seed = derive_noise_seed(base.seed, base.modulation, frame_index, base.noise_seed);
-    std::optional<double> effective_snr = snr_db;
-    if (!effective_snr && base.awgn.enabled) effective_snr = base.awgn.snr_db;
-    auto config = base;
-    config.data_source = DataSource::Random;
-    config.bits.clear();
-    config.awgn.enabled = false;
-    config.impairments = {};
-    config.noise_seed = frame.noise_seed;
-    if (waveform_family(base.modulation) == Family::Noise) {
-        config.noise_source.sample_count = frame_size;
-        auto full = generate(config);
-        frame.samples = std::move(full.samples);
-        frame.sample_rate_hz = full.sample_rate_hz;
-        frame.noise = NoiseRecord{false, 0, 0, 0, 0, config.noise_source.noise_power, frame.noise_seed};
-        return frame;
-    }
-    config.seed = frame.data_seed;
-    const auto sps = static_cast<std::size_t>(config.samples_per_symbol);
-    const auto payload = (static_cast<std::size_t>(frame_size) + sps - 1) / sps;
-    const auto guard = uses_rrc(config) ? static_cast<std::size_t>(config.span_symbols) : 0;
-    config.symbol_count = static_cast<int>(payload + 2 * guard);
-    auto full = generate(config);
-    frame.crop_offset = guard * sps + full.filter_delay_samples;
-    frame.filter_delay_samples = full.filter_delay_samples;
-    frame.sample_rate_hz = full.sample_rate_hz;
-    frame.samples.assign(full.samples.begin() + static_cast<std::ptrdiff_t>(frame.crop_offset),
-                         full.samples.begin() + static_cast<std::ptrdiff_t>(frame.crop_offset + static_cast<std::size_t>(frame_size)));
-    if (effective_snr) {
-        // Batch AWGN measures reference power over the retained clean frame.
-        frame.noise = add_awgn(frame.samples, 0, frame.samples.size(), *effective_snr, frame.noise_seed);
-    }
-    if (base.impairments.active()) {
-        frame.impairment_seed = derive_impairment_seed(base.seed, base.modulation, frame_index, base.impairment_seed);
-        apply_impairments(frame.samples, frame.sample_rate_hz, base.impairments, frame.impairment_seed);
-        frame.impairments_applied = true;
-    }
-    return frame;
-}
-void validate_batch(const BatchRequest& r) {
-    if (r.frames_per_point < 1) throw std::invalid_argument("Frames per point must be at least 1");
-    if (r.format != ExportFormat::CSV && r.format != ExportFormat::BinaryFloat32)
-        throw std::invalid_argument("Unsupported batch format");
-    if (r.output_dir.empty()) throw std::invalid_argument("Batch output directory is empty");
-    if (r.base.data_source == DataSource::Explicit)
-        throw std::invalid_argument("Batch generation requires seeded random data");
-    if (std::filesystem::exists(r.output_dir))
-        throw std::runtime_error("Batch output directory already exists: " + r.output_dir.string());
-    const auto waveforms = effective_waveforms(r);
-    const auto seeds = effective_seeds(r);
-    std::set<int> waveform_ids;
-    for (auto waveform : waveforms) {
-        if (!is_valid(waveform)) throw std::invalid_argument("Unsupported modulation");
-        if (!waveform_ids.insert(waveform_id(waveform)).second)
-            throw std::invalid_argument(std::string("Duplicate waveform in sweep: ") + modulation_name(waveform));
-    }
-    std::set<std::uint32_t> unique_seeds;
-    for (auto seed : seeds)
-        if (!unique_seeds.insert(seed).second)
-            throw std::invalid_argument("Duplicate seed in sweep: " + std::to_string(seed));
-    std::set<double> unique_snrs;
-    for (auto snr : r.snrs_db) {
-        if (!std::isfinite(snr)) throw std::invalid_argument("SNR values must be finite");
-        if (!unique_snrs.insert(snr).second)
-            throw std::invalid_argument("Duplicate SNR in sweep: " + std::to_string(snr));
-    }
-    std::size_t points = 0;
-    for (auto waveform : waveforms) {
-        validate_frame_request(r.base, waveform, r.frame_size);
-        if (waveform_descriptor(waveform).awgn_supported &&
-            (!r.snrs_db.empty() || r.base.awgn.enabled)) {
-            if (r.base.amplitude_gain == 0)
-                throw std::invalid_argument("AWGN reference power must be positive");
-            if (r.snrs_db.empty()) snr_power_ratio(r.base.awgn.snr_db);
-            else for (auto snr : r.snrs_db) snr_power_ratio(snr);
-        }
-        // WGN ignores the SNR axis: one point per seed at the configured power.
-        const auto per_seed = (waveform_family(waveform) == Family::Noise || r.snrs_db.empty())
-                                  ? 1 : r.snrs_db.size();
-        if (seeds.size() > (MAX_BATCH_FRAMES - points) / per_seed)
-            throw std::length_error("Batch exceeds frame limit");
-        points += seeds.size() * per_seed;
-    }
-    if (r.frames_per_point > static_cast<int>(MAX_BATCH_FRAMES / points))
-        throw std::length_error("Batch exceeds frame limit");
-}
-namespace {
-std::string frame_sidecar(const BatchRequest& r, Modulation waveform, std::uint32_t seed,
-                          const std::optional<double>& snr, std::size_t point_index, std::size_t frame_index,
-                          const FrameResult& frame, const std::string& data_name) {
-    auto out = json_stream();
-    const bool noise = waveform_family(waveform) == Family::Noise;
-    const bool fsk = waveform_family(waveform) == Family::Fsk;
-    auto shaped = r.base;
-    shaped.modulation = waveform;
-    out << "{\n  \"version\": 2,\n  \"kind\": \"batch_frame\",\n  \"format\": \"" << format_name(r.format)
-        << "\",\n  \"waveform\": " << json_quote(modulation_name(waveform))
-        << ",\n  \"family\": \"" << family_name(waveform_family(waveform))
-        << "\",\n  \"frame_size\": " << frame.samples.size()
-        << ",\n  \"sample_rate_hz\": " << frame.sample_rate_hz
-        << ",\n  \"sample_units\": \"relative amplitude\",\n  \"amplitude_gain\": " << r.base.amplitude_gain
-        << ",\n  \"point_index\": " << point_index << ",\n  \"frame_index\": " << frame_index
-        << ",\n  \"data_file\": " << json_quote(data_name)
-        << ",\n  \"axes\": {\n    \"seed\": " << seed << ",\n    \"snr_db\": ";
-    if (snr) out << *snr; else out << "null";
-    out << "\n  },\n  \"derived_seeds\": {\n    \"data\": " << frame.data_seed
-        << ",\n    \"noise\": " << frame.noise_seed << "\n  },\n";
-    if (noise) {
-        out << "  \"noise_source\": {\n    \"noise_power\": " << r.base.noise_source.noise_power
-            << ",\n    \"rule\": \"Box-Muller from mt19937; open-interval uniforms; I=cos, Q=sin\"\n  },\n";
-    } else if (fsk) {
-        out << "  \"fsk\": {\n    \"samples_per_symbol\": " << r.base.samples_per_symbol
-            << ",\n    \"symbol_rate_baud\": " << r.base.symbol_rate_baud
-            << ",\n    \"tone_spacing_hz\": " << fsk_tone_spacing_hz(shaped)
-            << ",\n    \"modulation_index\": " << fsk_modulation_index(shaped)
-            << ",\n    \"rule\": \"continuous phase, zero initial phase per frame, ascending Gray-labelled tones\"\n  },\n"
-            << "  \"crop\": {\n    \"offset_samples\": 0,\n    \"filter_delay_samples\": 0,\n    \"guard_symbols\": 0\n  },\n";
+
+void AppendOptionalNumber(std::ostream &out, const std::optional<double> &value) {
+    if (value) {
+        out << *value;
     } else {
-        out << "  \"linear\": {\n    \"pulse\": \"" << (r.base.pulse == Pulse::RRC ? "RRC" : "Rectangular")
-            << "\",\n    \"roll_off\": " << r.base.roll_off << ",\n    \"span_symbols\": " << r.base.span_symbols
-            << ",\n    \"samples_per_symbol\": " << r.base.samples_per_symbol
-            << ",\n    \"symbol_rate_baud\": " << r.base.symbol_rate_baud << "\n  },\n"
-            << "  \"crop\": {\n    \"offset_samples\": " << frame.crop_offset
-            << ",\n    \"filter_delay_samples\": " << frame.filter_delay_samples
-            << ",\n    \"guard_symbols\": " << (r.base.pulse == Pulse::RRC ? r.base.span_symbols : 0)
-            << "\n  },\n";
+        out << "null";
     }
-    if (!noise) {
-        if (frame.noise.awgn_applied) {
-            out << "  \"awgn\": {\n    \"requested_snr_db\": " << frame.noise.requested_snr_db
-                << ",\n    \"reference_power\": " << frame.noise.reference_power
-                << ",\n    \"reference_interval\": {\"begin\": " << frame.noise.reference_begin << ", \"end\": " << frame.noise.reference_end << "}"
-                << ",\n    \"added_noise_power\": " << frame.noise.added_noise_power
-                << ",\n    \"noise_seed\": " << frame.noise.noise_seed
-                << ",\n    \"snr_definition\": \"clean frame power / added complex noise power\"\n  },\n";
+}
+
+template <class T, class Writer> void AppendJsonArray(std::ostream &out, const std::vector<T> &values, Writer write) {
+    out << '[';
+    for (std::size_t k = 0; k < values.size(); ++k) {
+        if (k) {
+            out << ',';
         }
-        if (frame.impairments_applied)
-            out << "  \"impairments\": " << impairments_json(r.base.impairments, frame.impairment_seed, "  ") << ",\n";
+        write(values[k]);
+    }
+    out << ']';
+}
+
+void AppendNoiseSourceSidecar(std::ostream &out, const BatchRequest &request) {
+    out << "  \"noise_source\": {\n    \"noise_power\": " << request.Base.NoiseSource.NoisePower
+        << ",\n    \"rule\": \"Box-Muller from mt19937; open-interval uniforms; I=cos, Q=sin\"\n  },\n";
+}
+
+void AppendFskSidecar(std::ostream &out, const BatchRequest &request, const Modulation waveform) {
+    auto shaped = request.Base;
+    shaped.Modulation = waveform;
+    out << "  \"fsk\": {\n    \"samples_per_symbol\": " << request.Base.SamplesPerSymbol
+        << ",\n    \"symbol_rate_baud\": " << request.Base.SymbolRateBaud
+        << ",\n    \"tone_spacing_hz\": " << FskToneSpacingHz(shaped)
+        << ",\n    \"modulation_index\": " << FskModulationIndex(shaped)
+        << ",\n    \"rule\": \"continuous phase, zero initial phase per frame, ascending Gray-labelled tones\"\n  "
+           "},\n"
+        << "  \"crop\": {\n    \"offset_samples\": 0,\n    \"filter_delay_samples\": 0,\n    \"guard_symbols\": "
+           "0\n  },\n";
+}
+
+void AppendLinearSidecar(std::ostream &out, const BatchRequest &request, const FrameResult &frame) {
+    const auto &base = request.Base;
+    out << "  \"linear\": {\n    \"pulse\": \"" << (base.Pulse == Pulse::RRC ? "RRC" : "Rectangular")
+        << "\",\n    \"roll_off\": " << base.RollOff << ",\n    \"span_symbols\": " << base.SpanSymbols
+        << ",\n    \"samples_per_symbol\": " << base.SamplesPerSymbol
+        << ",\n    \"symbol_rate_baud\": " << base.SymbolRateBaud << "\n  },\n"
+        << "  \"crop\": {\n    \"offset_samples\": " << frame.CropOffset
+        << ",\n    \"filter_delay_samples\": " << frame.FilterDelaySamples
+        << ",\n    \"guard_symbols\": " << (base.Pulse == Pulse::RRC ? base.SpanSymbols : 0) << "\n  },\n";
+}
+
+void AppendChannelSidecar(std::ostream &out, const BatchRequest &request, const FrameResult &frame) {
+    const auto &noise = frame.Noise;
+    if (noise.AwgnApplied) {
+        out << "  \"awgn\": {\n    \"requested_snr_db\": " << noise.RequestedSnrDb
+            << ",\n    \"reference_power\": " << noise.ReferencePower
+            << ",\n    \"reference_interval\": {\"begin\": " << noise.ReferenceBegin
+            << ", \"end\": " << noise.ReferenceEnd << "}"
+            << ",\n    \"added_noise_power\": " << noise.AddedNoisePower << ",\n    \"noise_seed\": " << noise.NoiseSeed
+            << ",\n    \"snr_definition\": \"clean frame power / added complex noise power\"\n  },\n";
+    }
+    if (frame.ImpairmentsApplied) {
+        out << "  \"impairments\": " << ImpairmentsJson(request.Base.Impairments, frame.ImpairmentSeed, "  ") << ",\n";
+    }
+}
+
+/**
+ * @brief   Builds the JSON sidecar (version 2, kind "batch_frame") of one frame file.
+ * @param[in] request   Batch request.
+ * @param[in] location  Axis values and indices of the frame.
+ * @param[in] frame     Generated frame.
+ * @param[in] data_name File name of the frame samples, relative to the output directory.
+ * @return  The JSON document.
+ */
+std::string FrameSidecar(const BatchRequest &request, const FrameLocation &location, const FrameResult &frame,
+                         const std::string &data_name) {
+    auto out = JsonStream();
+    const auto family = WaveformFamily(location.Waveform);
+    out << "{\n  \"version\": 2,\n  \"kind\": \"batch_frame\",\n  \"format\": \"" << FormatName(request.Format)
+        << "\",\n  \"waveform\": " << JsonQuote(ModulationName(location.Waveform)) << ",\n  \"family\": \""
+        << FamilyName(family) << "\",\n  \"frame_size\": " << frame.Samples.size()
+        << ",\n  \"sample_rate_hz\": " << frame.SampleRateHz
+        << ",\n  \"sample_units\": \"relative amplitude\",\n  \"amplitude_gain\": " << request.Base.AmplitudeGain
+        << ",\n  \"point_index\": " << location.PointIndex << ",\n  \"frame_index\": " << location.FrameIndex
+        << ",\n  \"data_file\": " << JsonQuote(data_name) << ",\n  \"axes\": {\n    \"seed\": " << location.Seed
+        << ",\n    \"snr_db\": ";
+    AppendOptionalNumber(out, location.SnrDb);
+    out << "\n  },\n  \"derived_seeds\": {\n    \"data\": " << frame.DataSeed << ",\n    \"noise\": " << frame.NoiseSeed
+        << "\n  },\n";
+    switch (family) {
+    case Family::Noise:
+        AppendNoiseSourceSidecar(out, request);
+        break;
+    case Family::Fsk:
+        AppendFskSidecar(out, request, location.Waveform);
+        AppendChannelSidecar(out, request, frame);
+        break;
+    default:
+        AppendLinearSidecar(out, request, frame);
+        AppendChannelSidecar(out, request, frame);
+        break;
     }
     out << "  \"timing\": {\n    \"frame_start_s\": 0,\n    \"duration_s\": "
-        << (frame.sample_rate_hz > 0 ? frame.samples.size() / frame.sample_rate_hz : 0) << "\n  }\n}\n";
+        << (frame.SampleRateHz > 0 ? frame.Samples.size() / frame.SampleRateHz : 0) << "\n  }\n}\n";
     return out.str();
 }
-std::string manifest_record(const BatchRequest& r, Modulation waveform, std::uint32_t seed,
-                            const std::optional<double>& snr, std::size_t point_index, std::size_t frame_index,
-                            const FrameResult& frame, const std::string& data_name) {
-    auto out = json_stream();
-    out << "{\"kind\":\"frame\",\"point_index\":" << point_index << ",\"frame_index\":" << frame_index
-        << ",\"path\":" << json_quote(data_name)
-        << ",\"sidecar\":" << json_quote(data_name + ".json")
-        << ",\"waveform\":" << json_quote(modulation_name(waveform))
-        << ",\"family\":\"" << family_name(waveform_family(waveform))
-        << "\",\"seed\":" << seed << ",\"snr_db\":";
-    if (snr) out << *snr; else out << "null";
-    out << ",\"data_seed\":" << frame.data_seed << ",\"noise_seed\":" << frame.noise_seed
-        << ",\"frame_size\":" << frame.samples.size()
-        << ",\"format\":\"" << format_name(r.format) << '"'
-        << ",\"crop_offset_samples\":" << frame.crop_offset
-        << ",\"filter_delay_samples\":" << frame.filter_delay_samples
-        << ",\"awgn_applied\":" << (frame.noise.awgn_applied ? "true" : "false");
-    if (frame.impairments_applied)
-        out << ",\"impairment_seed\":" << frame.impairment_seed << ",\"cfo_hz\":" << r.base.impairments.cfo_hz
-            << ",\"phase_noise_linewidth_hz\":" << r.base.impairments.phase_noise_linewidth_hz
-            << ",\"iq_gain_db\":" << r.base.impairments.iq_gain_db
-            << ",\"iq_phase_deg\":" << r.base.impairments.iq_phase_deg
-            << ",\"dc_offset_i\":" << r.base.impairments.dc_offset_i
-            << ",\"dc_offset_q\":" << r.base.impairments.dc_offset_q
-            << ",\"adc_bits\":" << r.base.impairments.adc_bits;
-    if (frame.noise.awgn_applied)
-        out << ",\"requested_snr_db\":" << frame.noise.requested_snr_db
-            << ",\"reference_power\":" << frame.noise.reference_power
-            << ",\"added_noise_power\":" << frame.noise.added_noise_power;
-    if (waveform_family(waveform) == Family::Noise)
-        out << ",\"noise_power\":" << frame.noise.added_noise_power;
+
+/**
+ * @brief   Builds the manifest record (kind "frame") of one completed frame, one JSON object per line.
+ * @param[in] request   Batch request.
+ * @param[in] location  Axis values and indices of the frame.
+ * @param[in] frame     Generated frame.
+ * @param[in] data_name File name of the frame samples, relative to the output directory.
+ * @return  The record, ending with a newline.
+ */
+std::string ManifestRecord(const BatchRequest &request, const FrameLocation &location, const FrameResult &frame,
+                           const std::string &data_name) {
+    auto out = JsonStream();
+    out << "{\"kind\":\"frame\",\"point_index\":" << location.PointIndex << ",\"frame_index\":" << location.FrameIndex
+        << ",\"path\":" << JsonQuote(data_name) << ",\"sidecar\":" << JsonQuote(data_name + ".json")
+        << ",\"waveform\":" << JsonQuote(ModulationName(location.Waveform)) << ",\"family\":\""
+        << FamilyName(WaveformFamily(location.Waveform)) << "\",\"seed\":" << location.Seed << ",\"snr_db\":";
+    AppendOptionalNumber(out, location.SnrDb);
+    out << ",\"data_seed\":" << frame.DataSeed << ",\"noise_seed\":" << frame.NoiseSeed
+        << ",\"frame_size\":" << frame.Samples.size() << ",\"format\":\"" << FormatName(request.Format) << '"'
+        << ",\"crop_offset_samples\":" << frame.CropOffset << ",\"filter_delay_samples\":" << frame.FilterDelaySamples
+        << ",\"awgn_applied\":" << (frame.Noise.AwgnApplied ? "true" : "false");
+    if (frame.ImpairmentsApplied) {
+        const auto &impairments = request.Base.Impairments;
+        out << ",\"impairment_seed\":" << frame.ImpairmentSeed << ",\"cfo_hz\":" << impairments.CfoHz
+            << ",\"phase_noise_linewidth_hz\":" << impairments.PhaseNoiseLinewidthHz
+            << ",\"iq_gain_db\":" << impairments.IqGainDb << ",\"iq_phase_deg\":" << impairments.IqPhaseDeg
+            << ",\"dc_offset_i\":" << impairments.DcOffsetI << ",\"dc_offset_q\":" << impairments.DcOffsetQ
+            << ",\"adc_bits\":" << impairments.AdcBits;
+    }
+    if (frame.Noise.AwgnApplied) {
+        out << ",\"requested_snr_db\":" << frame.Noise.RequestedSnrDb
+            << ",\"reference_power\":" << frame.Noise.ReferencePower
+            << ",\"added_noise_power\":" << frame.Noise.AddedNoisePower;
+    }
+    if (WaveformFamily(location.Waveform) == Family::Noise) {
+        out << ",\"noise_power\":" << frame.Noise.AddedNoisePower;
+    }
     out << "}\n";
     return out.str();
 }
-std::string manifest_header(const BatchRequest& r, std::size_t point_count, std::size_t frame_count) {
-    auto out = json_stream();
+
+std::string ManifestHeader(const BatchRequest &request, const std::size_t point_count, const std::size_t frame_count) {
+    auto out = JsonStream();
     out << "{\"kind\":\"batch_header\",\"manifest_version\":1,\"tool\":\"siggen\",\"format\":\""
-        << format_name(r.format) << "\",\"frame_size\":" << r.frame_size
-        << ",\"frames_per_point\":" << r.frames_per_point
-        << ",\"point_count\":" << point_count << ",\"frame_count\":" << frame_count
-        << ",\"waveforms\":[";
-    const auto waveforms = effective_waveforms(r);
-    for (std::size_t k = 0; k < waveforms.size(); ++k) {
-        if (k) out << ',';
-        out << json_quote(modulation_name(waveforms[k]));
+        << FormatName(request.Format) << "\",\"frame_size\":" << request.FrameSize
+        << ",\"frames_per_point\":" << request.FramesPerPoint << ",\"point_count\":" << point_count
+        << ",\"frame_count\":" << frame_count << ",\"waveforms\":";
+    AppendJsonArray(out, EffectiveWaveforms(request),
+                    [&](const Modulation waveform) { out << JsonQuote(ModulationName(waveform)); });
+    out << ",\"seeds\":";
+    AppendJsonArray(out, EffectiveSeeds(request), [&](const std::uint32_t seed) { out << seed; });
+    out << ",\"snrs_db\":";
+    if (request.SnrsDb.empty()) {
+        out << "null";
+    } else {
+        AppendJsonArray(out, request.SnrsDb, [&](const double snr) { out << snr; });
     }
-    out << "],\"seeds\":[";
-    const auto seeds = effective_seeds(r);
-    for (std::size_t k = 0; k < seeds.size(); ++k) {
-        if (k) out << ',';
-        out << seeds[k];
-    }
-    out << "],\"snrs_db\":";
-    if (r.snrs_db.empty()) out << "null";
-    else {
-        out << '[';
-        for (std::size_t k = 0; k < r.snrs_db.size(); ++k) {
-            if (k) out << ',';
-            out << r.snrs_db[k];
-        }
-        out << ']';
-    }
-    out << ",\"amplitude_gain\":" << r.base.amplitude_gain << ",\"noise_seed\":" << r.base.noise_seed << "}\n";
+    out << ",\"amplitude_gain\":" << request.Base.AmplitudeGain << ",\"noise_seed\":" << request.Base.NoiseSeed
+        << "}\n";
     return out.str();
 }
+
+std::string ManifestSummary(const BatchSummary &summary) {
+    auto out = JsonStream();
+    out << "{\"kind\":\"summary\",\"completed\":true,\"point_count\":" << summary.PointCount
+        << ",\"frame_count\":" << summary.FrameCount << "}\n";
+    return out.str();
 }
-BatchSummary run_batch(const BatchRequest& r) {
-    validate_batch(r);
-    if (!std::filesystem::create_directory(r.output_dir))
-        throw std::runtime_error("Batch output directory already exists: " + r.output_dir.string());
-    const auto waveforms = effective_waveforms(r);
-    const auto seeds = effective_seeds(r);
-    // Total counts are known up front; the header advertises the full sweep.
-    std::size_t point_count = 0;
-    for (auto waveform : waveforms)
-        point_count += seeds.size() * ((waveform_family(waveform) == Family::Noise || r.snrs_db.empty())
-                                           ? 1 : r.snrs_db.size());
-    const auto frame_count = point_count * static_cast<std::size_t>(r.frames_per_point);
-    std::ofstream manifest(r.output_dir / "manifest.jsonl", std::ios::binary | std::ios::noreplace);
-    manifest.exceptions(std::ios::badbit | std::ios::failbit);
-    manifest << manifest_header(r, point_count, frame_count);
-    manifest.flush();
-    BatchSummary summary;
-    std::size_t point_index = 0;
-    for (auto waveform : waveforms) {
-        const bool noise = waveform_family(waveform) == Family::Noise;
-        std::vector<std::optional<double>> snr_points{std::nullopt};
-        if (!noise && !r.snrs_db.empty()) {
-            snr_points.clear();
-            for (auto snr : r.snrs_db) snr_points.push_back(snr);
+
+// endregion
+
+// region Batch run
+
+std::vector<std::optional<double>> SnrPoints(const Modulation waveform, const BatchRequest &request) {
+    std::vector<std::optional<double>> snr_points{std::nullopt};
+    if (WaveformFamily(waveform) != Family::Noise && !request.SnrsDb.empty()) {
+        snr_points.clear();
+        for (const auto snr : request.SnrsDb) {
+            snr_points.push_back(snr);
         }
-        for (auto seed : seeds) {
-            for (const auto& snr : snr_points) {
-                auto config = r.base;
-                config.modulation = waveform;
-                config.seed = seed;
-                for (auto frame_index = 0; frame_index < r.frames_per_point; ++frame_index) {
-                    const auto frame = generate_frame(config, r.frame_size, static_cast<std::size_t>(frame_index),
-                                                      noise ? std::nullopt : snr);
-                    const auto name = frame_basename(point_index, static_cast<std::size_t>(frame_index));
-                    const auto data_name = name + format_extension(r.format);
-                    const auto data_path = r.output_dir / data_name;
-                    const auto sidecar_path = r.output_dir / (data_name + ".json");
-                    const auto sidecar = frame_sidecar(r, waveform, seed, noise ? std::nullopt : snr,
-                                                       point_index, static_cast<std::size_t>(frame_index),
-                                                       frame, data_name);
-                    {
-                        std::ofstream data(data_path, std::ios::binary | std::ios::noreplace);
-                        std::ofstream meta(sidecar_path, std::ios::binary | std::ios::noreplace);
-                        data.exceptions(std::ios::badbit | std::ios::failbit);
-                        meta.exceptions(std::ios::badbit | std::ios::failbit);
-                        write_samples(data, std::span<const std::complex<float>>(frame.samples),
-                                      frame.sample_rate_hz, r.format);
-                        meta << sidecar;
-                        data.close();
-                        meta.close();
-                    }
-                    // Completion records are appended only after the frame files closed successfully.
-                    manifest << manifest_record(r, waveform, seed, noise ? std::nullopt : snr, point_index,
-                                                static_cast<std::size_t>(frame_index), frame, data_name);
-                    manifest.flush();
-                    ++summary.frame_count;
+    }
+    return snr_points;
+}
+
+std::size_t CountPoints(const std::vector<Modulation> &waveforms, const std::size_t seed_count,
+                        const BatchRequest &request) {
+    std::size_t point_count = 0;
+    for (const auto waveform : waveforms) {
+        point_count += seed_count * PointsPerSeed(waveform, request);
+    }
+    return point_count;
+}
+
+std::ofstream OpenManifest(const BatchRequest &request, const std::size_t point_count) {
+    const auto frame_count = point_count * static_cast<std::size_t>(request.FramesPerPoint);
+    std::ofstream manifest(request.OutputDir / "manifest.jsonl", std::ios::binary | std::ios::noreplace);
+    manifest.exceptions(std::ios::badbit | std::ios::failbit);
+    manifest << ManifestHeader(request, point_count, frame_count);
+    manifest.flush();
+    return manifest;
+}
+
+/**
+ * @brief   Generates one frame, writes its sample file and sidecar, then appends its manifest record.
+ * @note    The record is appended only after both frame files closed successfully, so the manifest lists only
+ *          complete frames.
+ */
+void WriteFrame(const BatchRequest &request, const GenerationConfig &config, const FrameLocation &location,
+                std::ofstream &manifest) {
+    const auto frame = GenerateFrame(config, request.FrameSize, location.FrameIndex, location.SnrDb);
+    const auto data_name = FrameBasename(location.PointIndex, location.FrameIndex) + FormatExtension(request.Format);
+    const auto sidecar = FrameSidecar(request, location, frame, data_name);
+    {
+        std::ofstream data_file(request.OutputDir / data_name, std::ios::binary | std::ios::noreplace);
+        std::ofstream sidecar_file(request.OutputDir / (data_name + ".json"), std::ios::binary | std::ios::noreplace);
+        data_file.exceptions(std::ios::badbit | std::ios::failbit);
+        sidecar_file.exceptions(std::ios::badbit | std::ios::failbit);
+        WriteSamples(data_file, std::span<const std::complex<float>>(frame.Samples), frame.SampleRateHz,
+                     request.Format);
+        sidecar_file << sidecar;
+        data_file.close();
+        sidecar_file.close();
+    }
+    manifest << ManifestRecord(request, location, frame, data_name);
+    manifest.flush();
+}
+
+// endregion
+
+} // namespace
+
+/**
+ * @brief   Derives the data seed of a batch frame.
+ * @param[in] base_seed     Seed of the sweep point.
+ * @param[in] waveform      Waveform of the frame.
+ * @param[in] frame_index   Index of the frame within its point.
+ * @return  A deterministic seed from std::seed_seq over {base seed, waveform id, frame index, 1}.
+ * @note    SNR is deliberately excluded so every SNR point of a (waveform, seed) sweep shares the same data and
+ *          noise draws.
+ */
+std::uint32_t DeriveDataSeed(const std::uint32_t base_seed, const Modulation waveform, const std::size_t frame_index) {
+    return DeriveSeed({base_seed, static_cast<std::uint32_t>(WaveformId(waveform)),
+                       static_cast<std::uint32_t>(frame_index), StreamTagData});
+}
+
+/**
+ * @brief   Derives the AWGN (or noise source) seed of a batch frame.
+ * @param[in] base_seed             Seed of the sweep point.
+ * @param[in] waveform              Waveform of the frame.
+ * @param[in] frame_index           Index of the frame within its point.
+ * @param[in] configured_noise_seed Noise seed of the base configuration.
+ * @return  A deterministic seed from std::seed_seq over {base seed, waveform id, frame index, 2, configured seed}.
+ * @note    Independent of the SNR, like DeriveDataSeed().
+ */
+std::uint32_t DeriveNoiseSeed(const std::uint32_t base_seed, const Modulation waveform, const std::size_t frame_index,
+                              const std::uint32_t configured_noise_seed) {
+    return DeriveSeed({base_seed, static_cast<std::uint32_t>(WaveformId(waveform)),
+                       static_cast<std::uint32_t>(frame_index), StreamTagNoise, configured_noise_seed});
+}
+
+/**
+ * @brief   Derives the channel impairment seed of a batch frame.
+ * @param[in] base_seed                     Seed of the sweep point.
+ * @param[in] waveform                      Waveform of the frame.
+ * @param[in] frame_index                   Index of the frame within its point.
+ * @param[in] configured_impairment_seed    Impairment seed of the base configuration.
+ * @return  A deterministic seed from std::seed_seq over {base seed, waveform id, frame index, 3, configured seed}.
+ * @note    Independent of the SNR, like DeriveDataSeed().
+ */
+std::uint32_t DeriveImpairmentSeed(const std::uint32_t base_seed, const Modulation waveform,
+                                   const std::size_t frame_index, const std::uint32_t configured_impairment_seed) {
+    return DeriveSeed({base_seed, static_cast<std::uint32_t>(WaveformId(waveform)),
+                       static_cast<std::uint32_t>(frame_index), StreamTagImpairment, configured_impairment_seed});
+}
+
+/**
+ * @brief   Checks that a frame can be generated, with checked frame arithmetic, without generating samples.
+ * @param[in] base          Base configuration.
+ * @param[in] waveform      Waveform of the frame, replacing the base modulation.
+ * @param[in] frame_size    Samples per frame, 1 to MaxSignalSamples.
+ * @note    Throws std::invalid_argument for an unsupported waveform, frame size or configuration, and
+ *          std::length_error when the frame with its guard symbols exceeds the symbol limit or the crop does not
+ *          fit the generated buffer.
+ */
+void ValidateFrameRequest(const GenerationConfig &base, const Modulation waveform, const int frame_size) {
+    if (!IsValid(waveform)) {
+        throw std::invalid_argument("Unsupported modulation");
+    }
+    if (frame_size < 1 || static_cast<std::size_t>(frame_size) > MaxSignalSamples) {
+        throw std::invalid_argument("Frame size must be 1–4194304 samples");
+    }
+    auto config = base;
+    config.Modulation = waveform;
+    config.DataSource = DataSource::Random;
+    config.Bits.clear();
+    if (WaveformFamily(waveform) == Family::Noise) {
+        config.NoiseSource.SampleCount = frame_size;
+        // WGN ignores the SNR axis entirely; any base AWGN setting is inactive
+        config.Awgn.Enabled = false;
+        config.Impairments = {};
+        Validate(config);
+        return;
+    }
+    // Validate pulse, rate and gain ranges with a trivial length before the frame arithmetic
+    config.SymbolCount = 1;
+    Validate(config);
+    const auto samples_per_symbol = static_cast<std::size_t>(config.SamplesPerSymbol);
+    const auto guard = GuardSymbols(config);
+    const auto symbols = PayloadSymbols(frame_size, samples_per_symbol) + 2 * guard;
+    if (symbols > MaxFrameSymbols) {
+        throw std::length_error("Frame generation exceeds symbol limit including guards");
+    }
+    config.SymbolCount = static_cast<int>(symbols);
+    Validate(config);
+    const auto taps =
+        UsesRrc(config) ? static_cast<std::size_t>(config.SpanSymbols) * samples_per_symbol + 1 : samples_per_symbol;
+    const auto full_size = (symbols - 1) * samples_per_symbol + taps + QuadratureDelaySamples(config);
+    const auto offset = guard * samples_per_symbol + (UsesRrc(config) ? (taps - 1) / 2 : 0);
+    if (offset + static_cast<std::size_t>(frame_size) > full_size) {
+        throw std::length_error("Frame crop exceeds generated buffer");
+    }
+}
+
+/**
+ * @brief   Generates one fixed-length frame of the base modulation.
+ * @param[in] base          Base configuration; its data source and bits are replaced by seeded random data.
+ * @param[in] frame_size    Samples in the frame.
+ * @param[in] frame_index   Index of the frame within its point; feeds the seed derivation.
+ * @param[in] snr_db        Enables AWGN at this SNR for linear waveforms; empty keeps the base noise setting.
+ *                          Noise sources ignore it.
+ * @return  The frame. Its timestamps always start at zero; the crop offset is reported separately.
+ * @note    Symbol frames are generated with guard symbols and cropped after the filter delay. AWGN measures its
+ *          reference power over the retained clean frame; impairments run after it on the cropped frame. Throws
+ *          like ValidateFrameRequest().
+ */
+FrameResult GenerateFrame(const GenerationConfig &base, const int frame_size, const std::size_t frame_index,
+                          const std::optional<double> &snr_db) {
+    ValidateFrameRequest(base, base.Modulation, frame_size);
+    FrameResult frame;
+    frame.DataSeed = DeriveDataSeed(base.Seed, base.Modulation, frame_index);
+    frame.NoiseSeed = DeriveNoiseSeed(base.Seed, base.Modulation, frame_index, base.NoiseSeed);
+    std::optional<double> effective_snr = snr_db;
+    if (!effective_snr && base.Awgn.Enabled) {
+        effective_snr = base.Awgn.SnrDb;
+    }
+    auto config = base;
+    config.DataSource = DataSource::Random;
+    config.Bits.clear();
+    config.Awgn.Enabled = false;
+    config.Impairments = {};
+    config.NoiseSeed = frame.NoiseSeed;
+    if (WaveformFamily(base.Modulation) == Family::Noise) {
+        return GenerateNoiseFrame(config, frame_size, std::move(frame));
+    }
+    frame = GenerateSymbolFrame(config, frame_size, std::move(frame));
+    if (effective_snr) {
+        frame.Noise = AddAwgn(frame.Samples, 0, frame.Samples.size(), *effective_snr, frame.NoiseSeed);
+    }
+    if (base.Impairments.Active()) {
+        frame.ImpairmentSeed = DeriveImpairmentSeed(base.Seed, base.Modulation, frame_index, base.ImpairmentSeed);
+        ApplyImpairments(frame.Samples, frame.SampleRateHz, base.Impairments, frame.ImpairmentSeed);
+        frame.ImpairmentsApplied = true;
+    }
+    return frame;
+}
+
+/**
+ * @brief   Validates a complete sweep, including checked size arithmetic, before any output is created.
+ * @param[in] request   Batch request.
+ * @note    Throws std::invalid_argument for invalid settings, duplicate or invalid axis values and frames that
+ *          cannot be generated, std::runtime_error when the output directory already exists, and std::length_error
+ *          when the sweep exceeds MaxBatchFrames frames.
+ */
+void ValidateBatch(const BatchRequest &request) {
+    ValidateBatchSettings(request);
+    const auto waveforms = EffectiveWaveforms(request);
+    const auto seeds = EffectiveSeeds(request);
+    ValidateSweepAxes(waveforms, seeds, request.SnrsDb);
+    std::size_t points = 0;
+    for (const auto waveform : waveforms) {
+        ValidateFrameRequest(request.Base, waveform, request.FrameSize);
+        ValidateAwgnSettings(waveform, request);
+        const auto per_seed = PointsPerSeed(waveform, request);
+        if (seeds.size() > (MaxBatchFrames - points) / per_seed) {
+            throw std::length_error("Batch exceeds frame limit");
+        }
+        points += seeds.size() * per_seed;
+    }
+    if (request.FramesPerPoint > static_cast<int>(MaxBatchFrames / points)) {
+        throw std::length_error("Batch exceeds frame limit");
+    }
+}
+
+/**
+ * @brief   Validates and runs a sweep, writing every frame, its sidecar and the manifest to a new directory.
+ * @param[in] request   Batch request; the output directory must not exist (existing directories are left
+ *                      untouched).
+ * @return  The number of points and frames written.
+ * @note    Throws like ValidateBatch() before creating anything. Fails fast on generation or write errors and
+ *          keeps the frames already completed; an interrupted run simply lacks the summary record.
+ */
+BatchSummary RunBatch(const BatchRequest &request) {
+    ValidateBatch(request);
+    if (!std::filesystem::create_directory(request.OutputDir)) {
+        throw std::runtime_error("Batch output directory already exists: " + request.OutputDir.string());
+    }
+    const auto waveforms = EffectiveWaveforms(request);
+    const auto seeds = EffectiveSeeds(request);
+    // Total counts are known up front; the header advertises the full sweep
+    auto manifest = OpenManifest(request, CountPoints(waveforms, seeds.size(), request));
+    BatchSummary summary;
+    FrameLocation location;
+    for (const auto waveform : waveforms) {
+        location.Waveform = waveform;
+        const auto snr_points = SnrPoints(waveform, request);
+        for (const auto seed : seeds) {
+            location.Seed = seed;
+            for (const auto &snr : snr_points) {
+                location.SnrDb = snr;
+                auto config = request.Base;
+                config.Modulation = waveform;
+                config.Seed = seed;
+                for (auto frame_index = 0; frame_index < request.FramesPerPoint; ++frame_index) {
+                    location.FrameIndex = static_cast<std::size_t>(frame_index);
+                    WriteFrame(request, config, location, manifest);
+                    ++summary.FrameCount;
                 }
-                ++point_index;
-                ++summary.point_count;
+                ++location.PointIndex;
+                ++summary.PointCount;
             }
         }
     }
-    auto summary_line = json_stream();
-    summary_line << "{\"kind\":\"summary\",\"completed\":true,\"point_count\":" << summary.point_count
-                 << ",\"frame_count\":" << summary.frame_count << "}\n";
-    manifest << summary_line.str();
+    manifest << ManifestSummary(summary);
     manifest.flush();
     manifest.close();
     return summary;
 }
-}
+
+} // namespace Core

@@ -1,3 +1,8 @@
+/**
+ * @file    main.cpp
+ * @brief   Entry point of siggen: parses the command line, then generates, runs a batch or opens the GUI.
+ */
+
 #include "cli_config.h"
 #include "command_line.h"
 #include "generator.h"
@@ -7,68 +12,65 @@
 #include <spdlog/spdlog.h>
 
 #if SIGGEN_HAS_GUI
-int run_gui(const iq::GenerationConfig& config);
+#include "gui_runner.h"
 #endif
 
-int main(int argc, char** argv)
-{
-    try
-    {
-        CommandLine command_line(SIGGEN_VERSION);
-        try
-        {
-            command_line.app.parse(argc, argv);
-        }
-        catch (const CLI::ParseError& e)
-        {
-            return command_line.app.exit(e);
+/**
+ * @brief   Parses the command line and runs the selected mode: batch, GUI, or a single generation exported to file.
+ * @param[in] argc  Argument count.
+ * @param[in] argv  Arguments.
+ * @return  0 on success; 1 on any error, or CLI11's exit code for --help, --version and parse errors.
+ * @note    The log level comes from SPDLOG_LEVEL unless --log-level overrides it. Logs go to stderr.
+ */
+int main(int argc, char **argv) {
+    try {
+        Console::CommandLine command_line(SIGGEN_VERSION);
+        try {
+            command_line.App.parse(argc, argv);
+        } catch (const CLI::ParseError &error) {
+            return command_line.App.exit(error);
         }
 
         spdlog::set_default_logger(spdlog::stderr_color_mt("siggen"));
         spdlog::set_pattern("[%Y-%m-%d %H:%M:%S.%e] [%n] [%^%l%$] %v");
         spdlog::cfg::load_env_levels();
-        if (!command_line.log_level.empty())
-            spdlog::set_level(spdlog::level::from_str(command_line.log_level));
+        if (!command_line.LogLevel.empty()) {
+            spdlog::set_level(spdlog::level::from_str(command_line.LogLevel));
+        }
         spdlog::flush_on(spdlog::level::warn);
 
-        if (command_line.batch_selected())
-        {
-            const auto request = resolve_batch(command_line);
-            spdlog::info("Generating batch into {}", request.output_dir.string());
-            const auto summary = iq::run_batch(request);
-            spdlog::info("Batch complete: {} frames across {} sweep points", summary.frame_count, summary.point_count);
+        if (command_line.BatchSelected()) {
+            const auto request = Console::ResolveBatch(command_line);
+            spdlog::info("Generating batch into {}", request.OutputDir.string());
+            const auto summary = Core::RunBatch(request);
+            spdlog::info("Batch complete: {} frames across {} sweep points", summary.FrameCount, summary.PointCount);
             return 0;
         }
 
-        const auto config = resolve_config(command_line);
+        const auto config = Console::ResolveConfig(command_line);
 
-        if (command_line.gui)
-        {
+        if (command_line.Gui) {
 #if SIGGEN_HAS_GUI
             spdlog::info("Starting Siggen GUI");
-            return run_gui(config);
+            return GUI::RunGUI(config);
 #else
-            spdlog::error("GUI support is not included in this build. Build with the dev or release preset to use --gui.");
+            spdlog::error(
+                "GUI support is not included in this build. Build with the dev or release preset to use --gui.");
             return 1;
 #endif
         }
 
-        const auto format = resolve_format(command_line.format);
-        const auto output = resolve_output(command_line);
-        spdlog::debug("Generating {} signal", iq::modulation_name(config.modulation));
-        const auto signal = iq::generate(config);
-        iq::export_signal(output, signal, format, command_line.overwrite);
-        spdlog::info("Exported {} complex samples to {} and its JSON metadata sidecar",
-                     signal.samples.size(), output);
+        const auto format = Console::ResolveFormat(command_line.Format);
+        const auto output = Console::ResolveOutput(command_line);
+        spdlog::debug("Generating {} signal", Core::ModulationName(config.Modulation));
+        const auto signal = Core::Generate(config);
+        Core::ExportSignal(output, signal, format, command_line.Overwrite);
+        spdlog::info("Exported {} complex samples to {} and its JSON metadata sidecar", signal.Samples.size(), output);
         return 0;
-    }
-    catch (const std::exception& e)
-    {
-        spdlog::error("Operation failed: {}", e.what());
+    } catch (const std::exception &error) {
+        spdlog::error("Operation failed: {}", error.what());
         return 1;
-    }
-    catch (...)
-    {
+    } catch (...) {
         spdlog::critical("Unknown error occurred");
         return 1;
     }
