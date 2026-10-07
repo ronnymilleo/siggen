@@ -42,13 +42,13 @@ std::vector<std::uint32_t> effective_seeds(const BatchRequest& r) {
 }
 // Manifest format: how a frame is stored. Sidecars describe the sample encoding instead.
 const char* format_name(ExportFormat format) {
-    return format == ExportFormat::CSV ? "csv" : format == ExportFormat::SigMF ? "sigmf" : "cf32_le";
+    return format == ExportFormat::CSV ? "csv" : "sigmf";
 }
 const char* data_format_name(ExportFormat format) {
     return format == ExportFormat::CSV ? "csv" : "cf32_le";
 }
 const char* format_extension(ExportFormat format) {
-    return format == ExportFormat::CSV ? ".csv" : format == ExportFormat::SigMF ? ".sigmf-data" : ".cf32";
+    return format == ExportFormat::CSV ? ".csv" : ".sigmf-data";
 }
 std::string frame_basename(std::size_t point_index, std::size_t frame_index) {
     std::ostringstream out;
@@ -157,7 +157,7 @@ FrameResult generate_frame(const GenerationConfig& base, int frame_size, std::si
 }
 void validate_batch(const BatchRequest& r) {
     if (r.frames_per_point < 1) throw std::invalid_argument("Frames per point must be at least 1");
-    if (r.format != ExportFormat::CSV && r.format != ExportFormat::BinaryFloat32 && r.format != ExportFormat::SigMF)
+    if (r.format != ExportFormat::CSV && r.format != ExportFormat::SigMF)
         throw std::invalid_argument("Unsupported batch format");
     if (r.output_dir.empty()) throw std::invalid_argument("Batch output directory is empty");
     if (r.base.data_source == DataSource::Explicit)

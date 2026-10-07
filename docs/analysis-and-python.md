@@ -43,8 +43,8 @@ Power, PAPR and the spectrum need only the samples. **EVM and SNR need the symbo
 they appear when the file carries siggen's configuration (a SigMF file written by `siggen --format sigmf` or `siggen batch`) and its
 length matches it: siggen regenerates the ideal symbols from `siggen:preset` and measures
 the *file's* samples against them. If the samples were modified after export, the report
-reflects the modification. Otherwise a `note` line says why EVM is absent. For a batch frame the meta also records the generator preset and where the frame was cut (`siggen:frame`); only symbols whose matched-filter window lies wholly inside the frame are scored, so a frame shorter than a few filter spans may report no EVM. A legacy `.cf32` frame
-is read through its `.json` sidecar and gets the sample-based measurements only. Errors
+reflects the modification. Otherwise a `note` line says why EVM is absent. For a batch frame the meta also records the generator preset and where the frame was cut (`siggen:frame`); only symbols whose matched-filter window lies wholly inside the frame are scored, so a frame shorter than a few filter spans may report no EVM.
+Errors
 (missing file, unsupported datatype, truncated data, malformed JSON) print a message and exit
 with status 1.
 

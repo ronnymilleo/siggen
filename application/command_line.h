@@ -109,7 +109,7 @@ struct CommandLine
         batch->excludes(gui_option);
 
         analyze = app.add_subcommand("analyze", "Measure a SigMF recording (single signal or batch frame) (power, PAPR, spectrum, EVM)");
-        analyze->add_option("file", analyze_file, "SigMF .sigmf-meta/.sigmf-data, or a legacy .cf32 frame with its .json sidecar")
+        analyze->add_option("file", analyze_file, "SigMF .sigmf-meta or .sigmf-data")
             ->required();
         analyze->add_option("--window", analyze_window, "Welch window (default: hann)")
             ->check(CLI::IsMember({"hann", "hamming", "blackman", "rectangular"}));

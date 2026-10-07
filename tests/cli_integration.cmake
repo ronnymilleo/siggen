@@ -76,7 +76,7 @@ run(success --output custom.csv --overwrite --log-level off)
 if(NOT last_output STREQUAL "")
     message(FATAL_ERROR "Log level off did not silence output")
 endif()
-# The raw cf32 format is gone from the command line (library batches can still write it).
+# The raw cf32 format no longer exists; SigMF replaced it.
 run(failure --format cf32)
 run(failure batch --format cf32 --output-dir rejected-batch)
 # WGN source produces the configured sample count and noise family metadata.

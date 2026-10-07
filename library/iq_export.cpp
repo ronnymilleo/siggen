@@ -19,7 +19,7 @@
 namespace iq {
 namespace {
 bool supported(ExportFormat format) {
-    return format == ExportFormat::CSV || format == ExportFormat::BinaryFloat32 || format == ExportFormat::SigMF;
+    return format == ExportFormat::CSV || format == ExportFormat::SigMF;
 }
 void validate_linear(const GeneratedSignal& r) {
     const auto sps = static_cast<std::size_t>(r.config.samples_per_symbol);
@@ -142,7 +142,7 @@ std::string trimmed(std::string text) {
 std::string export_metadata(const GeneratedSignal& r, ExportFormat format) {
     if (format != ExportFormat::SigMF) return siggen_metadata(r, format);
     // SigMF 1.0.0 core fields; everything siggen-specific lives under the `siggen:` namespace.
-    const auto detail = siggen_metadata(r, ExportFormat::BinaryFloat32);
+    const auto detail = siggen_metadata(r, ExportFormat::SigMF);
     std::ostringstream out;
     out.imbue(std::locale::classic());
     out << std::setprecision(std::numeric_limits<double>::max_digits10)

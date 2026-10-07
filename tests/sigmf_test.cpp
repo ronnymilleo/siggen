@@ -33,7 +33,7 @@ void write_file(const std::filesystem::path& path, const std::string& bytes) {
 
 TEST(SigMF, MetadataPathPairsDataAndMetaFiles) {
     EXPECT_EQ(iq::metadata_path("a/b.sigmf-data"), std::filesystem::path("a/b.sigmf-meta"));
-    EXPECT_EQ(iq::metadata_path("a/b.iq"), std::filesystem::path("a/b.iq.json"));
+    EXPECT_EQ(iq::metadata_path("a/b.csv"), std::filesystem::path("a/b.csv.json"));
 }
 
 TEST(SigMF, MetadataIsValidJsonWithCoreFields) {
@@ -137,19 +137,6 @@ TEST(Analyze, SpectrumFindsToneAndBandwidth) {
     EXPECT_EQ(json.at("sample_count"), 8192);
 }
 
-TEST(Recording, ReadsBatchCf32FramesThroughTheirSidecar) {
-    const auto dir = scratch_dir("cf32");
-    const auto signal = iq::generate(qam_config());
-    iq::export_signal(dir / "tx.iq", signal, iq::ExportFormat::BinaryFloat32);
-    const auto recording = iq::read_recording(dir / "tx.iq");
-    ASSERT_EQ(recording.samples.size(), signal.samples.size());
-    EXPECT_EQ(recording.samples[17], signal.samples[17]);
-    EXPECT_FALSE(recording.config.has_value());
-    const auto report = iq::analyze_recording(recording);
-    EXPECT_FALSE(report.accuracy.has_value());
-    EXPECT_NE(report.note.find("SigMF"), std::string::npos);
-}
-
 TEST(Recording, ReadsSigmfCi16WithScaling) {
     const auto dir = scratch_dir("ci16");
     write_file(dir / "r.sigmf-meta", R"({"global": {"core:datatype": "ci16_le", "core:sample_rate": 1000.0, "core:version": "1.0.0"}, "captures": [], "annotations": []})");
@@ -175,7 +162,7 @@ TEST(Recording, RejectsBadInputs) {
     write_file(dir / "m.sigmf-meta", "not json");
     EXPECT_THROW(iq::read_recording(dir / "m.sigmf-meta"), std::invalid_argument);
     EXPECT_THROW(iq::read_recording(dir / "missing.sigmf-meta"), std::runtime_error);
-    EXPECT_THROW(iq::read_recording(dir / "nometa.iq"), std::runtime_error);
+    EXPECT_THROW(iq::read_recording(dir / "tx.iq"), std::runtime_error);
     write_file(dir / "nan.sigmf-meta", R"({"global": {"core:datatype": "cf32_le", "core:sample_rate": 1000}})");
     write_file(dir / "nan.sigmf-data", std::string("\x00\x00\xc0\x7f\x00\x00\x00\x00", 8));
     EXPECT_THROW(iq::read_recording(dir / "nan.sigmf-meta"), std::runtime_error);

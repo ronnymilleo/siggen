@@ -89,26 +89,11 @@ Recording read_sigmf(std::filesystem::path meta_path) {
     }
     return recording;
 }
-Recording read_siggen_binary(const std::filesystem::path& path) {
-    const auto sidecar = path.string() + ".json";
-    if (!std::filesystem::exists(sidecar))
-        throw std::runtime_error("No metadata found: expected " + sidecar + " (or a .sigmf-meta file)");
-    const auto root = parse_json(read_text(sidecar));
-    const auto& format = require(root, "format", "siggen metadata");
-    if (!format.is_string() || format.get<std::string>() != "cf32_le")
-        throw std::runtime_error("Only cf32 exports and SigMF recordings can be read; CSV is not supported");
-    const auto& rate = require(root, "sample_rate_hz", "siggen metadata");
-    if (!rate.is_number() || !(rate.get<double>() > 0)) throw std::runtime_error("siggen metadata has an invalid sample_rate_hz");
-    Recording recording;
-    recording.datatype = "cf32_le";
-    recording.sample_rate_hz = rate.get<double>();
-    recording.samples = decode(read_bytes(path), recording.datatype);
-    return recording;
-}
 }
 Recording read_recording(const std::filesystem::path& path) {
-    if (path.extension() == ".sigmf-meta" || path.extension() == ".sigmf-data") return read_sigmf(path);
-    return read_siggen_binary(path);
+    if (path.extension() != ".sigmf-meta" && path.extension() != ".sigmf-data")
+        throw std::runtime_error("Unsupported file '" + path.string() + "': expected a .sigmf-meta or .sigmf-data recording");
+    return read_sigmf(path);
 }
 std::optional<GeneratedSignal> signal_from_recording(const Recording& recording) {
     if (!recording.config || recording.frame) return std::nullopt;

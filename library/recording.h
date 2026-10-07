@@ -20,8 +20,7 @@ struct Recording {
     struct Frame { std::size_t crop_offset = 0; std::size_t size = 0; };
     std::optional<Frame> frame;
 };
-// Reads a SigMF recording given its `.sigmf-meta` or `.sigmf-data` path, or a
-// legacy siggen `cf32` export given its sample file (metadata from `<path>.json`).
+// Reads a SigMF recording given its `.sigmf-meta` or `.sigmf-data` path.
 // Supports cf32_le and ci16_le (scaled by 1/32768). Throws std::runtime_error
 // or std::invalid_argument with a descriptive message otherwise.
 Recording read_recording(const std::filesystem::path& path);

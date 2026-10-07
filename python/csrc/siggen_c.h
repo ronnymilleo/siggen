@@ -15,7 +15,7 @@ SIGGEN_API int siggen_default_preset(char* out, size_t capacity);
 
 // Generate from preset text. Returns NULL on failure.
 SIGGEN_API siggen_signal* siggen_generate(const char* preset_text, char* error, size_t error_capacity);
-// Read a SigMF recording (.sigmf-meta/.sigmf-data) or a legacy cf32 frame. Returns NULL on failure.
+// Read a SigMF recording (.sigmf-meta/.sigmf-data). Returns NULL on failure.
 SIGGEN_API siggen_signal* siggen_load(const char* path, char* error, size_t error_capacity);
 SIGGEN_API void siggen_free(siggen_signal* signal);
 

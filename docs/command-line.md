@@ -60,8 +60,7 @@ disabled.
 
 ### Analyzing a recording
 
-`siggen analyze <file>` measures a SigMF recording (`.sigmf-meta` or `.sigmf-data`) or a
-legacy `.cf32` frame (with its `.json` sidecar) without opening the GUI, using the same
+`siggen analyze <file>` measures a SigMF recording (`.sigmf-meta` or `.sigmf-data`, including batch frames) without opening the GUI, using the same
 estimators: sample count and rate, mean power, PAPR, the strongest spectral bin, the
 99 % occupied bandwidth and, for a recording made by siggen, the waveform, EVM and
 SNR after the matched filter. `--window hann|hamming|blackman|rectangular` and

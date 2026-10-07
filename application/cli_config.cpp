@@ -134,7 +134,6 @@ iq::GenerationConfig resolve_base(const CLI::App& source, const CommandLine& cli
 iq::GenerationConfig resolve_config(const CommandLine& cli) { return resolve_base(cli.app, cli, false); }
 
 iq::ExportFormat resolve_format(const std::string& format) {
-    if (format == "cf32") return iq::ExportFormat::BinaryFloat32;
     if (format == "csv") return iq::ExportFormat::CSV;
     if (format == "sigmf") return iq::ExportFormat::SigMF;
     throw std::invalid_argument("Unknown --format: " + format);
