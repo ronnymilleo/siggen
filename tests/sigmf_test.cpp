@@ -1,6 +1,5 @@
 #include "analysis.h"
 #include "iq_export.h"
-#include "json.h"
 #include "measurements.h"
 #include "preset.h"
 #include "recording.h"
@@ -8,6 +7,7 @@
 #include <filesystem>
 #include <fstream>
 #include <gtest/gtest.h>
+#include <nlohmann/json.hpp>
 #include <random>
 
 namespace {
@@ -31,22 +31,6 @@ void write_file(const std::filesystem::path& path, const std::string& bytes) {
 }
 }
 
-TEST(Json, ParsesNestedDocumentsAndEscapes) {
-    const auto v = iq::json::parse(R"({"a": [1, -2.5e1, true, null], "s": "x\n\u00e9\"", "o": {"k": "v"}})");
-    ASSERT_TRUE(v.is_object());
-    EXPECT_DOUBLE_EQ(v.find("a")->array[1].number, -25);
-    EXPECT_TRUE(v.find("a")->array[2].boolean);
-    EXPECT_EQ(v.find("s")->string, "x\n\xc3\xa9\"");
-    EXPECT_EQ(v.find("o")->find("k")->string, "v");
-    EXPECT_EQ(v.find("missing"), nullptr);
-}
-
-TEST(Json, RejectsMalformedInput) {
-    for (const char* bad : {"", "{", "[1,]", "{\"a\" 1}", "tru", "\"abc", "01x", "{} {}", "[1] x", "\"\\q\""})
-        EXPECT_THROW(iq::json::parse(bad), std::invalid_argument) << bad;
-    EXPECT_THROW(iq::json::parse(std::string(100, '[')), std::invalid_argument);
-}
-
 TEST(SigMF, MetadataPathPairsDataAndMetaFiles) {
     EXPECT_EQ(iq::metadata_path("a/b.sigmf-data"), std::filesystem::path("a/b.sigmf-meta"));
     EXPECT_EQ(iq::metadata_path("a/b.iq"), std::filesystem::path("a/b.iq.json"));
@@ -54,16 +38,14 @@ TEST(SigMF, MetadataPathPairsDataAndMetaFiles) {
 
 TEST(SigMF, MetadataIsValidJsonWithCoreFields) {
     const auto signal = iq::generate(qam_config());
-    const auto root = iq::json::parse(iq::export_metadata(signal, iq::ExportFormat::SigMF));
-    const auto* global = root.find("global");
-    ASSERT_NE(global, nullptr);
-    EXPECT_EQ(global->find("core:datatype")->string, "cf32_le");
-    EXPECT_DOUBLE_EQ(global->find("core:sample_rate")->number, signal.sample_rate_hz);
-    EXPECT_EQ(global->find("core:version")->string, "1.0.0");
-    EXPECT_EQ(global->find("siggen:metadata")->find("sample_count")->number, static_cast<double>(signal.samples.size()));
-    EXPECT_EQ(global->find("siggen:preset")->string, iq::serialize_preset(signal.config));
-    ASSERT_NE(root.find("captures"), nullptr);
-    EXPECT_EQ(root.find("captures")->array.size(), 1u);
+    const auto root = nlohmann::json::parse(iq::export_metadata(signal, iq::ExportFormat::SigMF));
+    const auto& global = root.at("global");
+    EXPECT_EQ(global.at("core:datatype"), "cf32_le");
+    EXPECT_DOUBLE_EQ(global.at("core:sample_rate").get<double>(), signal.sample_rate_hz);
+    EXPECT_EQ(global.at("core:version"), "1.0.0");
+    EXPECT_EQ(global.at("siggen:metadata").at("sample_count").get<std::size_t>(), signal.samples.size());
+    EXPECT_EQ(global.at("siggen:preset"), iq::serialize_preset(signal.config));
+    EXPECT_EQ(root.at("captures").size(), 1u);
 }
 
 TEST(SigMF, ExportThenReadRoundTripsSamplesAndConfiguration) {
@@ -151,8 +133,8 @@ TEST(Analyze, SpectrumFindsToneAndBandwidth) {
     EXPECT_LT(report.occupied_bandwidth_hz, 100);
     EXPECT_FALSE(report.accuracy.has_value());
     EXPECT_NE(iq::report_text(report).find("PAPR"), std::string::npos);
-    const auto json = iq::json::parse(iq::report_json(report));
-    EXPECT_DOUBLE_EQ(json.find("sample_count")->number, 8192);
+    const auto json = nlohmann::json::parse(iq::report_json(report));
+    EXPECT_EQ(json.at("sample_count"), 8192);
 }
 
 TEST(Recording, ReadsCf32ExportsThroughTheirSidecar) {

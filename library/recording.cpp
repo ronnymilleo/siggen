@@ -1,6 +1,6 @@
 #include "recording.h"
-#include "json.h"
 #include "preset.h"
+#include <nlohmann/json.hpp>
 #include <bit>
 #include <cmath>
 #include <cstdint>
@@ -49,29 +49,36 @@ std::vector<std::complex<float>> decode(const std::vector<char>& bytes, const st
         if (!std::isfinite(value.real()) || !std::isfinite(value.imag())) throw std::runtime_error("Recording contains non-finite samples");
     return samples;
 }
-const json::Value& require(const json::Value& object, std::string_view key, const char* where) {
-    const auto* value = object.find(key);
-    if (!value) throw std::runtime_error(std::string(where) + " is missing '" + std::string(key) + "'");
-    return *value;
+using Json = nlohmann::json;
+Json parse_json(const std::string& text) {
+    try {
+        return Json::parse(text);
+    } catch (const Json::parse_error& e) {
+        throw std::invalid_argument(std::string("Invalid JSON: ") + e.what());
+    }
+}
+const Json& require(const Json& object, const char* key, const char* where) {
+    if (!object.is_object() || !object.contains(key)) throw std::runtime_error(std::string(where) + " is missing '" + key + "'");
+    return object.at(key);
 }
 Recording read_sigmf(std::filesystem::path meta_path) {
     if (meta_path.extension() == ".sigmf-data") meta_path.replace_extension(".sigmf-meta");
-    const auto root = json::parse(read_text(meta_path));
+    const auto root = parse_json(read_text(meta_path));
     const auto& global = require(root, "global", "SigMF metadata");
     Recording recording;
     const auto& datatype = require(global, "core:datatype", "SigMF global object");
     const auto& rate = require(global, "core:sample_rate", "SigMF global object");
-    if (!datatype.is_string() || !rate.is_number() || !(rate.number > 0))
+    if (!datatype.is_string() || !rate.is_number() || !(rate.get<double>() > 0))
         throw std::runtime_error("SigMF core:datatype must be a string and core:sample_rate a positive number");
-    recording.datatype = datatype.string;
-    recording.sample_rate_hz = rate.number;
-    if (const auto* description = global.find("core:description"); description && description->is_string())
-        recording.description = description->string;
+    recording.datatype = datatype.get<std::string>();
+    recording.sample_rate_hz = rate.get<double>();
+    if (global.contains("core:description") && global.at("core:description").is_string())
+        recording.description = global.at("core:description").get<std::string>();
     auto data_path = meta_path;
     data_path.replace_extension(".sigmf-data");
     recording.samples = decode(read_bytes(data_path), recording.datatype);
-    if (const auto* preset = global.find("siggen:preset"); preset && preset->is_string()) {
-        try { recording.config = parse_preset(preset->string); } catch (const std::exception&) {}
+    if (global.contains("siggen:preset") && global.at("siggen:preset").is_string()) {
+        try { recording.config = parse_preset(global.at("siggen:preset").get<std::string>()); } catch (const std::exception&) {}
     }
     return recording;
 }
@@ -79,15 +86,15 @@ Recording read_siggen_binary(const std::filesystem::path& path) {
     const auto sidecar = path.string() + ".json";
     if (!std::filesystem::exists(sidecar))
         throw std::runtime_error("No metadata found: expected " + sidecar + " (or a .sigmf-meta file)");
-    const auto root = json::parse(read_text(sidecar));
+    const auto root = parse_json(read_text(sidecar));
     const auto& format = require(root, "format", "siggen metadata");
-    if (!format.is_string() || format.string != "cf32_le")
+    if (!format.is_string() || format.get<std::string>() != "cf32_le")
         throw std::runtime_error("Only cf32 exports and SigMF recordings can be read; CSV is not supported");
     const auto& rate = require(root, "sample_rate_hz", "siggen metadata");
-    if (!rate.is_number() || !(rate.number > 0)) throw std::runtime_error("siggen metadata has an invalid sample_rate_hz");
+    if (!rate.is_number() || !(rate.get<double>() > 0)) throw std::runtime_error("siggen metadata has an invalid sample_rate_hz");
     Recording recording;
     recording.datatype = "cf32_le";
-    recording.sample_rate_hz = rate.number;
+    recording.sample_rate_hz = rate.get<double>();
     recording.samples = decode(read_bytes(path), recording.datatype);
     return recording;
 }
