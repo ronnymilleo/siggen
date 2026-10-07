@@ -334,7 +334,7 @@ def generate(preset: Optional[str] = None, **options) -> Signal:
 
 
 def load(path) -> Signal:
-    """Read a SigMF recording (``.sigmf-meta`` or ``.sigmf-data``) or a batch ``.cf32`` frame with its ``.json`` sidecar."""
+    """Read a SigMF recording (``.sigmf-meta`` or ``.sigmf-data``) or a legacy ``.cf32`` frame with its ``.json`` sidecar."""
     err = ctypes.create_string_buffer(_ERROR)
     handle = _load(os.fspath(path).encode(), err, _ERROR)
     if not handle:

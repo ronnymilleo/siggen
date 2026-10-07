@@ -171,7 +171,7 @@ TEST(CommandLine, BatchDefaults)
     EXPECT_EQ(cli.frame_size, 2048);
     EXPECT_EQ(cli.frames_per_point, 1);
     EXPECT_EQ(cli.output_dir, "dataset");
-    EXPECT_EQ(cli.batch_format, "cf32");
+    EXPECT_EQ(cli.batch_format, "sigmf");
 }
 
 TEST(CommandLine, BatchOverwriteFlagIsDetected)

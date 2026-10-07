@@ -61,7 +61,7 @@ disabled.
 ### Analyzing a recording
 
 `siggen analyze <file>` measures a SigMF recording (`.sigmf-meta` or `.sigmf-data`) or a
-batch `.cf32` frame (with its `.json` sidecar) without opening the GUI, using the same
+legacy `.cf32` frame (with its `.json` sidecar) without opening the GUI, using the same
 estimators: sample count and rate, mean power, PAPR, the strongest spectral bin, the
 99 % occupied bandwidth and, for a recording made by siggen, the waveform, EVM and
 SNR after the matched filter. `--window hann|hamming|blackman|rectangular` and
@@ -78,11 +78,11 @@ signal overrides with single generation:
 ./build/dev/bin/siggen batch --modulations BPSK QPSK 8-PSK 16-QAM 64-QAM WGN \
   --seeds 42 43 --snrs-db=-10,0,10 \
   --frame-size 2048 --frames-per-point 100 \
-  --output-dir dataset --format cf32
+  --output-dir dataset --format sigmf
 ```
 
 Batch defaults are the resolved waveform and seed (or the explicit lists), one
-frame per point, 2048 samples, and binary `cf32` frames. Lists preserve user
+frame per point, 2048 samples, and SigMF frames (`--format csv` writes CSV instead). Lists preserve user
 order and reject duplicates; `--snrs-db` accepts a comma-separated list (use the
 `--snrs-db=-10,0,10` form for negative values). Without an SNR list, the
 resolved single-signal noise setting is retained. WGN ignores the SNR axis: it
@@ -115,7 +115,7 @@ realizations.
 
 The output directory must not exist; existing directories are never touched.
 Files are named `frame_<point>_<frame>` with zero-padded indices preserving
-user list order, each with a JSON sidecar (`<file>.json`). A versioned
+user list order, each with its metadata file: `<name>.sigmf-meta` for SigMF (the frame description sits under `siggen:metadata`, so any SigMF tool and `siggen analyze` open the frames) or `<file>.json` for CSV. A versioned
 `manifest.jsonl` starts with a `batch_header` record, gains one `frame`
 completion record (relative path, waveform, axis values, derived seeds, frame
 size, format, and crop/noise provenance) appended and flushed only after that

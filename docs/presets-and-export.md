@@ -66,8 +66,7 @@ followed by one complex sample per row; decimal precision preserves the stored
 float32 components and double timestamps on round trip. SigMF is binary: the
 samples are headerless little-endian IEEE-754 float32 (`cf32_le`), interleaved as
 `I0,Q0,I1,Q1,...`, eight bytes per complex sample, described by a JSON file (see
-below). Batches (`siggen batch`) write the same raw float32 as `.cf32` frames with a
-`.json` sidecar, or CSV.
+below). Batches (`siggen batch`) write one SigMF pair per frame, or CSV.
 
 CSV writes `<destination>.json`; SigMF writes `<name>.sigmf-meta`. The
 version-2 sidecar object (also carried inside the SigMF metadata) records the

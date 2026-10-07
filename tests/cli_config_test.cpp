@@ -310,7 +310,7 @@ TEST(CliConfig, BatchDefaultsUseResolvedWaveformAndSeed) {
     EXPECT_EQ(request.base.seed, 123u);
     EXPECT_EQ(request.frame_size, 2048);
     EXPECT_EQ(request.frames_per_point, 1);
-    EXPECT_EQ(request.format, iq::ExportFormat::BinaryFloat32);
+    EXPECT_EQ(request.format, iq::ExportFormat::SigMF);
 }
 
 TEST(CliConfig, ImpairmentOptionsResolveAndRejectWgn) {

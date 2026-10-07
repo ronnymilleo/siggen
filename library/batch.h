@@ -48,7 +48,7 @@ struct BatchRequest {
     std::vector<double> snrs_db;         // Empty retains the base noise setting.
     int frame_size = 2048;
     int frames_per_point = 1;
-    ExportFormat format = ExportFormat::BinaryFloat32;
+    ExportFormat format = ExportFormat::SigMF;
     std::filesystem::path output_dir;
 };
 struct BatchSummary {

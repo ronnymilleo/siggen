@@ -1,4 +1,7 @@
 #include "batch.h"
+#include "analysis.h"
+#include "recording.h"
+#include <nlohmann/json.hpp>
 #include "noise.h"
 #include <gtest/gtest.h>
 #include <chrono>
@@ -132,6 +135,7 @@ TEST(Batch, FrameLimitsAndInvalidRequests) {
 TEST(Batch, RunWritesFramesSidecarsAndManifest) {
     const auto dir = unique_dir("iq-batch-run-");
     BatchRequest request;
+    request.format = ExportFormat::BinaryFloat32;
     request.waveforms = {Modulation::BPSK, Modulation::WGN};
     request.seeds = {42};
     request.snrs_db = {0, 10};
@@ -283,6 +287,7 @@ TEST(Batch, InvalidAwgnSweepLeavesNoOutput) {
 TEST(Batch, PresetNoiseSettingRetainedWithoutSnrAxis) {
     const auto dir = unique_dir("iq-batch-preset-");
     BatchRequest request;
+    request.format = ExportFormat::BinaryFloat32;
     request.base.awgn.enabled = true;
     request.base.awgn.snr_db = 5;
     request.frame_size = 64;
@@ -309,6 +314,7 @@ TEST(Batch, WriteFailurePreservesCompletedFrames) {
         if (setrlimit(RLIMIT_FSIZE, &limit) != 0) std::_Exit(2);
         std::signal(SIGXFSZ, SIG_IGN);
         BatchRequest request;
+        request.format = ExportFormat::BinaryFloat32;
         request.output_dir = dir;
         request.frame_size = 32;
         request.frames_per_point = 100;
@@ -334,3 +340,27 @@ TEST(Batch, WriteFailurePreservesCompletedFrames) {
     std::filesystem::remove_all(dir);
 }
 #endif
+
+TEST(Batch, SigmfFramesCarryMetadataAndAnalyze) {
+    const auto dir = unique_dir("iq-batch-sigmf-");
+    BatchRequest request;
+    request.waveforms = {Modulation::QPSK};
+    request.snrs_db = {10};
+    request.frame_size = 256;
+    request.output_dir = dir;
+    ASSERT_EQ(request.format, ExportFormat::SigMF);
+    run_batch(request);
+    EXPECT_EQ(std::filesystem::file_size(dir / "frame_000000_000000.sigmf-data"), 256u * 8);
+    EXPECT_FALSE(std::filesystem::exists(dir / "frame_000000_000000.sigmf-data.json"));
+    const auto meta = nlohmann::json::parse(read_file(dir / "frame_000000_000000.sigmf-meta"));
+    EXPECT_EQ(meta.at("global").at("core:datatype"), "cf32_le");
+    EXPECT_EQ(meta.at("global").at("siggen:metadata").at("kind"), "batch_frame");
+    EXPECT_EQ(meta.at("global").at("siggen:metadata").at("axes").at("snr_db"), 10);
+    const auto manifest = read_lines(dir / "manifest.jsonl");
+    EXPECT_NE(manifest[0].find("\"format\":\"sigmf\""), std::string::npos);
+    EXPECT_NE(manifest[1].find("\"sidecar\":\"frame_000000_000000.sigmf-meta\""), std::string::npos);
+    const auto recording = read_recording(dir / "frame_000000_000000.sigmf-meta");
+    EXPECT_EQ(recording.samples.size(), 256u);
+    EXPECT_FALSE(recording.config.has_value());
+    EXPECT_NO_THROW(analyze_recording(recording));
+}
