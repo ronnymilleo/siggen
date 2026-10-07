@@ -1,11 +1,19 @@
 #include "analysis.h"
 #include "iq_export.h"
+#include "theory.h"
 #include <cmath>
 #include <iomanip>
 #include <limits>
 #include <sstream>
 #include <stdexcept>
 namespace iq {
+namespace {
+void finish_accuracy(AnalysisReport& report, int samples_per_symbol, Modulation modulation) {
+    report.sample_snr_db = report.accuracy->snr_after_matched_db - report.accuracy->expected_offset_db;
+    report.measured_eb_n0_db = snr_to_energy_ratios(report.sample_snr_db, samples_per_symbol, bits_per_symbol(modulation)).eb_n0_db;
+    report.theoretical_ber = theoretical_ber(modulation, report.measured_eb_n0_db);
+}
+}
 AnalysisReport analyze_recording(const Recording& recording, Window window, std::size_t segment_length) {
     if (recording.samples.empty()) throw std::invalid_argument("Recording has no samples");
     AnalysisReport report;
@@ -49,9 +57,10 @@ AnalysisReport analyze_recording(const Recording& recording, Window window, std:
     if (recording.frame) {
         if (const auto scoring = frame_scoring(recording)) {
             report.accuracy = symbol_accuracy(scoring->signal, scoring->first_symbol, scoring->end_symbol);
+            if (report.accuracy) report.errors = bit_errors(scoring->signal, scoring->first_symbol, scoring->end_symbol);
         }
         if (!report.accuracy) report.note = "No symbol of this batch frame has its matched-filter window fully inside the frame: EVM skipped.";
-        else report.sample_snr_db = report.accuracy->snr_after_matched_db - report.accuracy->expected_offset_db;
+        else finish_accuracy(report, recording.config->samples_per_symbol, recording.config->modulation);
         return report;
     }
     const auto signal = signal_from_recording(recording);
@@ -60,8 +69,9 @@ AnalysisReport analyze_recording(const Recording& recording, Window window, std:
         return report;
     }
     report.accuracy = symbol_accuracy(*signal);
+    if (report.accuracy) report.errors = bit_errors(*signal);
     if (!report.accuracy) report.note = "This waveform has no symbol constellation: EVM does not apply.";
-    else report.sample_snr_db = report.accuracy->snr_after_matched_db - report.accuracy->expected_offset_db;
+    else finish_accuracy(report, recording.config->samples_per_symbol, recording.config->modulation);
     return report;
 }
 std::string report_text(const AnalysisReport& r) {
@@ -77,7 +87,12 @@ std::string report_text(const AnalysisReport& r) {
     if (r.waveform) out << "waveform:           " << *r.waveform << "\n";
     if (r.accuracy)
         out << "symbols:            " << r.accuracy->symbol_count << "\nEVM:                " << r.accuracy->evm_rms * 100 << " % (" << r.accuracy->evm_db << " dB)\n"
-            << "SNR after matched:  " << r.accuracy->snr_after_matched_db << " dB\nSNR per sample:     " << r.sample_snr_db << " dB\n";
+            << "SNR after matched:  " << r.accuracy->snr_after_matched_db << " dB\nSNR per sample:     " << r.sample_snr_db << " dB\n"
+            << "Eb/N0 (measured):   " << r.measured_eb_n0_db << " dB\n";
+    if (r.errors)
+        out << "bits compared:      " << r.errors->bit_count << "\nbit errors:         " << r.errors->bit_errors << "\nBER:                " << r.errors->ber()
+            << "\nSER:                " << r.errors->ser() << "\n";
+    if (r.errors && r.theoretical_ber) out << "theoretical BER:    " << *r.theoretical_ber << " (ideal receiver at the measured Eb/N0)\n";
     if (!r.note.empty()) out << "note:               " << r.note << "\n";
     return out.str();
 }
@@ -96,7 +111,11 @@ std::string report_json(const AnalysisReport& r) {
     if (r.accuracy)
         out << ",\n  \"symbol_count\": " << r.accuracy->symbol_count << ",\n  \"evm_rms\": " << r.accuracy->evm_rms
             << ",\n  \"evm_db\": " << r.accuracy->evm_db << ",\n  \"snr_after_matched_db\": " << r.accuracy->snr_after_matched_db
-            << ",\n  \"sample_snr_db\": " << r.sample_snr_db;
+            << ",\n  \"sample_snr_db\": " << r.sample_snr_db << ",\n  \"eb_n0_db\": " << r.measured_eb_n0_db;
+    if (r.errors)
+        out << ",\n  \"bit_count\": " << r.errors->bit_count << ",\n  \"bit_errors\": " << r.errors->bit_errors << ",\n  \"ber\": " << r.errors->ber()
+            << ",\n  \"symbol_errors\": " << r.errors->symbol_errors << ",\n  \"ser\": " << r.errors->ser();
+    if (r.errors && r.theoretical_ber) out << ",\n  \"theoretical_ber\": " << *r.theoretical_ber;
     if (!r.note.empty()) out << ",\n  \"note\": " << json_quote(r.note);
     out << "\n}\n";
     return out.str();

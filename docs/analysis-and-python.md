@@ -37,7 +37,18 @@ symbols:            236
 EVM:                5.7888 % (-24.7482 dB)
 SNR after matched:  24.7482 dB
 SNR per sample:     15.7173 dB
+Eb/N0 (measured):   21.7379 dB
+bits compared:      472
+bit errors:         0
+BER:                0
+SER:                0
+theoretical BER:    3.64576e-67 (ideal receiver at the measured Eb/N0)
 ```
+
+`bit errors` come from the [reference receiver](ber-and-receiver.md) run on the file's samples; the measured Eb/N0 is
+derived from the EVM, and the theoretical BER is the textbook value at that Eb/N0 (absent where no closed form exists, and
+absent for batch frames shorter than a filter span). With `--json` they appear as `eb_n0_db`, `bit_count`,
+`bit_errors`, `ber`, `symbol_errors`, `ser` and `theoretical_ber`.
 
 Power, PAPR and the spectrum need only the samples. **EVM and SNR need the symbols**, so
 they appear when the file carries siggen's configuration (a SigMF file written by `siggen --format sigmf` or `siggen batch`) and its
@@ -74,6 +85,7 @@ tx = siggen.generate(modulation="16-QAM", sps=8, snr_db=20, cfo_hz=2)   # CLI op
 tx.samples            # complex64 array, identical to `siggen --format sigmf`
 tx.symbols            # ideal mapped symbols (unit mean energy)
 tx.symbol_accuracy()  # SymbolAccuracy(evm_percent, evm_db, snr_after_matched_db, ...)
+tx.bit_errors()       # BitErrors(bit_errors, bit_count, ber, ...) from the ideal reference receiver
 obs, idx = tx.matched_symbols()   # decision observations and their symbol indices
 t, i, q = tx.eye()                # eye-diagram traces
 f, d = tx.psd(window="blackman")  # Welch PSD, as in the Spectrum tab
@@ -82,6 +94,10 @@ noisy = tx.with_samples(tx.samples + noise)   # same configuration, edited sampl
 tx.export("tx.sigmf-data", "sigmf")           # csv or sigmf
 rx = siggen.load("tx.sigmf-meta")             # any SigMF recording; siggen ones keep their configuration
 ```
+
+`siggen.theoretical_ber("16-QAM", eb_n0_db)` returns the textbook BER (scalar or array, NaN where there is none) and
+`siggen.ber_curve(eb_n0_db, modulation="16-QAM", ...)` runs the same sweep as `siggen ber`, returning a `BerCurve` with
+`eb_n0_db`, `snr_db`, `bits`, `bit_errors`, `ber` and `theory` arrays.
 
 `generate` also accepts `preset=` (a preset path or text); keyword options override it.
 `siggen.default_config()` lists the options and their defaults, and a signal with a given
@@ -97,7 +113,7 @@ for the Python found by CMake.
 
 ## Notebooks
 
-`python/notebooks` holds two notebooks (executed, so they render on GitHub; they need
+`python/notebooks` holds three notebooks (executed, so they render on GitHub; they need
 `numpy`, `matplotlib` and Jupyter):
 
 1. **Generate and measure**: waveform, constellation, eye and spectrum of a 16-QAM signal,
@@ -105,11 +121,13 @@ for the Python found by CMake.
 2. **SigMF files and carrier offset**: a SigMF round trip, and QPSK versus DQPSK symbol
    errors under a carrier offset, showing why EVM alone does not say how well a receiver
    would do.
+3. **Bit error rate and the reference receiver**: BER against Eb/N0 for several modulations compared with theory,
+   the price of differential detection, and how a carrier offset breaks coherent schemes.
 
 Run them from `python/notebooks` after building the library.
 
 ## Where this leads
 
-`matched_symbols()`, the ideal symbols and recordings on disk are what a reference demodulator
-needs: carrier recovery, decisions, bit-error counting and BER against Eb/N0 can be written
-and validated in NumPy against the generator, then moved into the library and the GUI.
+`matched_symbols()`, the ideal symbols and the reference receiver are the starting point for what a real receiver
+adds: carrier recovery, timing recovery and soft decisions can be prototyped in NumPy against the generator and
+compared with the curves in [Bit error rate and the reference receiver](ber-and-receiver.md).

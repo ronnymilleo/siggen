@@ -1,4 +1,5 @@
 #pragma once
+#include "demodulator.h"
 #include "measurements.h"
 #include "recording.h"
 #include "signal_analysis.h"
@@ -22,6 +23,10 @@ struct AnalysisReport {
     std::optional<std::string> waveform;
     std::optional<SymbolAccuracy> accuracy;
     double sample_snr_db = 0;           // Per-sample SNR implied by the post-filter SNR (valid with `accuracy`).
+    // Reference demodulator against the transmitted bits (linear waveforms with `accuracy`).
+    std::optional<BitErrors> errors;
+    double measured_eb_n0_db = 0;       // Eb/N0 implied by the measured SNR (valid with `errors`).
+    std::optional<double> theoretical_ber; // Textbook BER at that Eb/N0, where a closed form exists.
     std::string note;                   // Why EVM is absent, when it is.
 };
 AnalysisReport analyze_recording(const Recording& recording, Window window = Window::Hann, std::size_t segment_length = 1024);

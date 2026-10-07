@@ -30,6 +30,9 @@ struct Panel {
     std::optional<std::array<double, 2>> x_limits, y_limits; // Empty: fit the data.
     bool equal_aspect = false;  // Same pixels per unit on both axes (constellations).
     bool zero_line = false;     // Emphasise y = 0.
+    // Logarithmic y axis with a tick at every decade. Non-positive values are not drawn; y_limits, if set,
+    // are given in the data's own units (for example 1e-5 to 1).
+    bool y_log = false;
 };
 
 struct Figure {

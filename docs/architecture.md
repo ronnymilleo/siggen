@@ -14,6 +14,7 @@
 - `library/signal_analysis.*`: matched observations and Welch PSD with selectable window.
 - `library/measurements.*`: power statistics (PAPR), EVM, measured SNR and eye traces.
 - `library/pipeline.*`: the staged signal (bits, symbols, zero-inserted, filtered, noisy) behind the Pipeline tab.
+- `library/demodulator.*`, `library/theory.*`, `library/ber.*`: the ideal reference receiver and its bit errors, the textbook BER curves, and the Eb/N0 sweep behind `siggen ber`, the BER tab and the Python `ber_curve`.
 - `library/impairments.*`: carrier offset, phase noise, IQ imbalance, DC offset and quantization.
 - `library/plot_export.*`: renderer that draws a `Figure` (panels, series, axes, legend) to SVG or PNG; `application/plot_figures.h` builds the figures from the plotted data.
 - `presets/`: guided lesson presets (`NN-name.preset`, with `#` note lines).
@@ -22,7 +23,7 @@
 - `python/`: C interface (`csrc/siggen_c.*`), the `siggen` Python package, its tests and the notebooks.
 - `application/command_line.h`, `application/cli_config.*`: CLI parsing and
   defaults → preset → explicit-option resolution.
-- `application/generation_job.h`: owned worker and immutable completed snapshot.
+- `application/generation_job.h`: owned worker and immutable completed snapshot; `application/ber_job.h` runs a BER sweep the same way, with cancellation and progress.
 - `application/plot_data.h`, `application/signal_generator.*`: cached presentation
   and UI-thread state. Analysis/cache preparation runs once on result completion;
   generation is asynchronous, while export and cache preparation are synchronous.

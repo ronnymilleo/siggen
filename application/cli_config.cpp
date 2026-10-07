@@ -1,6 +1,7 @@
 #include "cli_config.h"
 #include "preset.h"
 #include <charconv>
+#include <cmath>
 #include <cstdlib>
 #include <stdexcept>
 
@@ -166,6 +167,35 @@ iq::BatchRequest resolve_batch(const CommandLine& cli) {
     request.frames_per_point = cli.frames_per_point;
     request.format = resolve_format(cli.batch_format);
     request.output_dir = cli.output_dir;
+    return request;
+}
+
+BerRequest resolve_ber(const CommandLine& cli) {
+    for (const auto* option : cli.app.get_options())
+        if (option->count() && option->get_name() != "--log-level")
+            throw std::invalid_argument("With ber, put signal options after 'ber'; root option: " + option->get_name());
+    reject(supplied(*cli.ber, "--symbols") || supplied(*cli.ber, "--bits") || supplied(*cli.ber, "--data-source") ||
+               supplied(*cli.ber, "--snr-db"),
+           "ber rejects --symbols/--bits/--data-source/--snr-db; use --block-symbols and --eb-n0-db");
+    BerRequest request;
+    request.config = resolve_base(*cli.ber, cli, false);
+    request.config.awgn.enabled = false; // The sweep sets the noise itself.
+    request.config.data_source = iq::DataSource::Random;
+    request.config.bits.clear();
+    if (!iq::has_reference_demodulator(request.config.modulation))
+        throw std::invalid_argument(std::string("ber needs a linear waveform; ") + iq::modulation_name(request.config.modulation) +
+                                    " has no reference receiver");
+    request.settings.eb_n0_db = cli.ber_eb_n0_db;
+    if (request.settings.eb_n0_db.empty())
+        for (int db = 0; db <= 10; db += 2) request.settings.eb_n0_db.push_back(db);
+    for (double db : request.settings.eb_n0_db)
+        reject(!std::isfinite(db) || std::abs(db) > 60, "--eb-n0-db values must be finite and within 60 dB");
+    reject(cli.ber_min_errors == 0, "--min-errors must be positive");
+    reject(cli.ber_max_bits == 0 || cli.ber_max_bits > 1000000000ULL, "--max-bits must be 1 to 1000000000");
+    reject(cli.ber_block_symbols < 64 || cli.ber_block_symbols > 65536, "--block-symbols must be 64 to 65536");
+    request.settings.min_errors = cli.ber_min_errors;
+    request.settings.max_bits = cli.ber_max_bits;
+    request.settings.block_symbols = cli.ber_block_symbols;
     return request;
 }
 

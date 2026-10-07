@@ -135,6 +135,7 @@ Everything else lives in [docs/](docs/):
 - [Noise, SNR and channel impairments](docs/noise-and-impairments.md): AWGN, SNR vs Es/N0 vs Eb/N0, CFO, phase noise, IQ imbalance, DC offset and quantization.
 - [Pulse gain, length and timing](docs/signal-timing.md): amplitude gain, filter length, delay and sample counts.
 - [Presets and I/Q export](docs/presets-and-export.md): guided lessons, preset format, CSV, binary and SigMF export and metadata.
+- [Bit error rate and the reference receiver](docs/ber-and-receiver.md): the ideal receiver, BER against Eb/N0 with theory, `siggen ber`, the BER tab and the Python API.
 - [Analysis, SigMF and Python](docs/analysis-and-python.md): `siggen analyze`, reading recordings, the NumPy-based Python package and the notebooks.
 - [Architecture and validation](docs/architecture.md): source layout, tests and sanitizer workflows.
 

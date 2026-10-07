@@ -1,10 +1,14 @@
 #pragma once
+#include "ber.h"
 #include "measurements.h"
 #include "pipeline.h"
 #include "plot_data.h"
 #include "plot_export.h"
+#include "theory.h"
 #include <algorithm>
+#include <array>
 #include <cmath>
+#include <optional>
 #include <string>
 
 // Figures for image export, built from the same data the GUI plots. Colours match the screen:
@@ -177,5 +181,83 @@ inline iq::Figure pipeline(const iq::PipelineStages& st, int first, int count, b
         fig.panels.push_back(std::move(p));
     }
     return fig;
+}
+// BER against Eb/N0: points that saw errors, points that saw none (drawn at 1 / bits, an upper bound),
+// and the textbook curve over the swept range when one exists.
+struct BerPlot
+{
+    std::vector<double> x, y;               // Measured, with errors.
+    std::vector<double> bound_x, bound_y;   // No error seen: BER below 1 / bits.
+    std::vector<double> theory_x, theory_y;
+};
+inline BerPlot make_ber_plot(const std::vector<iq::BerPoint>& points, iq::Modulation modulation)
+{
+    BerPlot plot;
+    double lo = INFINITY, hi = -INFINITY, floor_ber = 1;
+    for (const auto& p : points)
+    {
+        if (p.errors.bit_count > 0)
+            floor_ber = std::min(floor_ber, 1.0 / static_cast<double>(p.errors.bit_count));
+        lo = std::min(lo, p.eb_n0_db);
+        hi = std::max(hi, p.eb_n0_db);
+        if (p.errors.bit_errors > 0)
+        {
+            plot.x.push_back(p.eb_n0_db);
+            plot.y.push_back(p.ber());
+        }
+        else if (p.errors.bit_count > 0)
+        {
+            plot.bound_x.push_back(p.eb_n0_db);
+            plot.bound_y.push_back(1.0 / static_cast<double>(p.errors.bit_count));
+        }
+    }
+    if (points.empty() || !(hi > lo))
+        return plot;
+    for (int k = 0; k <= 120; ++k)
+    {
+        const double db  = lo + (hi - lo) * k / 120.0;
+        const auto   ber = iq::theoretical_ber(modulation, db);
+        if (!ber)
+            break;
+        if (*ber < floor_ber * 0.3) // Below what the measurement could resolve: leave the axis alone.
+            break;
+        plot.theory_x.push_back(db);
+        plot.theory_y.push_back(*ber);
+    }
+    return plot;
+}
+inline iq::Figure ber(const std::vector<iq::BerPoint>& points, iq::Modulation modulation, std::optional<std::array<double, 2>> current)
+{
+    const auto  plot = make_ber_plot(points, modulation);
+    iq::Panel   p;
+    p.x_label = "Eb/N0 (dB)";
+    p.y_label = "Bit error rate";
+    p.y_log   = true;
+    double floor_ber = 1;
+    for (const auto& pt : points)
+        if (pt.errors.bit_count > 0)
+            floor_ber = std::min(floor_ber, 1.0 / static_cast<double>(pt.errors.bit_count));
+    p.y_limits = std::array<double, 2>{std::pow(10.0, std::floor(std::log10(std::max(floor_ber, 1e-12)))), 1.0};
+    if (!plot.theory_x.empty())
+        p.series.push_back(line("Theory (ideal receiver)", plot.theory_x, plot.theory_y, ORANGE, 2.0));
+    auto measured = line("Measured", plot.x, plot.y, BLUE, 2.0);
+    p.series.push_back(measured);
+    measured.kind  = iq::Series::Kind::Scatter;
+    measured.label = "";
+    measured.width = 5.0;
+    p.series.push_back(measured);
+    if (!plot.bound_x.empty())
+    {
+        auto bound  = line("No errors seen (BER below this)", plot.bound_x, plot.bound_y, iq::Rgb{139, 148, 163}, 5.0);
+        bound.kind  = iq::Series::Kind::Scatter;
+        p.series.push_back(bound);
+    }
+    if (current && (*current)[1] > 0)
+    {
+        auto now  = line("Displayed signal", {(*current)[0]}, {(*current)[1]}, iq::Rgb{110, 220, 140}, 8.0);
+        now.kind  = iq::Series::Kind::Scatter;
+        p.series.push_back(now);
+    }
+    return {std::string("BER against Eb/N0: ") + iq::modulation_name(modulation), {p}};
 }
 } // namespace figures

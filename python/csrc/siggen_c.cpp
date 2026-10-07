@@ -1,11 +1,16 @@
 #include "siggen_c.h"
+#include "ber.h"
+#include "demodulator.h"
 #include "generator.h"
+#include "theory.h"
 #include "iq_export.h"
 #include "measurements.h"
 #include "preset.h"
 #include "recording.h"
 #include "signal_analysis.h"
 #include <algorithm>
+#include <cmath>
+#include <limits>
 #include <cstring>
 #include <complex>
 #include <exception>
@@ -136,6 +141,53 @@ int siggen_symbol_accuracy(const siggen_signal* s, double* out, char* error, std
         out[0] = static_cast<double>(accuracy->symbol_count); out[1] = accuracy->evm_rms; out[2] = accuracy->evm_db;
         out[3] = accuracy->snr_after_matched_db; out[4] = accuracy->expected_offset_db;
         return 1;
+    });
+}
+
+int siggen_bit_errors(const siggen_signal* s, double* out, char* error, std::size_t error_capacity) {
+    return guarded(error, error_capacity, -1, [&] {
+        if (!s->has_config) return 0;
+        if (s->signal.samples.size() != s->expected_samples)
+            throw std::invalid_argument("The sample count changed from the generated length; the receiver needs the original timing");
+        const auto errors = iq::bit_errors(s->signal);
+        if (!errors) return 0;
+        out[0] = static_cast<double>(errors->symbol_count); out[1] = static_cast<double>(errors->symbol_errors);
+        out[2] = static_cast<double>(errors->bit_count); out[3] = static_cast<double>(errors->bit_errors);
+        return 1;
+    });
+}
+
+int siggen_theoretical_ber(const char* waveform, double eb_n0_db, double* out, char* error, std::size_t error_capacity) {
+    return guarded(error, error_capacity, -1, [&] {
+        iq::Modulation modulation;
+        if (!iq::parse_modulation(waveform ? waveform : "", modulation))
+            throw std::invalid_argument(std::string("Unknown waveform: ") + (waveform ? waveform : ""));
+        const auto ber = iq::theoretical_ber(modulation, eb_n0_db);
+        if (!ber) return 0;
+        *out = *ber;
+        return 1;
+    });
+}
+
+long siggen_ber_curve(const char* preset_text, const double* eb_n0_db, std::size_t count, std::size_t min_errors, std::size_t max_bits,
+                      int block_symbols, double* out, char* error, std::size_t error_capacity) {
+    return guarded(error, error_capacity, -1L, [&] {
+        const auto config = iq::parse_preset(preset_text ? preset_text : "");
+        iq::validate(config);
+        iq::BerSweepSettings settings;
+        settings.eb_n0_db.assign(eb_n0_db, eb_n0_db + count);
+        settings.min_errors = min_errors;
+        settings.max_bits = max_bits;
+        settings.block_symbols = block_symbols;
+        const auto points = iq::ber_sweep(config, settings);
+        if (out)
+            for (std::size_t k = 0; k < points.size(); ++k) {
+                const auto& p = points[k];
+                out[5 * k] = p.eb_n0_db; out[5 * k + 1] = p.snr_db;
+                out[5 * k + 2] = static_cast<double>(p.errors.bit_count); out[5 * k + 3] = static_cast<double>(p.errors.bit_errors);
+                out[5 * k + 4] = p.theory ? *p.theory : std::numeric_limits<double>::quiet_NaN();
+            }
+        return static_cast<long>(points.size());
     });
 }
 

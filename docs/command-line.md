@@ -62,10 +62,33 @@ disabled.
 
 `siggen analyze <file>` measures a SigMF recording (`.sigmf-meta` or `.sigmf-data`, including batch frames) without opening the GUI, using the same
 estimators: sample count and rate, mean power, PAPR, the strongest spectral bin, the
-99 % occupied bandwidth and, for a recording made by siggen, the waveform, EVM and
-SNR after the matched filter. `--window hann|hamming|blackman|rectangular` and
+99 % occupied bandwidth and, for a recording made by siggen, the waveform, EVM,
+SNR after the matched filter, the measured Eb/N0 and the bit errors of the reference receiver. `--window hann|hamming|blackman|rectangular` and
 `--segment N` select the Welch estimator, and `--json` prints the report as JSON.
 See [Analysis, SigMF and Python](analysis-and-python.md).
+
+### Measuring BER
+
+`siggen ber` sweeps Eb/N0 and measures the bit error rate of the ideal reference receiver, next
+to the textbook value. It takes the same signal options as single generation
+(`--modulation`, `--sps`, `--pulse`, `--cfo-hz`, ...), but `--symbols`, `--bits`, `--data-source` and
+`--snr-db` are rejected because the sweep controls them.
+
+```sh
+siggen ber --modulation QPSK --eb-n0-db=0,2,4,6,8
+siggen ber --modulation DQPSK --eb-n0-db=4,8 --cfo-hz 20 --json
+```
+
+```text
+waveform: QPSK, 8 samples/symbol, RRC pulse, ideal reference receiver
+ Eb/N0 dB   SNR dB       bits     errors          BER       theory
+     0.00     -6.02       8152        637    7.814e-02    7.865e-02
+```
+
+`--eb-n0-db` is a comma list (default 0 to 10 in steps of 2), `--min-errors N` (default 100) and
+`--max-bits N` (default 2000000) stop a point, `--block-symbols N` sets the symbols per generated block
+(default 4096) and `--json` prints the curve as JSON. Only linear waveforms are accepted. See
+[Bit error rate and the reference receiver](ber-and-receiver.md).
 
 ### Batch dataset generation
 

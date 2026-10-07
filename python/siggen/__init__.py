@@ -81,6 +81,10 @@ _waveform_name = _sig("siggen_waveform_name", ctypes.c_long, _handle, ctypes.c_c
 _bits = _sig("siggen_bits", ctypes.c_long, _handle, ctypes.c_char_p, _c_size_t)
 _power = _sig("siggen_power_statistics", ctypes.c_int, _handle, _f64)
 _accuracy = _sig("siggen_symbol_accuracy", ctypes.c_int, _handle, _f64, ctypes.c_char_p, _c_size_t)
+_bit_errors = _sig("siggen_bit_errors", ctypes.c_int, _handle, _f64, ctypes.c_char_p, _c_size_t)
+_theory = _sig("siggen_theoretical_ber", ctypes.c_int, _c_char_p, _c_double, ctypes.POINTER(_c_double), ctypes.c_char_p, _c_size_t)
+_ber_curve = _sig("siggen_ber_curve", ctypes.c_long, _c_char_p, _f64, _c_size_t, _c_size_t, _c_size_t, ctypes.c_int, ctypes.c_void_p,
+                  ctypes.c_char_p, _c_size_t)
 _eye = _sig("siggen_eye", ctypes.c_long, _handle, _c_size_t, ctypes.c_void_p, _c_size_t, ctypes.c_void_p, ctypes.c_void_p,
             _c_size_t, ctypes.POINTER(_c_size_t))
 _matched = _sig("siggen_matched_symbols", ctypes.c_long, _handle, ctypes.c_void_p, ctypes.c_void_p, _c_size_t)
@@ -125,6 +129,23 @@ class SymbolAccuracy:
     def sample_snr_db(self) -> float:
         """Per-sample SNR implied by the post-filter SNR."""
         return self.snr_after_matched_db - self.sps_offset_db
+
+
+@dataclasses.dataclass(frozen=True)
+class BitErrors:
+    """Hard-decision errors of the ideal reference receiver (see docs/modulations.md)."""
+    symbol_count: int
+    symbol_errors: int
+    bit_count: int
+    bit_errors: int
+
+    @property
+    def ber(self) -> float:
+        return self.bit_errors / self.bit_count if self.bit_count else 0.0
+
+    @property
+    def ser(self) -> float:
+        return self.symbol_errors / self.symbol_count if self.symbol_count else 0.0
 
 
 def _default_text() -> str:
@@ -269,6 +290,18 @@ class Signal:
             _fail(err, "symbol_accuracy")
         return SymbolAccuracy(int(out[0]), *map(float, out[1:])) if status else None
 
+    def bit_errors(self) -> Optional[BitErrors]:
+        """Demodulate with the ideal reference receiver and count errors against the transmitted bits.
+
+        None for waveforms without one (FSK, MSK, noise). Coherent schemes fail under a carrier offset
+        by design; the differential ones (DBPSK, DQPSK, pi/4-DQPSK, 8-DPSK) tolerate small offsets."""
+        out = np.zeros(4)
+        err = ctypes.create_string_buffer(_ERROR)
+        status = _bit_errors(self._h, out, err, _ERROR)
+        if status < 0:
+            _fail(err, "bit_errors")
+        return BitErrors(*map(int, out)) if status else None
+
     def eye(self, max_traces: int = 200):
         """Overlaid matched-filter traces: ``(time_in_symbols, in_phase[traces, points], quadrature[traces, points])``."""
         points = _c_size_t(0)
@@ -355,3 +388,52 @@ def psd(samples, sample_rate: float, window: str = "hann", segment: int = 1024):
     freq, density = np.empty(bins), np.empty(bins)
     _psd(raw, data.size, sample_rate, segment, WINDOWS[window], freq.ctypes.data, density.ctypes.data, bins, err, _ERROR)
     return freq, density
+
+
+def theoretical_ber(waveform: str, eb_n0_db):
+    """Textbook BER of an ideal receiver over AWGN. Accepts a scalar or an array of Eb/N0 in dB.
+
+    Returns NaN where the library has no closed form (8-DPSK, 32-QAM, FSK, MSK, WGN)."""
+    values = np.atleast_1d(np.asarray(eb_n0_db, dtype=float))
+    result = np.full(values.shape, np.nan)
+    err = ctypes.create_string_buffer(_ERROR)
+    for k, db in enumerate(values.flat):
+        out = _c_double(0)
+        status = _theory(waveform.encode(), float(db), ctypes.byref(out), err, _ERROR)
+        if status < 0:
+            _fail(err, "theoretical_ber")
+        if status:
+            result.flat[k] = out.value
+    return result if np.ndim(eb_n0_db) else float(result[0])
+
+
+@dataclasses.dataclass(frozen=True)
+class BerCurve:
+    """BER measured at each Eb/N0, with the textbook curve for the same points (NaN where none exists)."""
+    eb_n0_db: np.ndarray
+    snr_db: np.ndarray
+    bits: np.ndarray
+    bit_errors: np.ndarray
+    theory: np.ndarray
+
+    @property
+    def ber(self) -> np.ndarray:
+        return self.bit_errors / np.maximum(self.bits, 1)
+
+
+def ber_curve(eb_n0_db, preset: Optional[str] = None, min_errors: int = 100, max_bits: int = 2_000_000,
+              block_symbols: int = 4096, **options) -> BerCurve:
+    """Measure BER against Eb/N0 with the reference receiver, the same sweep as ``siggen ber``.
+
+    The waveform, pulse, rate and impairments come from ``preset``/keywords (see :func:`generate`); the
+    sweep sets the noise itself, so ``snr_db``, ``bits`` and ``symbols`` are ignored."""
+    points = np.ascontiguousarray(np.atleast_1d(np.asarray(eb_n0_db, dtype=np.float64)))
+    err = ctypes.create_string_buffer(_ERROR)
+    text = _build_preset(preset, options).encode()
+    count = _ber_curve(text, points, points.size, min_errors, max_bits, block_symbols, None, err, _ERROR)
+    if count < 0:
+        _fail(err, "ber_curve")
+    out = np.zeros(5 * count)
+    _ber_curve(text, points, points.size, min_errors, max_bits, block_symbols, out.ctypes.data, err, _ERROR)
+    table = out.reshape(count, 5)
+    return BerCurve(table[:, 0], table[:, 1], table[:, 2], table[:, 3], table[:, 4])

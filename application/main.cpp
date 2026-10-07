@@ -2,6 +2,7 @@
 #include "command_line.h"
 #include "generator.h"
 #include "analysis.h"
+#include "ber.h"
 #include "iq_export.h"
 #include "recording.h"
 #include <iostream>
@@ -54,6 +55,14 @@ int main(int argc, char** argv)
             const auto report = iq::analyze_recording(recording, resolve_window(command_line.analyze_window),
                                                       static_cast<std::size_t>(command_line.analyze_segment));
             std::cout << (command_line.analyze_json ? iq::report_json(report) : iq::report_text(report));
+            return 0;
+        }
+
+        if (command_line.ber_selected())
+        {
+            const auto request = resolve_ber(command_line);
+            const auto points = iq::ber_sweep(request.config, request.settings);
+            std::cout << (command_line.ber_json ? iq::ber_json(request.config, points) : iq::ber_text(request.config, points));
             return 0;
         }
 
