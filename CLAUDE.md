@@ -10,8 +10,12 @@ Complex baseband signal generator in C++23: a command-line tool and an optional 
   - `waveform.h` holds the descriptor table; `StableId` values feed seed derivation and must never be renumbered
 - `app-cli/` → static lib `siggen-cli-lib`, namespace `Console` (CLI11 parsing; precedence is defaults → preset →
   explicitly supplied options)
-- `app-gui/` → static lib `siggen-gui-lib`, namespace `GUI` (window, ImGui layer, `SignalGenerator` window); built
-  only with `SIGGEN_BUILD_GUI=ON`
+- `app-gui/` → static lib `siggen-gui-lib`, namespace `GUI` (window, ImGui layer, dockable windows); built only with
+  `SIGGEN_BUILD_GUI=ON`
+  - `generator_session.h` is the document (settings, background generation, analysis of the last result); the
+    `WindowManager` owns it and hands it to every window by reference
+  - `windows/` holds the dockable windows: each derives from `AppWindow`, which wraps `Draw()` in Begin/End;
+    windows keep only view state (selected view, zoom requests, dialogs) and read or change the session
 - `main.cpp` → executable `siggen`
 - `tests/` → GoogleTest executables `siggen-tests` (core), `siggen-cli-tests` (+ `CLI.EndToEnd`, which runs the real
   executable) and `siggen-gui-tests` (needs a display)
@@ -55,7 +59,7 @@ Enforced by `.clang-tidy` (`readability-identifier-naming`).
 | `constexpr` and global constants | PascalCase | `Core::MaxSignalSamples` |
 | Macros | UPPER_SNAKE | `SIGGEN_VERSION` |
 | Namespaces | `Core`, `Console`, `GUI` | |
-| Files | snake_case | `signal_generator.cpp` |
+| Files | snake_case | `views_window.cpp` |
 | Include guards | `SIGGEN_<FILE_NAME>_H` | `SIGGEN_GENERATOR_H` |
 
 Acronyms stay uppercase (`GUI`, `RRC`, `SPS`) except proper names (`ImGui`). Names describe meaning, not type.

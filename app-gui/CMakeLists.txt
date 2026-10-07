@@ -5,11 +5,15 @@
 add_library(siggen-gui-lib
         STATIC
             application.cpp
+            generator_session.cpp
             gui_runner.cpp
             imgui_layer.cpp
-            imgui_window_layer.cpp
-            signal_generator.cpp
+            widgets.cpp
             window_manager.cpp
+            windows/app_window.cpp
+            windows/controls_window.cpp
+            windows/summary_window.cpp
+            windows/views_window.cpp
 )
 
 target_include_directories(siggen-gui-lib

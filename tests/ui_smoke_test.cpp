@@ -1,6 +1,6 @@
 /**
  * @file    ui_smoke_test.cpp
- * @brief   Smoke tests that draw the generator window, plus help topics and plot image export.
+ * @brief   Smoke tests that draw the generator windows in their dock layout, plus help topics and image export.
  */
 
 #include "help_topics.h"
@@ -9,7 +9,7 @@
 #include "imgui_internal.h"
 #include "implot.h"
 #include "implot_internal.h"
-#include "signal_generator.h"
+#include "window_manager.h"
 #include <GLFW/glfw3.h>
 #include <gtest/gtest.h>
 #define STB_IMAGE_WRITE_IMPLEMENTATION
@@ -23,7 +23,9 @@ namespace GUI {
 
 namespace {
 
-// The tab bar lives inside a layout table cell, whose ID scope differs from the window's; find it by its tab names
+constexpr const char *WindowTitles[] = {"Signal Setup", "Signal Summary", "Signal Views"};
+
+// Found by its tab names, so the test does not depend on the ID scope the tab bar is created in
 ImGuiTabBar *FindSignalViews() {
     auto *ctx = ImGui::GetCurrentContext();
     for (int i = 0; i < ctx->TabBars.GetMapSize(); ++i) {
@@ -38,43 +40,65 @@ ImGuiTabBar *FindSignalViews() {
     return nullptr;
 }
 
-} // namespace
-
-TEST(UI, InitialInvalidAndResizedFrames) {
+// A headless ImGui/ImPlot context with docking, as ImGuiLayer::Init() configures it, and no imgui.ini
+void CreateContexts(ImVec2 display_size) {
     ImGui::CreateContext();
     ImPlot::CreateContext();
     auto &io = ImGui::GetIO();
     io.IniFilename = nullptr;
+    io.ConfigFlags |= ImGuiConfigFlags_DockingEnable;
     io.DeltaTime = 1.f / 60;
+    io.DisplaySize = display_size;
+}
+
+void BuildFontAtlas() {
     unsigned char *pixels;
-    int w, h;
-    io.Fonts->GetTexDataAsRGBA32(&pixels, &w, &h);
+    int width, height;
+    ImGui::GetIO().Fonts->GetTexDataAsRGBA32(&pixels, &width, &height);
+}
+
+void DrawFrame(WindowManager &manager) {
+    ImGui::NewFrame();
+    manager.Render();
+    ImGui::Render();
+}
+
+} // namespace
+
+TEST(UI, InitialInvalidAndResizedFrames) {
+    CreateContexts(ImVec2(1100, 900));
+    BuildFontAtlas();
+    auto &io = ImGui::GetIO();
     for (bool invalid : {false, true}) {
-        Core::GenerationConfig c;
+        Core::GenerationConfig config;
         if (invalid) {
-            c.SymbolCount = -1;
+            config.SymbolCount = -1;
         }
-        SignalGenerator window(c);
+        WindowManager manager(config);
         for (auto size : {ImVec2(1100, 900), ImVec2(640, 480), ImVec2(1600, 1000)}) {
             io.DisplaySize = size;
-            ImGui::NewFrame();
-            // Simulate stale floating-window geometry; the root layout overrides it.
-            ImGui::SetNextWindowPos(ImVec2(2000, 2000));
-            ImGui::SetNextWindowSize(ImVec2(900, 760));
-            window.Render();
-            ImGui::Render();
-            ImGui::NewFrame();
-            window.Render();
-            ImGui::Render();
-            const auto *resized = ImGui::FindWindowByName("Signal Generator");
-            ASSERT_NE(resized, nullptr);
+            DrawFrame(manager);
+            DrawFrame(manager);
             const auto *viewport = ImGui::GetMainViewport();
-            EXPECT_EQ(resized->Size.x, viewport->WorkSize.x);
-            EXPECT_EQ(resized->Size.y, viewport->WorkSize.y);
-            EXPECT_EQ(resized->Pos.x, viewport->WorkPos.x);
-            EXPECT_EQ(resized->Pos.y, viewport->WorkPos.y);
-            EXPECT_EQ(resized->ViewportId, viewport->ID);
-            EXPECT_FALSE(resized->HasCloseButton);
+            // Every window is docked in one dockspace that fills the work area below the menu bar
+            for (const char *title : WindowTitles) {
+                const auto *window = ImGui::FindWindowByName(title);
+                ASSERT_NE(window, nullptr) << title;
+                ASSERT_NE(window->DockNode, nullptr) << title;
+                const auto *root = ImGui::DockNodeGetRootNode(window->DockNode);
+                EXPECT_EQ(root->Pos.x, viewport->WorkPos.x) << title;
+                EXPECT_EQ(root->Pos.y, viewport->WorkPos.y) << title;
+                EXPECT_EQ(root->Size.x, viewport->WorkSize.x) << title;
+                EXPECT_EQ(root->Size.y, viewport->WorkSize.y) << title;
+                EXPECT_FALSE(window->HasCloseButton) << title;
+            }
+            // Default layout: setup on the left, summary above views on the right
+            const auto *setup = ImGui::FindWindowByName("Signal Setup");
+            const auto *summary = ImGui::FindWindowByName("Signal Summary");
+            const auto *views = ImGui::FindWindowByName("Signal Views");
+            EXPECT_LT(setup->Pos.x, summary->Pos.x);
+            EXPECT_EQ(summary->Pos.x, views->Pos.x);
+            EXPECT_LT(summary->Pos.y, views->Pos.y);
             ASSERT_GT(ImGui::GetDrawData()->TotalVtxCount, 0);
         }
     }
@@ -82,25 +106,30 @@ TEST(UI, InitialInvalidAndResizedFrames) {
     ImGui::DestroyContext();
 }
 
-struct SignalGeneratorTestAccess {
-    static void Start(SignalGenerator &w) { w.m_Job.Start(w.m_Config); }
-    static bool Busy(SignalGenerator &w) { return w.m_Job.Busy(); }
-    static void Edit(SignalGenerator &w) { w.m_Config.Seed++; }
-    static void Matched(SignalGenerator &w, bool enabled) { w.m_ConstellationView = enabled ? 1 : 0; }
-    static const auto &Result(SignalGenerator &w) { return w.m_Job.Result(); }
-    static const auto &Error(SignalGenerator &w) { return w.m_Error; }
-    // What the Export image dialog does once a destination is chosen.
-    static std::string ExportImage(SignalGenerator &w, const std::string &path, int format, bool overwrite = false) {
-        w.m_ImageFigure = Core::WaveformFigure(w.m_Plots);
-        std::snprintf(w.m_ImagePath, sizeof w.m_ImagePath, "%s", path.c_str());
-        w.m_ImageFormat = format;
-        w.m_ImageWidth = 800;
-        w.m_ImageHeight = 450;
-        w.ExportImage(overwrite);
-        return w.m_ImageStatus;
+struct GUITestAccess {
+    static void Start(WindowManager &manager) { manager.m_Session.StartGeneration(); }
+    static bool Busy(WindowManager &manager) { return manager.m_Session.IsGenerating(); }
+    static void Edit(WindowManager &manager) { manager.m_Session.GetConfig().Seed++; }
+    static void Matched(WindowManager &manager, bool enabled) {
+        manager.m_ViewsWindow.m_ConstellationView = enabled ? 1 : 0;
     }
-    static void Invalid(SignalGenerator &w) { w.m_Config.SymbolCount = 0; }
+    static const auto &Result(WindowManager &manager) { return manager.m_Session.GetResult(); }
+    static const auto &Error(WindowManager &manager) { return manager.m_Session.GetError(); }
+    // What the Export image dialog does once a destination is chosen
+    static std::string ExportImage(WindowManager &manager, const std::string &path, int format,
+                                   bool overwrite = false) {
+        auto &views = manager.m_ViewsWindow;
+        views.m_ImageFigure = Core::WaveformFigure(manager.m_Session.GetPlots());
+        std::snprintf(views.m_ImagePath, sizeof views.m_ImagePath, "%s", path.c_str());
+        views.m_ImageFormat = format;
+        views.m_ImageWidth = 800;
+        views.m_ImageHeight = 450;
+        views.ExportImage(overwrite);
+        return views.m_ImageStatus;
+    }
+    static void Invalid(WindowManager &manager) { manager.m_Session.GetConfig().SymbolCount = 0; }
 };
+
 TEST(UI, GeneratedViewsAndPendingClosure) {
     const char *capture = std::getenv("SIGGEN_CAPTURE_DIR");
     GLFWwindow *native = nullptr;
@@ -115,32 +144,20 @@ TEST(UI, GeneratedViewsAndPendingClosure) {
         glfwMakeContextCurrent(native);
         std::filesystem::create_directories(capture);
     }
-    ImGui::CreateContext();
-    ImPlot::CreateContext();
-    auto &io = ImGui::GetIO();
-    io.IniFilename = nullptr;
-    io.DeltaTime = 1.f / 60;
-    io.DisplaySize = ImVec2(1100, 1100);
+    CreateContexts(ImVec2(1100, 1100));
     if (native) {
         ImGui_ImplGlfw_InitForOpenGL(native, true);
         ImGui_ImplOpenGL3_Init("#version 330");
     } else {
-        unsigned char *pixels;
-        int w, h;
-        io.Fonts->GetTexDataAsRGBA32(&pixels, &w, &h);
+        BuildFontAtlas();
     }
-    auto frame = [&](SignalGenerator &window) {
+    auto frame = [&](WindowManager &manager) {
         if (native) {
             glfwPollEvents();
             ImGui_ImplOpenGL3_NewFrame();
             ImGui_ImplGlfw_NewFrame();
         }
-        ImGui::SetWindowSize("Signal Generator", io.DisplaySize);
-        ImGui::NewFrame();
-        ImGui::SetNextWindowPos(ImVec2(0, 0));
-        ImGui::SetNextWindowSize(io.DisplaySize);
-        window.Render();
-        ImGui::Render();
+        DrawFrame(manager);
         if (native) {
             glViewport(0, 0, 1100, 1100);
             glClearColor(.1f, .1f, .1f, 1);
@@ -162,18 +179,18 @@ TEST(UI, GeneratedViewsAndPendingClosure) {
             c.Awgn.Enabled = true; // Noise makes the frequency estimate visibly non-ideal.
             c.Awgn.SnrDb = 20;
         }
-        SignalGenerator window(c);
-        SignalGeneratorTestAccess::Start(window);
-        SignalGeneratorTestAccess::Edit(window); // Edit while work is pending.
+        WindowManager window(c);
+        GUITestAccess::Start(window);
+        GUITestAccess::Edit(window); // Edit while work is pending.
         const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(10);
-        while (SignalGeneratorTestAccess::Busy(window) && std::chrono::steady_clock::now() < deadline) {
+        while (GUITestAccess::Busy(window) && std::chrono::steady_clock::now() < deadline) {
             frame(window);
             std::this_thread::yield();
         }
-        ASSERT_FALSE(SignalGeneratorTestAccess::Busy(window));
-        ASSERT_TRUE(SignalGeneratorTestAccess::Result(window));
-        EXPECT_EQ(SignalGeneratorTestAccess::Result(window)->Config.Seed, c.Seed);
-        EXPECT_TRUE(SignalGeneratorTestAccess::Error(window).empty());
+        ASSERT_FALSE(GUITestAccess::Busy(window));
+        ASSERT_TRUE(GUITestAccess::Result(window));
+        EXPECT_EQ(GUITestAccess::Result(window)->Config.Seed, c.Seed);
+        EXPECT_TRUE(GUITestAccess::Error(window).empty());
         if (fsk) {
             frame(window);
             frame(window);
@@ -204,12 +221,12 @@ TEST(UI, GeneratedViewsAndPendingClosure) {
                 : std::vector<const char *>{"Waveform", "Constellation", "Matched", "Eye", "Pipeline", "Spectrum"};
         for (const char *view : views) {
             frame(window);
-            auto *gui_window = ImGui::FindWindowByName("Signal Generator");
+            auto *gui_window = ImGui::FindWindowByName("Signal Views");
             ASSERT_NE(gui_window, nullptr);
             auto *bar = FindSignalViews();
             ASSERT_NE(bar, nullptr);
             const bool matched = std::string(view) == "Matched";
-            SignalGeneratorTestAccess::Matched(window, matched);
+            GUITestAccess::Matched(window, matched);
             for (auto &tab : bar->Tabs) {
                 if (std::string(ImGui::TabBarGetTabName(bar, &tab)) == (matched ? "Constellation" : view)) {
                     bar->NextSelectedTabId = tab.ID;
@@ -256,21 +273,21 @@ TEST(UI, GeneratedViewsAndPendingClosure) {
                 EXPECT_TRUE(stbi_write_png(path.string().c_str(), 1100, 1100, 4, pixels.data(), 1100 * 4));
             }
         }
-        auto previous = SignalGeneratorTestAccess::Result(window);
-        SignalGeneratorTestAccess::Invalid(window);
-        SignalGeneratorTestAccess::Start(window);
+        auto previous = GUITestAccess::Result(window);
+        GUITestAccess::Invalid(window);
+        GUITestAccess::Start(window);
         const auto failure_deadline = std::chrono::steady_clock::now() + std::chrono::seconds(10);
-        while (SignalGeneratorTestAccess::Busy(window) && std::chrono::steady_clock::now() < failure_deadline) {
+        while (GUITestAccess::Busy(window) && std::chrono::steady_clock::now() < failure_deadline) {
             frame(window);
         }
-        EXPECT_EQ(SignalGeneratorTestAccess::Result(window), previous);
-        EXPECT_FALSE(SignalGeneratorTestAccess::Error(window).empty());
+        EXPECT_EQ(GUITestAccess::Result(window), previous);
+        EXPECT_FALSE(GUITestAccess::Error(window).empty());
     }
     {
         Core::GenerationConfig c;
         c.SymbolCount = 65536;
-        SignalGenerator closing(c);
-        SignalGeneratorTestAccess::Start(closing);
+        WindowManager closing(c);
+        GUITestAccess::Start(closing);
         // Destruction with an outstanding job must complete before destroying the UI context.
     }
     if (native) {
@@ -286,39 +303,26 @@ TEST(UI, GeneratedViewsAndPendingClosure) {
 }
 
 TEST(UI, NoiseSourceRendersWithoutConstellation) {
-    ImGui::CreateContext();
-    ImPlot::CreateContext();
-    auto &io = ImGui::GetIO();
-    io.IniFilename = nullptr;
-    io.DeltaTime = 1.f / 60;
-    io.DisplaySize = ImVec2(1100, 900);
-    unsigned char *pixels;
-    int w, h;
-    io.Fonts->GetTexDataAsRGBA32(&pixels, &w, &h);
+    CreateContexts(ImVec2(1100, 900));
+    BuildFontAtlas();
     Core::GenerationConfig c;
     c.Modulation = Core::Modulation::WGN;
-    SignalGenerator window(c);
-    auto frame = [&] {
-        ImGui::NewFrame();
-        ImGui::SetNextWindowPos(ImVec2(0, 0));
-        ImGui::SetNextWindowSize(io.DisplaySize);
-        window.Render();
-        ImGui::Render();
-    };
-    SignalGeneratorTestAccess::Start(window);
+    WindowManager window(c);
+    auto frame = [&] { DrawFrame(window); };
+    GUITestAccess::Start(window);
     const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(10);
-    while (SignalGeneratorTestAccess::Busy(window) && std::chrono::steady_clock::now() < deadline) {
+    while (GUITestAccess::Busy(window) && std::chrono::steady_clock::now() < deadline) {
         frame();
         std::this_thread::yield();
     }
-    ASSERT_FALSE(SignalGeneratorTestAccess::Busy(window));
-    ASSERT_TRUE(SignalGeneratorTestAccess::Result(window));
-    EXPECT_TRUE(SignalGeneratorTestAccess::Error(window).empty());
-    EXPECT_EQ(SignalGeneratorTestAccess::Result(window)->Family, Core::Family::Noise);
+    ASSERT_FALSE(GUITestAccess::Busy(window));
+    ASSERT_TRUE(GUITestAccess::Result(window));
+    EXPECT_TRUE(GUITestAccess::Error(window).empty());
+    EXPECT_EQ(GUITestAccess::Result(window)->Family, Core::Family::Noise);
     for (int pass = 0; pass < 3; ++pass) {
         frame();
         EXPECT_GT(ImGui::GetDrawData()->TotalVtxCount, 0);
-        auto *gui_window = ImGui::FindWindowByName("Signal Generator");
+        auto *gui_window = ImGui::FindWindowByName("Signal Views");
         ASSERT_NE(gui_window, nullptr);
         auto *bar = FindSignalViews();
         ASSERT_NE(bar, nullptr);
@@ -349,37 +353,26 @@ TEST(UI, EveryHelpTopicHasATitleAndExplanation) {
 }
 
 TEST(UI, ExportImageWritesPngAndSvgAndProtectsExistingFiles) {
-    ImGui::CreateContext();
-    ImPlot::CreateContext();
-    auto &io = ImGui::GetIO();
-    io.IniFilename = nullptr;
-    io.DisplaySize = ImVec2(1100, 800);
-    io.DeltaTime = 1.f / 60;
-    unsigned char *pixels;
-    int w, h;
-    io.Fonts->GetTexDataAsRGBA32(&pixels, &w, &h);
-    SignalGenerator window;
-    SignalGeneratorTestAccess::Start(window);
+    CreateContexts(ImVec2(1100, 800));
+    BuildFontAtlas();
+    WindowManager window;
+    GUITestAccess::Start(window);
     const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(10);
-    while (SignalGeneratorTestAccess::Busy(window) && std::chrono::steady_clock::now() < deadline) {
-        ImGui::NewFrame();
-        ImGui::SetNextWindowPos(ImVec2(0, 0));
-        ImGui::SetNextWindowSize(io.DisplaySize);
-        window.Render();
-        ImGui::Render();
+    while (GUITestAccess::Busy(window) && std::chrono::steady_clock::now() < deadline) {
+        DrawFrame(window);
         std::this_thread::yield();
     }
-    ASSERT_TRUE(SignalGeneratorTestAccess::Result(window));
+    ASSERT_TRUE(GUITestAccess::Result(window));
     const auto dir = std::filesystem::temp_directory_path() / "siggen-ui-image-export";
     std::filesystem::remove_all(dir);
     std::filesystem::create_directories(dir);
     const auto png = (dir / "wave.png").string(), svg = (dir / "wave.svg").string();
-    EXPECT_EQ(SignalGeneratorTestAccess::ExportImage(window, png, 0), "Saved " + png);
-    EXPECT_EQ(SignalGeneratorTestAccess::ExportImage(window, svg, 1), "Saved " + svg);
+    EXPECT_EQ(GUITestAccess::ExportImage(window, png, 0), "Saved " + png);
+    EXPECT_EQ(GUITestAccess::ExportImage(window, svg, 1), "Saved " + svg);
     EXPECT_GT(std::filesystem::file_size(png), 1000u);
     EXPECT_GT(std::filesystem::file_size(svg), 1000u);
-    EXPECT_NE(SignalGeneratorTestAccess::ExportImage(window, png, 0).find("Export failed"), std::string::npos);
-    EXPECT_EQ(SignalGeneratorTestAccess::ExportImage(window, png, 0, true), "Saved " + png);
+    EXPECT_NE(GUITestAccess::ExportImage(window, png, 0).find("Export failed"), std::string::npos);
+    EXPECT_EQ(GUITestAccess::ExportImage(window, png, 0, true), "Saved " + png);
     std::filesystem::remove_all(dir);
     ImPlot::DestroyContext();
     ImGui::DestroyContext();

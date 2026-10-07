@@ -38,9 +38,15 @@ Command line and GUI:
 
 - `app-cli/command_line.*`, `app-cli/cli_config.*`: CLI parsing and
   defaults → preset → explicit-option resolution.
-- `app-gui/signal_generator.*`: the generator window, with cached presentation
-  and UI-thread state. Analysis/cache preparation runs once on result completion;
-  generation is asynchronous, while export and cache preparation are synchronous.
+- `app-gui/generator_session.*`: the document shared by the windows: settings,
+  the owned generation job and the analysis of the last result. Analysis runs once
+  on result completion; generation is asynchronous, while export and analysis are
+  synchronous.
+- `app-gui/windows/`: dockable windows deriving from `AppWindow` that keep only
+  view state: Signal Setup (`controls_window.*`), Signal Summary
+  (`summary_window.*`) and Signal Views (`views_window.*`, plots and image export).
+- `app-gui/window_manager.*`: owns the session and the windows, and builds the
+  default dock layout (also from View > Reset Layout).
 
 CLI tests exercise argument validation, configuration precedence, family
 switching, incompatible-option rejection, batch resolution, and the real

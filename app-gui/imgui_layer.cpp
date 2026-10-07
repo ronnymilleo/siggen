@@ -118,7 +118,7 @@ void ImGuiLayer::Init(GLFWwindow *window) {
     ImGui::CreateContext();
     ImPlot::CreateContext();
     ImGuiIO &io = ImGui::GetIO();
-    io.ConfigFlags |= ImGuiConfigFlags_NavEnableKeyboard;
+    io.ConfigFlags |= ImGuiConfigFlags_NavEnableKeyboard | ImGuiConfigFlags_DockingEnable;
     ImGui::StyleColorsDark();
     ApplyTheme();
     ImGui_ImplGlfw_InitForOpenGL(window, true);
