@@ -7,7 +7,10 @@
 #include <string>
 #include <string_view>
 namespace iq {
-enum class ExportFormat { CSV, BinaryFloat32 };
+// SigMF writes the same little-endian float32 I/Q as BinaryFloat32 (`cf32_le`),
+// with a `.sigmf-meta` JSON beside the `.sigmf-data` file.
+enum class ExportFormat { CSV, BinaryFloat32, SigMF };
+// `<destination>.json`, or the `.sigmf-meta` sibling of a `.sigmf-data` destination.
 std::filesystem::path metadata_path(const std::filesystem::path& destination);
 // Minimal JSON string escaping shared by export and batch sidecars/manifests.
 std::string json_quote(std::string_view text);

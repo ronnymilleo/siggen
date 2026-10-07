@@ -1,5 +1,6 @@
 #include "iq_export.h"
 #include "impairments.h"
+#include "preset.h"
 #include "signal_processing.h"
 #include <bit>
 #include <cmath>
@@ -17,6 +18,9 @@
 #include <string_view>
 namespace iq {
 namespace {
+bool supported(ExportFormat format) {
+    return format == ExportFormat::CSV || format == ExportFormat::BinaryFloat32 || format == ExportFormat::SigMF;
+}
 void validate_linear(const GeneratedSignal& r) {
     const auto sps = static_cast<std::size_t>(r.config.samples_per_symbol);
     const auto taps = uses_rrc(r.config) ? static_cast<std::size_t>(r.config.span_symbols) * sps + 1 : sps;
@@ -41,7 +45,7 @@ void validate_noise(const GeneratedSignal& r) {
 }
 void validate_result(const GeneratedSignal& r, ExportFormat format) {
     validate(r.config);
-    if (format != ExportFormat::CSV && format != ExportFormat::BinaryFloat32) throw std::invalid_argument("Unsupported export format");
+    if (!supported(format)) throw std::invalid_argument("Unsupported export format");
     if (r.family != waveform_family(r.config.modulation)) throw std::invalid_argument("Result family does not match configuration");
     if (r.family == Family::Noise) validate_noise(r);
     else if (r.family == Family::Fsk) validate_fsk(r);
@@ -79,8 +83,12 @@ void little_float(std::ostream& out, float value) {
 }
 }
 std::string json_quote(std::string_view text) { return quote(text); }
-std::filesystem::path metadata_path(const std::filesystem::path& destination) { return destination.string() + ".json"; }
-std::string export_metadata(const GeneratedSignal& r, ExportFormat format) {
+std::filesystem::path metadata_path(const std::filesystem::path& destination) {
+    if (destination.extension() == ".sigmf-data") return std::filesystem::path(destination).replace_extension(".sigmf-meta");
+    return destination.string() + ".json";
+}
+namespace {
+std::string siggen_metadata(const GeneratedSignal& r, ExportFormat format) {
     validate_result(r, format);
     const auto& c = r.config;
     std::ostringstream out;
@@ -126,8 +134,27 @@ std::string export_metadata(const GeneratedSignal& r, ExportFormat format) {
         << "\n  }\n}\n";
     return out.str();
 }
+std::string trimmed(std::string text) {
+    while (!text.empty() && (text.back() == '\n' || text.back() == ' ')) text.pop_back();
+    return text;
+}
+}
+std::string export_metadata(const GeneratedSignal& r, ExportFormat format) {
+    if (format != ExportFormat::SigMF) return siggen_metadata(r, format);
+    // SigMF 1.0.0 core fields; everything siggen-specific lives under the `siggen:` namespace.
+    const auto detail = siggen_metadata(r, ExportFormat::BinaryFloat32);
+    std::ostringstream out;
+    out.imbue(std::locale::classic());
+    out << std::setprecision(std::numeric_limits<double>::max_digits10)
+        << "{\n  \"global\": {\n    \"core:datatype\": \"cf32_le\",\n    \"core:sample_rate\": " << r.sample_rate_hz
+        << ",\n    \"core:version\": \"1.0.0\",\n    \"core:description\": " << quote(std::string("Synthetic ") + modulation_name(r.config.modulation) + " baseband signal from siggen")
+        << ",\n    \"core:recorder\": \"siggen\",\n    \"siggen:preset\": " << quote(serialize_preset(r.config))
+        << ",\n    \"siggen:metadata\": " << trimmed(detail)
+        << "\n  },\n  \"captures\": [\n    {\"core:sample_start\": 0, \"core:frequency\": 0}\n  ],\n  \"annotations\": []\n}\n";
+    return out.str();
+}
 void write_samples(std::ostream& out, std::span<const std::complex<float>> samples, double sample_rate_hz, ExportFormat format) {
-    if (format != ExportFormat::CSV && format != ExportFormat::BinaryFloat32) throw std::invalid_argument("Unsupported export format");
+    if (!supported(format)) throw std::invalid_argument("Unsupported export format");
     if (!std::isfinite(sample_rate_hz) || sample_rate_hz <= 0) throw std::invalid_argument("Sample rate must be positive and finite");
     out.imbue(std::locale::classic());
     out << std::setprecision(std::numeric_limits<double>::max_digits10);

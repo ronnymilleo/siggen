@@ -65,15 +65,22 @@ struct CommandLine
     std::string              output_dir = "dataset";
     bool                     batch_overwrite = false;
 
+    // Analyze subcommand state.
+    CLI::App*                analyze = nullptr;
+    std::string              analyze_file;
+    std::string              analyze_window = "hann";
+    int                      analyze_segment = 1024;
+    bool                     analyze_json = false;
+
     explicit CommandLine(const std::string& version)
     {
         auto* gui_option = app.add_flag("--gui", gui, "Open the GUI, optionally initialized by preset/signal options");
 
-        app.add_option("-o,--output", output, "Sample destination (default: signal.csv or signal.iq)")
+        app.add_option("-o,--output", output, "Sample destination (default: signal.csv, signal.iq or signal.sigmf-data)")
             ->excludes(gui_option);
         app.add_flag("--overwrite", overwrite, "Replace existing sample and metadata files")->excludes(gui_option);
         app.add_option("--format", format, "Single-generation output format")
-            ->check(CLI::IsMember({"csv", "cf32"}))
+            ->check(CLI::IsMember({"csv", "cf32", "sigmf"}))
             ->excludes(gui_option);
 
         app.add_option("--preset", preset, "Load a preset before applying explicit options");
@@ -100,9 +107,19 @@ struct CommandLine
         batch->add_option("--preset", preset, "Load a preset before applying explicit batch overrides");
         add_signal_options(*batch);
         batch->excludes(gui_option);
+
+        analyze = app.add_subcommand("analyze", "Measure a SigMF recording or cf32 export (power, PAPR, spectrum, EVM)");
+        analyze->add_option("file", analyze_file, "SigMF .sigmf-meta/.sigmf-data, or a cf32 export with its .json sidecar")
+            ->required();
+        analyze->add_option("--window", analyze_window, "Welch window (default: hann)")
+            ->check(CLI::IsMember({"hann", "hamming", "blackman", "rectangular"}));
+        analyze->add_option("--segment", analyze_segment, "Welch segment length in samples (default: 1024)");
+        analyze->add_flag("--json", analyze_json, "Print the report as JSON");
+        analyze->excludes(gui_option);
     }
 
     bool batch_selected() const { return batch != nullptr && batch->parsed(); }
+    bool analyze_selected() const { return analyze != nullptr && analyze->parsed(); }
 
 private:
     // Signal and noise options shared by single generation and the batch sweep.
