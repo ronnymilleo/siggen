@@ -120,7 +120,7 @@ inheritance gives each new name its own build directory. For example:
 
 Run `cmake --workflow --preset local-clang`. To build only the signal library,
 run `cmake --preset library-only` followed by `cmake --build --preset library-only`;
-this needs no vendor submodules and has no test step. `SIGGEN_BUILD_APP` controls
+this needs only the `stb` submodule (image export) and has no test step. `SIGGEN_BUILD_APP` controls
 the executable; `SIGGEN_BUILD_GUI` controls its optional graphical interface. For a local
 GUI or Release Clang profile, inherit `dev` or `release` and set the compiler path.
 CMake 3.28 supports these built-in [workflow presets](https://cmake.org/cmake/help/v3.28/manual/cmake-presets.7.html).
@@ -636,6 +636,8 @@ with AWGN enabled the observation view is explicitly labeled as noisy. WGN
 results show waveform, spectrum and power statistics without any symbol
 constellation. FSK and MSK results replace the constellation and eye with a
 **Frequency** tab (see "Frequency modulation").
+
+Each tab can be saved as a PNG or SVG image (see "Exporting plot images").
 
 **Eye** overlays two-symbol-period traces of the matched-filter I and Q (OQPSK
 shows the half-symbol Q offset). **Pipeline** (linear signals only) stacks five
