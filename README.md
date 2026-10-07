@@ -60,8 +60,6 @@ ctest --preset dev
 | `asan` | Debug | No | GCC (Linux) | Address + undefined behavior |
 | `tsan` | Debug | No | GCC (Linux) | Thread |
 
-`dev` and `headless` also build the shared library behind the Python package (`SIGGEN_BUILD_PYTHON`, off by default elsewhere); see [Analysis, SigMF and Python](docs/analysis-and-python.md).
-
 All profiles enable tests and project warnings. Configure, build, test, and
 workflow names match and share `build/<preset-name>`. Tests print failures and
 fail if no tests are discovered. Discovery happens at test time, so linking a
