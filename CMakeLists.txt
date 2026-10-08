@@ -13,7 +13,7 @@ if(CMAKE_SOURCE_DIR STREQUAL CMAKE_BINARY_DIR)
 endif()
 
 project(siggen
-    VERSION 0.4.0
+    VERSION 0.5.0
     LANGUAGES CXX
 )
 
