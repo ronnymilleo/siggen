@@ -72,10 +72,13 @@ GLFW. On Linux its default backend is X11, which also runs through XWayland.
 GLFW examples, tests, documentation, and installation default off. GoogleMock and ImGui/ImPlot demo sources are excluded from default builds.
 
 Executables are in the build directory's `bin/`, libraries in `lib/`, and
-`compile_commands.json` stays in the build directory. In-source builds are
-rejected. `SIGGEN_ENABLE_WARNINGS` controls compiler-appropriate warnings on project
-targets. If clang-format is available, `cmake --build --preset dev --target format`
-explicitly formats project sources; ordinary builds never rewrite sources.
+`compile_commands.json` of the last built preset is copied to the repository root
+for editors and `clang-tidy`. In-source builds are rejected. `SIGGEN_ENABLE_WARNINGS`
+controls compiler-appropriate warnings on project targets. If clang-format is
+available, building the `siggen` executable first formats every project source
+(the `format` target), so commit the formatted files. Identifier naming is checked
+with `clang-tidy -p build/dev $(git ls-files '*.cpp')`; see `CLAUDE.md` for the
+code conventions.
 
 ### Local overrides and library-only builds
 

@@ -1,8 +1,8 @@
 # Shared C interface used by the `siggen` Python package (ctypes; no extra dependencies).
-set_target_properties(signalgenerator PROPERTIES POSITION_INDEPENDENT_CODE ON)
+set_target_properties(siggen-core-lib PROPERTIES POSITION_INDEPENDENT_CODE ON)
 add_library(siggen_c SHARED csrc/siggen_c.cpp)
 target_include_directories(siggen_c PRIVATE csrc)
-target_link_libraries(siggen_c PRIVATE signalgenerator)
+target_link_libraries(siggen_c PRIVATE siggen-core-lib)
 target_compile_definitions(siggen_c PRIVATE SIGGEN_VERSION="${PROJECT_VERSION}")
 siggen_target_options(siggen_c)
 set_target_properties(siggen_c PROPERTIES CXX_VISIBILITY_PRESET hidden VISIBILITY_INLINES_HIDDEN ON)

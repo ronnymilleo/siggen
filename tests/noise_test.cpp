@@ -1,40 +1,50 @@
-#include "generator.h"
+/**
+ * @file    noise_test.cpp
+ * @brief   Tests for the seeded Gaussian noise source, the WGN waveform and AWGN at a requested SNR.
+ */
+
 #include "noise.h"
+
+#include "generator.h"
 #include "signal_analysis.h"
-#include <gtest/gtest.h>
 #include <cmath>
+#include <gtest/gtest.h>
 #include <numbers>
 #include <random>
 
-using namespace iq;
+namespace Core {
 
 namespace {
+
+// Sample mean and variance of each component and the I/Q correlation coefficient
 struct Statistics {
-    double mean_i = 0, mean_q = 0, var_i = 0, var_q = 0, correlation = 0;
+    double MeanI = 0, MeanQ = 0, VarI = 0, VarQ = 0, Correlation = 0;
 };
-Statistics component_statistics(const std::vector<std::complex<float>>& samples) {
-    Statistics s;
-    const auto n = static_cast<double>(samples.size());
-    for (const auto& value : samples) {
-        s.mean_i += value.real();
-        s.mean_q += value.imag();
+
+Statistics ComponentStatistics(const std::vector<std::complex<float>> &samples) {
+    Statistics statistics;
+    const auto count = static_cast<double>(samples.size());
+    for (const auto &value : samples) {
+        statistics.MeanI += value.real();
+        statistics.MeanQ += value.imag();
     }
-    s.mean_i /= n;
-    s.mean_q /= n;
+    statistics.MeanI /= count;
+    statistics.MeanQ /= count;
     double cross = 0;
-    for (const auto& value : samples) {
-        const auto di = value.real() - s.mean_i;
-        const auto dq = value.imag() - s.mean_q;
-        s.var_i += di * di;
-        s.var_q += dq * dq;
-        cross += di * dq;
+    for (const auto &value : samples) {
+        const auto deviation_i = value.real() - statistics.MeanI;
+        const auto deviation_q = value.imag() - statistics.MeanQ;
+        statistics.VarI += deviation_i * deviation_i;
+        statistics.VarQ += deviation_q * deviation_q;
+        cross += deviation_i * deviation_q;
     }
-    s.var_i /= n - 1;
-    s.var_q /= n - 1;
-    s.correlation = cross / (n - 1) / std::sqrt(s.var_i * s.var_q);
-    return s;
+    statistics.VarI /= count - 1;
+    statistics.VarQ /= count - 1;
+    statistics.Correlation = cross / (count - 1) / std::sqrt(statistics.VarI * statistics.VarQ);
+    return statistics;
 }
-}
+
+} // namespace
 
 TEST(Noise, DocumentedBoxMullerFixture) {
     // Independent reimplementation of the documented conversion:
@@ -49,159 +59,170 @@ TEST(Noise, DocumentedBoxMullerFixture) {
         EXPECT_LT(u1, 1);
         const double radius = std::sqrt(-2 * std::log(u1));
         const double theta = 2 * std::numbers::pi * u2;
-        EXPECT_DOUBLE_EQ(source.next(), radius * std::cos(theta));
-        EXPECT_DOUBLE_EQ(source.next(), radius * std::sin(theta));
+        EXPECT_DOUBLE_EQ(source.Next(), radius * std::cos(theta));
+        EXPECT_DOUBLE_EQ(source.Next(), radius * std::sin(theta));
     }
 }
 
 TEST(Noise, DeterministicAndSeedSeparated) {
-    const auto a = gaussian_noise(64, 1, 5490);
-    const auto b = gaussian_noise(64, 1, 5490);
-    const auto c = gaussian_noise(64, 1, 5491);
-    EXPECT_EQ(a, b);
-    EXPECT_NE(a, c);
-    EXPECT_EQ(a.size(), 64u);
-    EXPECT_THROW(gaussian_noise(4, -1, 1), std::invalid_argument);
-    EXPECT_THROW(gaussian_noise(4, NAN, 1), std::invalid_argument);
-    EXPECT_THROW(gaussian_noise(4, 1e100, 1), std::overflow_error);
-    EXPECT_NO_THROW(gaussian_noise(0, 1, 1));
+    const auto first = GaussianNoise(64, 1, 5490);
+    const auto repeated = GaussianNoise(64, 1, 5490);
+    const auto other_seed = GaussianNoise(64, 1, 5491);
+    EXPECT_EQ(first, repeated);
+    EXPECT_NE(first, other_seed);
+    EXPECT_EQ(first.size(), 64u);
+    EXPECT_THROW(GaussianNoise(4, -1, 1), std::invalid_argument);
+    EXPECT_THROW(GaussianNoise(4, NAN, 1), std::invalid_argument);
+    EXPECT_THROW(GaussianNoise(4, 1e100, 1), std::overflow_error);
+    EXPECT_NO_THROW(GaussianNoise(0, 1, 1));
     // Zero power produces exact zeros.
-    for (const auto& value : gaussian_noise(8, 0, 3)) EXPECT_EQ(value, std::complex<float>(0, 0));
+    for (const auto &value : GaussianNoise(8, 0, 3)) {
+        EXPECT_EQ(value, std::complex<float>(0, 0));
+    }
 }
 
 TEST(Noise, WGNComponentStatistics) {
     GenerationConfig config;
-    config.modulation = Modulation::WGN;
-    config.noise_source.sample_count = 65536;
-    config.noise_source.noise_power = 4;
-    const auto result = generate(config);
-    const auto stats = component_statistics(result.samples);
+    config.Modulation = Modulation::WGN;
+    config.NoiseSource.SampleCount = 65536;
+    config.NoiseSource.NoisePower = 4;
+    const auto result = Generate(config);
+    const auto stats = ComponentStatistics(result.Samples);
     // Each component carries half the total complex power.
-    EXPECT_NEAR(stats.mean_i, 0, .05);
-    EXPECT_NEAR(stats.mean_q, 0, .05);
-    EXPECT_NEAR(stats.var_i, 2, .1);
-    EXPECT_NEAR(stats.var_q, 2, .1);
-    EXPECT_NEAR(stats.correlation, 0, .02);
+    EXPECT_NEAR(stats.MeanI, 0, .05);
+    EXPECT_NEAR(stats.MeanQ, 0, .05);
+    EXPECT_NEAR(stats.VarI, 2, .1);
+    EXPECT_NEAR(stats.VarQ, 2, .1);
+    EXPECT_NEAR(stats.Correlation, 0, .02);
 }
 
 TEST(Noise, DisabledAwgnPreservesCleanSamples) {
     GenerationConfig clean;
-    clean.symbol_count = 64;
+    clean.SymbolCount = 64;
     GenerationConfig noisy = clean;
-    noisy.awgn.enabled = false;
-    noisy.awgn.snr_db = 3;
-    noisy.noise_seed = 1234;
-    EXPECT_EQ(generate(clean).samples, generate(noisy).samples);
-    EXPECT_FALSE(generate(noisy).noise.awgn_applied);
+    noisy.Awgn.Enabled = false;
+    noisy.Awgn.SnrDb = 3;
+    noisy.NoiseSeed = 1234;
+    EXPECT_EQ(Generate(clean).Samples, Generate(noisy).Samples);
+    EXPECT_FALSE(Generate(noisy).Noise.AwgnApplied);
     // Noise settings never change the transmitted symbols.
-    noisy.awgn.enabled = true;
-    EXPECT_EQ(generate(noisy).symbols, generate(clean).symbols);
+    noisy.Awgn.Enabled = true;
+    EXPECT_EQ(Generate(noisy).Symbols, Generate(clean).Symbols);
 }
 
 TEST(Noise, AwgnSnrToleranceAndReferenceInterval) {
     GenerationConfig config;
-    config.symbol_count = 512;
-    config.roll_off = .35;
-    config.span_symbols = 12;
-    config.awgn.enabled = true;
-    const auto clean = generate([&] { auto c = config; c.awgn.enabled = false; return c; }());
+    config.SymbolCount = 512;
+    config.RollOff = .35;
+    config.SpanSymbols = 12;
+    config.Awgn.Enabled = true;
+    const auto clean = Generate([&] {
+        auto clean_config = config;
+        clean_config.Awgn.Enabled = false;
+        return clean_config;
+    }());
     for (const double snr : {0., 10., 20.}) {
-        config.awgn.snr_db = snr;
-        const auto noisy = generate(config);
-        EXPECT_TRUE(noisy.noise.awgn_applied);
-        EXPECT_DOUBLE_EQ(noisy.noise.requested_snr_db, snr);
-        EXPECT_EQ(noisy.noise.reference_begin, 12u * 8u);
-        EXPECT_EQ(noisy.noise.reference_end, 512u * 8u);
-        EXPECT_GT(noisy.noise.reference_power, 0);
+        config.Awgn.SnrDb = snr;
+        const auto noisy = Generate(config);
+        EXPECT_TRUE(noisy.Noise.AwgnApplied);
+        EXPECT_DOUBLE_EQ(noisy.Noise.RequestedSnrDb, snr);
+        EXPECT_EQ(noisy.Noise.ReferenceBegin, 12u * 8u);
+        EXPECT_EQ(noisy.Noise.ReferenceEnd, 512u * 8u);
+        EXPECT_GT(noisy.Noise.ReferencePower, 0);
         double reference = 0;
-        for (std::size_t k = noisy.noise.reference_begin; k < noisy.noise.reference_end; ++k)
-            reference += std::norm(clean.samples[k]);
-        reference /= static_cast<double>(noisy.noise.reference_end - noisy.noise.reference_begin);
-        EXPECT_NEAR(noisy.noise.reference_power, reference, 1e-9);
+        for (std::size_t k = noisy.Noise.ReferenceBegin; k < noisy.Noise.ReferenceEnd; ++k) {
+            reference += std::norm(clean.Samples[k]);
+        }
+        reference /= static_cast<double>(noisy.Noise.ReferenceEnd - noisy.Noise.ReferenceBegin);
+        EXPECT_NEAR(noisy.Noise.ReferencePower, reference, 1e-9);
         double noise_power = 0;
-        for (std::size_t k = 0; k < noisy.samples.size(); ++k)
-            noise_power += std::norm(noisy.samples[k] - clean.samples[k]);
-        noise_power /= static_cast<double>(noisy.samples.size());
+        for (std::size_t k = 0; k < noisy.Samples.size(); ++k) {
+            noise_power += std::norm(noisy.Samples[k] - clean.Samples[k]);
+        }
+        noise_power /= static_cast<double>(noisy.Samples.size());
         const auto measured_db = 10 * std::log10(reference / noise_power);
         EXPECT_NEAR(measured_db, snr, .5);
-        EXPECT_NEAR(noisy.noise.added_noise_power, reference / std::pow(10., snr / 10), 1e-12);
+        EXPECT_NEAR(noisy.Noise.AddedNoisePower, reference / std::pow(10., snr / 10), 1e-12);
         // The added noise is exactly the documented seeded Gaussian stream.
-        const auto expected = gaussian_noise(noisy.samples.size(), noisy.noise.added_noise_power, config.noise_seed);
-        for (std::size_t k = 0; k < noisy.samples.size(); ++k)
-            EXPECT_FLOAT_EQ((clean.samples[k] + expected[k]).real(), noisy.samples[k].real());
+        const auto expected = GaussianNoise(noisy.Samples.size(), noisy.Noise.AddedNoisePower, config.NoiseSeed);
+        for (std::size_t k = 0; k < noisy.Samples.size(); ++k) {
+            EXPECT_FLOAT_EQ((clean.Samples[k] + expected[k]).real(), noisy.Samples[k].real());
+        }
     }
     // Rectangular pulses reference the entire clean signal.
-    config.pulse = Pulse::Rectangular;
-    config.awgn.snr_db = 10;
-    const auto rect = generate(config);
-    EXPECT_EQ(rect.noise.reference_begin, 0u);
-    EXPECT_EQ(rect.noise.reference_end, rect.samples.size());
+    config.Pulse = Pulse::Rectangular;
+    config.Awgn.SnrDb = 10;
+    const auto rect = Generate(config);
+    EXPECT_EQ(rect.Noise.ReferenceBegin, 0u);
+    EXPECT_EQ(rect.Noise.ReferenceEnd, rect.Samples.size());
 }
 
 TEST(Noise, AwgnSharedRealizationAcrossSnr) {
     GenerationConfig config;
-    config.symbol_count = 128;
-    config.awgn.enabled = true;
-    config.awgn.snr_db = 10;
-    const auto low = generate(config);
-    config.awgn.snr_db = 20;
-    const auto high = generate(config);
-    config.awgn.enabled = false;
-    const auto clean = generate(config);
-    ASSERT_EQ(low.samples.size(), high.samples.size());
+    config.SymbolCount = 128;
+    config.Awgn.Enabled = true;
+    config.Awgn.SnrDb = 10;
+    const auto low = Generate(config);
+    config.Awgn.SnrDb = 20;
+    const auto high = Generate(config);
+    config.Awgn.Enabled = false;
+    const auto clean = Generate(config);
+    ASSERT_EQ(low.Samples.size(), high.Samples.size());
     // Same underlying draws: the 20 dB noise is the 10 dB noise scaled by 10^(-10/20).
     const auto ratio = std::pow(10., -10. / 20);
-    for (std::size_t k = 0; k < low.samples.size(); ++k) {
-        const auto expected = clean.samples[k] + (low.samples[k] - clean.samples[k]) * static_cast<float>(ratio);
-        EXPECT_NEAR(high.samples[k].real(), expected.real(), 1e-4);
-        EXPECT_NEAR(high.samples[k].imag(), expected.imag(), 1e-4);
+    for (std::size_t k = 0; k < low.Samples.size(); ++k) {
+        const auto expected = clean.Samples[k] + (low.Samples[k] - clean.Samples[k]) * static_cast<float>(ratio);
+        EXPECT_NEAR(high.Samples[k].real(), expected.real(), 1e-4);
+        EXPECT_NEAR(high.Samples[k].imag(), expected.imag(), 1e-4);
     }
 }
 
 TEST(Noise, AwgnRejectsInvalidReferences) {
     GenerationConfig config;
-    config.awgn.enabled = true;
+    config.Awgn.Enabled = true;
     // Zero-power reference: gain zero leaves no clean energy.
-    config.amplitude_gain = 0;
-    EXPECT_THROW(generate(config), std::invalid_argument);
+    config.AmplitudeGain = 0;
+    EXPECT_THROW(Generate(config), std::invalid_argument);
     // Empty reference interval: symbol count within one RRC span.
     config = {};
-    config.awgn.enabled = true;
-    config.symbol_count = 5;
-    config.span_symbols = 10;
-    EXPECT_THROW(generate(config), std::invalid_argument);
+    config.Awgn.Enabled = true;
+    config.SymbolCount = 5;
+    config.SpanSymbols = 10;
+    EXPECT_THROW(Generate(config), std::invalid_argument);
     // Non-finite SNR fails validation.
     config = {};
-    config.awgn.enabled = true;
-    config.awgn.snr_db = NAN;
-    EXPECT_THROW(validate(config), std::invalid_argument);
-    config.awgn.enabled = false;
-    EXPECT_THROW(validate(config), std::invalid_argument);
+    config.Awgn.Enabled = true;
+    config.Awgn.SnrDb = NAN;
+    EXPECT_THROW(Validate(config), std::invalid_argument);
+    config.Awgn.Enabled = false;
+    EXPECT_THROW(Validate(config), std::invalid_argument);
     config = {};
-    config.modulation = Modulation::WGN;
-    config.noise_source.sample_rate_hz = 1e-305;
-    EXPECT_THROW(validate(config), std::invalid_argument);
+    config.Modulation = Modulation::WGN;
+    config.NoiseSource.SampleRateHz = 1e-305;
+    EXPECT_THROW(Validate(config), std::invalid_argument);
 }
 
 TEST(Noise, IndependentDataAndNoiseStreams) {
     GenerationConfig config;
-    config.symbol_count = 64;
-    config.awgn.enabled = true;
-    const auto base = generate(config);
+    config.SymbolCount = 64;
+    config.Awgn.Enabled = true;
+    const auto base = Generate(config);
     auto changed = config;
-    changed.seed++;
-    EXPECT_NE(generate(changed).samples, base.samples);
+    changed.Seed++;
+    EXPECT_NE(Generate(changed).Samples, base.Samples);
     changed = config;
-    changed.noise_seed++;
-    const auto other_noise = generate(changed);
-    EXPECT_NE(other_noise.samples, base.samples);
+    changed.NoiseSeed++;
+    const auto other_noise = Generate(changed);
+    EXPECT_NE(other_noise.Samples, base.Samples);
     // Same symbols, different noise realization.
-    EXPECT_EQ(other_noise.symbols, base.symbols);
-    EXPECT_EQ(other_noise.noise.reference_power, base.noise.reference_power);
+    EXPECT_EQ(other_noise.Symbols, base.Symbols);
+    EXPECT_EQ(other_noise.Noise.ReferencePower, base.Noise.ReferencePower);
 }
 
 TEST(Noise, MatchedSymbolsRejectNoiseSources) {
     GenerationConfig config;
-    config.modulation = Modulation::WGN;
-    EXPECT_THROW(matched_symbols(generate(config)), std::invalid_argument);
+    config.Modulation = Modulation::WGN;
+    EXPECT_THROW(MatchedSymbols(Generate(config)), std::invalid_argument);
 }
+
+} // namespace Core

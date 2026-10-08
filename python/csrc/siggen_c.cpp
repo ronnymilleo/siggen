@@ -19,7 +19,7 @@
 #include <string>
 
 struct siggen_signal {
-    iq::GeneratedSignal signal;
+    Core::GeneratedSignal signal;
     bool has_config = false;
     std::size_t expected_samples = 0; // Length implied by the configuration.
 };
@@ -54,49 +54,49 @@ extern "C" {
 const char* siggen_version(void) { return SIGGEN_VERSION; }
 
 int siggen_default_preset(char* out, std::size_t capacity) {
-    return static_cast<int>(copy_text(iq::serialize_preset(iq::GenerationConfig{}), out, capacity));
+    return static_cast<int>(copy_text(Core::SerializePreset(Core::GenerationConfig{}), out, capacity));
 }
 
 siggen_signal* siggen_generate(const char* preset_text, char* error, std::size_t error_capacity) {
     return guarded(error, error_capacity, static_cast<siggen_signal*>(nullptr), [&] {
         auto handle = new siggen_signal;
         try {
-            handle->signal = iq::generate(iq::parse_preset(preset_text ? preset_text : ""));
+            handle->signal = Core::Generate(Core::ParsePreset(preset_text ? preset_text : ""));
         } catch (...) {
             delete handle;
             throw;
         }
         handle->has_config = true;
-        handle->expected_samples = handle->signal.samples.size();
+        handle->expected_samples = handle->signal.Samples.size();
         return handle;
     });
 }
 
 siggen_signal* siggen_load(const char* path, char* error, std::size_t error_capacity) {
     return guarded(error, error_capacity, static_cast<siggen_signal*>(nullptr), [&] {
-        const auto recording = iq::read_recording(path ? path : "");
+        const auto recording = Core::ReadRecording(path ? path : "");
         auto handle = new siggen_signal;
-        if (auto signal = iq::signal_from_recording(recording)) {
+        if (auto signal = Core::SignalFromRecording(recording)) {
             handle->signal = std::move(*signal);
             handle->has_config = true;
         } else {
-            handle->signal.samples = recording.samples;
-            handle->signal.sample_rate_hz = recording.sample_rate_hz;
-            if (recording.config) handle->signal.config = *recording.config;
+            handle->signal.Samples = recording.Samples;
+            handle->signal.SampleRateHz = recording.SampleRateHz;
+            if (recording.Config) handle->signal.Config = *recording.Config;
         }
-        handle->signal.sample_rate_hz = recording.sample_rate_hz;
-        handle->expected_samples = handle->signal.samples.size();
+        handle->signal.SampleRateHz = recording.SampleRateHz;
+        handle->expected_samples = handle->signal.Samples.size();
         return handle;
     });
 }
 
 void siggen_free(siggen_signal* signal) { delete signal; }
-std::size_t siggen_sample_count(const siggen_signal* s) { return s->signal.samples.size(); }
-double siggen_sample_rate(const siggen_signal* s) { return s->signal.sample_rate_hz; }
-std::size_t siggen_filter_delay(const siggen_signal* s) { return s->signal.filter_delay_samples; }
+std::size_t siggen_sample_count(const siggen_signal* s) { return s->signal.Samples.size(); }
+double siggen_sample_rate(const siggen_signal* s) { return s->signal.SampleRateHz; }
+std::size_t siggen_filter_delay(const siggen_signal* s) { return s->signal.FilterDelaySamples; }
 
 void siggen_copy_samples(const siggen_signal* s, float* out) {
-    for (const auto& v : s->signal.samples) { *out++ = v.real(); *out++ = v.imag(); }
+    for (const auto& v : s->signal.Samples) { *out++ = v.real(); *out++ = v.imag(); }
 }
 
 int siggen_set_samples(siggen_signal* s, const float* interleaved, std::size_t n, char* error, std::size_t error_capacity) {
@@ -104,42 +104,42 @@ int siggen_set_samples(siggen_signal* s, const float* interleaved, std::size_t n
         if (!interleaved && n) throw std::invalid_argument("samples are null");
         std::vector<std::complex<float>> samples(n);
         for (std::size_t k = 0; k < n; ++k) samples[k] = {interleaved[2 * k], interleaved[2 * k + 1]};
-        s->signal.samples = std::move(samples);
+        s->signal.Samples = std::move(samples);
         return 0;
     });
 }
 
-std::size_t siggen_symbol_count(const siggen_signal* s) { return s->signal.symbols.size(); }
+std::size_t siggen_symbol_count(const siggen_signal* s) { return s->signal.Symbols.size(); }
 void siggen_copy_symbols(const siggen_signal* s, float* out) {
-    for (const auto& v : s->signal.symbols) { *out++ = v.real(); *out++ = v.imag(); }
+    for (const auto& v : s->signal.Symbols) { *out++ = v.real(); *out++ = v.imag(); }
 }
 
 long siggen_preset_text(const siggen_signal* s, char* out, std::size_t capacity) {
     if (!s->has_config) return -1;
-    return copy_text(iq::serialize_preset(s->signal.config), out, capacity);
+    return copy_text(Core::SerializePreset(s->signal.Config), out, capacity);
 }
 long siggen_waveform_name(const siggen_signal* s, char* out, std::size_t capacity) {
     if (!s->has_config) return -1;
-    return copy_text(iq::modulation_name(s->signal.config.modulation), out, capacity);
+    return copy_text(Core::ModulationName(s->signal.Config.Modulation), out, capacity);
 }
-long siggen_bits(const siggen_signal* s, char* out, std::size_t capacity) { return copy_text(s->signal.bits, out, capacity); }
+long siggen_bits(const siggen_signal* s, char* out, std::size_t capacity) { return copy_text(s->signal.Bits, out, capacity); }
 
 int siggen_power_statistics(const siggen_signal* s, double* out) {
-    if (s->signal.samples.empty()) return -1;
-    const auto stats = iq::power_statistics(s->signal.samples);
-    out[0] = stats.mean_power; out[1] = stats.peak_power; out[2] = stats.papr_db;
+    if (s->signal.Samples.empty()) return -1;
+    const auto stats = Core::MeasurePowerStatistics(s->signal.Samples);
+    out[0] = stats.MeanPower; out[1] = stats.PeakPower; out[2] = stats.PaprDb;
     return 0;
 }
 
 int siggen_symbol_accuracy(const siggen_signal* s, double* out, char* error, std::size_t error_capacity) {
     return guarded(error, error_capacity, -1, [&] {
         if (!s->has_config) return 0;
-        if (s->signal.samples.size() != s->expected_samples)
+        if (s->signal.Samples.size() != s->expected_samples)
             throw std::invalid_argument("The sample count changed from the generated length; EVM needs the original timing");
-        const auto accuracy = iq::symbol_accuracy(s->signal);
+        const auto accuracy = Core::MeasureSymbolAccuracy(s->signal);
         if (!accuracy) return 0;
-        out[0] = static_cast<double>(accuracy->symbol_count); out[1] = accuracy->evm_rms; out[2] = accuracy->evm_db;
-        out[3] = accuracy->snr_after_matched_db; out[4] = accuracy->expected_offset_db;
+        out[0] = static_cast<double>(accuracy->SymbolCount); out[1] = accuracy->EvmRms; out[2] = accuracy->EvmDb;
+        out[3] = accuracy->SnrAfterMatchedDb; out[4] = accuracy->ExpectedOffsetDb;
         return 1;
     });
 }
@@ -147,22 +147,22 @@ int siggen_symbol_accuracy(const siggen_signal* s, double* out, char* error, std
 int siggen_bit_errors(const siggen_signal* s, double* out, char* error, std::size_t error_capacity) {
     return guarded(error, error_capacity, -1, [&] {
         if (!s->has_config) return 0;
-        if (s->signal.samples.size() != s->expected_samples)
+        if (s->signal.Samples.size() != s->expected_samples)
             throw std::invalid_argument("The sample count changed from the generated length; the receiver needs the original timing");
-        const auto errors = iq::bit_errors(s->signal);
+        const auto errors = Core::CountBitErrors(s->signal);
         if (!errors) return 0;
-        out[0] = static_cast<double>(errors->symbol_count); out[1] = static_cast<double>(errors->symbol_errors);
-        out[2] = static_cast<double>(errors->bit_count); out[3] = static_cast<double>(errors->bit_errors);
+        out[0] = static_cast<double>(errors->SymbolCount); out[1] = static_cast<double>(errors->SymbolErrorCount);
+        out[2] = static_cast<double>(errors->BitCount); out[3] = static_cast<double>(errors->BitErrorCount);
         return 1;
     });
 }
 
 int siggen_theoretical_ber(const char* waveform, double eb_n0_db, double* out, char* error, std::size_t error_capacity) {
     return guarded(error, error_capacity, -1, [&] {
-        iq::Modulation modulation;
-        if (!iq::parse_modulation(waveform ? waveform : "", modulation))
+        Core::Modulation modulation;
+        if (!Core::ParseModulation(waveform ? waveform : "", modulation))
             throw std::invalid_argument(std::string("Unknown waveform: ") + (waveform ? waveform : ""));
-        const auto ber = iq::theoretical_ber(modulation, eb_n0_db);
+        const auto ber = Core::TheoreticalBer(modulation, eb_n0_db);
         if (!ber) return 0;
         *out = *ber;
         return 1;
@@ -172,20 +172,20 @@ int siggen_theoretical_ber(const char* waveform, double eb_n0_db, double* out, c
 long siggen_ber_curve(const char* preset_text, const double* eb_n0_db, std::size_t count, std::size_t min_errors, std::size_t max_bits,
                       int block_symbols, double* out, char* error, std::size_t error_capacity) {
     return guarded(error, error_capacity, -1L, [&] {
-        const auto config = iq::parse_preset(preset_text ? preset_text : "");
-        iq::validate(config);
-        iq::BerSweepSettings settings;
-        settings.eb_n0_db.assign(eb_n0_db, eb_n0_db + count);
-        settings.min_errors = min_errors;
-        settings.max_bits = max_bits;
-        settings.block_symbols = block_symbols;
-        const auto points = iq::ber_sweep(config, settings);
+        const auto config = Core::ParsePreset(preset_text ? preset_text : "");
+        Core::Validate(config);
+        Core::BerSweepSettings settings;
+        settings.EbN0Db.assign(eb_n0_db, eb_n0_db + count);
+        settings.MinErrors = min_errors;
+        settings.MaxBits = max_bits;
+        settings.BlockSymbols = block_symbols;
+        const auto points = Core::BerSweep(config, settings);
         if (out)
             for (std::size_t k = 0; k < points.size(); ++k) {
                 const auto& p = points[k];
-                out[5 * k] = p.eb_n0_db; out[5 * k + 1] = p.snr_db;
-                out[5 * k + 2] = static_cast<double>(p.errors.bit_count); out[5 * k + 3] = static_cast<double>(p.errors.bit_errors);
-                out[5 * k + 4] = p.theory ? *p.theory : std::numeric_limits<double>::quiet_NaN();
+                out[5 * k] = p.EbN0Db; out[5 * k + 1] = p.SnrDb;
+                out[5 * k + 2] = static_cast<double>(p.Errors.BitCount); out[5 * k + 3] = static_cast<double>(p.Errors.BitErrorCount);
+                out[5 * k + 4] = p.Theory ? *p.Theory : std::numeric_limits<double>::quiet_NaN();
             }
         return static_cast<long>(points.size());
     });
@@ -194,16 +194,16 @@ long siggen_ber_curve(const char* preset_text, const double* eb_n0_db, std::size
 long siggen_eye(const siggen_signal* s, std::size_t max_traces, double* time, std::size_t time_capacity, double* i, double* q,
                 std::size_t trace_capacity, std::size_t* points) {
     return guarded(nullptr, 0, -1L, [&] {
-        if (!s->has_config || s->signal.samples.size() != s->expected_samples) return -1L;
-        const auto eye = iq::eye_diagram(s->signal, max_traces);
-        const std::size_t count = eye.in_phase.size();
-        const std::size_t width = eye.time_symbols.size();
+        if (!s->has_config || s->signal.Samples.size() != s->expected_samples) return -1L;
+        const auto eye = Core::BuildEyeDiagram(s->signal, max_traces);
+        const std::size_t count = eye.InPhase.size();
+        const std::size_t width = eye.TimeSymbols.size();
         if (points) *points = width;
-        if (time && time_capacity >= width) std::copy(eye.time_symbols.begin(), eye.time_symbols.end(), time);
+        if (time && time_capacity >= width) std::copy(eye.TimeSymbols.begin(), eye.TimeSymbols.end(), time);
         if (i && q && trace_capacity >= count * width)
             for (std::size_t k = 0; k < count; ++k) {
-                std::copy(eye.in_phase[k].begin(), eye.in_phase[k].end(), i + k * width);
-                std::copy(eye.quadrature[k].begin(), eye.quadrature[k].end(), q + k * width);
+                std::copy(eye.InPhase[k].begin(), eye.InPhase[k].end(), i + k * width);
+                std::copy(eye.Quadrature[k].begin(), eye.Quadrature[k].end(), q + k * width);
             }
         return static_cast<long>(count);
     });
@@ -211,14 +211,14 @@ long siggen_eye(const siggen_signal* s, std::size_t max_traces, double* time, st
 
 long siggen_matched_symbols(const siggen_signal* s, float* out, std::size_t* symbol_indices, std::size_t capacity) {
     return guarded(nullptr, 0, -1L, [&] {
-        if (!s->has_config || s->signal.samples.size() != s->expected_samples || s->signal.symbols.empty()) return -1L;
-        const auto observations = iq::matched_symbols(s->signal);
-        const auto count = observations.values.size();
+        if (!s->has_config || s->signal.Samples.size() != s->expected_samples || s->signal.Symbols.empty()) return -1L;
+        const auto observations = Core::MatchedSymbols(s->signal);
+        const auto count = observations.Values.size();
         if (out && symbol_indices && capacity >= count)
             for (std::size_t k = 0; k < count; ++k) {
-                out[2 * k] = observations.values[k].real();
-                out[2 * k + 1] = observations.values[k].imag();
-                symbol_indices[k] = observations.symbol_indices[k];
+                out[2 * k] = observations.Values[k].real();
+                out[2 * k + 1] = observations.Values[k].imag();
+                symbol_indices[k] = observations.SymbolIndices[k];
             }
         return static_cast<long>(count);
     });
@@ -230,11 +230,11 @@ long siggen_psd(const float* interleaved, std::size_t n, double sample_rate_hz, 
         if (window < 0 || window > 3) throw std::invalid_argument("window must be 0..3");
         std::vector<std::complex<float>> samples(n);
         for (std::size_t k = 0; k < n; ++k) samples[k] = {interleaved[2 * k], interleaved[2 * k + 1]};
-        const auto psd = iq::welch_psd(samples, sample_rate_hz, segment_length, static_cast<iq::Window>(window));
-        const auto bins = psd.frequency_hz.size();
+        const auto psd = Core::WelchPsd(samples, sample_rate_hz, segment_length, static_cast<Core::Window>(window));
+        const auto bins = psd.FrequencyHz.size();
         if (frequency_hz && density && capacity >= bins) {
-            std::copy(psd.frequency_hz.begin(), psd.frequency_hz.end(), frequency_hz);
-            std::copy(psd.power_density.begin(), psd.power_density.end(), density);
+            std::copy(psd.FrequencyHz.begin(), psd.FrequencyHz.end(), frequency_hz);
+            std::copy(psd.PowerDensity.begin(), psd.PowerDensity.end(), density);
         }
         return static_cast<long>(bins);
     });
@@ -244,8 +244,8 @@ int siggen_export(const siggen_signal* s, const char* path, int format, int over
     return guarded(error, error_capacity, -1, [&] {
         if (!s->has_config) throw std::invalid_argument("Only signals generated by siggen can be exported");
         if (format < 0 || format > 1) throw std::invalid_argument("format must be 0 (csv) or 1 (sigmf)");
-        const auto kind = format == 0 ? iq::ExportFormat::CSV : iq::ExportFormat::SigMF;
-        iq::export_signal(path ? path : "", s->signal, kind, overwrite != 0);
+        const auto kind = format == 0 ? Core::ExportFormat::CSV : Core::ExportFormat::SigMF;
+        Core::ExportSignal(path ? path : "", s->signal, kind, overwrite != 0);
         return 0;
     });
 }

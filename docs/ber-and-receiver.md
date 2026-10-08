@@ -46,7 +46,7 @@ and `siggen.ber_curve` apply this for you.
 
 ## Theory curves
 
-`theoretical_ber` (library/theory.h) gives the textbook probability for an ideal receiver over
+`TheoreticalBer` (app-core/theory.h) gives the textbook probability for an ideal receiver over
 AWGN, with `Q(x) = erfc(x / sqrt 2) / 2` and `g = Eb/N0` as a ratio:
 
 | Waveform | BER |

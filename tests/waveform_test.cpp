@@ -1,58 +1,73 @@
+/**
+ * @file    waveform_test.cpp
+ * @brief   Tests for waveform descriptors, stable identifiers and case-insensitive name parsing.
+ */
+
 #include "waveform.h"
+
 #include <gtest/gtest.h>
 #include <set>
 #include <string>
 
+namespace Core {
+
 TEST(Waveform, DescriptorCapabilities) {
-    using iq::Modulation;
-    const struct { Modulation m; int bps; iq::Family family; bool shaped; bool explicit_input; bool awgn; } expected[] = {
-        {Modulation::BPSK, 1, iq::Family::Linear, true, true, true},
-        {Modulation::QPSK, 2, iq::Family::Linear, true, true, true},
-        {Modulation::PSK8, 3, iq::Family::Linear, true, true, true},
-        {Modulation::QAM16, 4, iq::Family::Linear, true, true, true},
-        {Modulation::QAM64, 6, iq::Family::Linear, true, true, true},
-        {Modulation::WGN, 0, iq::Family::Noise, false, false, false},
+    const struct {
+        Modulation Waveform;
+        int BitCount;
+        Family ExpectedFamily;
+        bool Shaped;
+        bool ExplicitInput;
+        bool Awgn;
+    } expected[] = {
+        {Modulation::BPSK, 1, Family::Linear, true, true, true},
+        {Modulation::QPSK, 2, Family::Linear, true, true, true},
+        {Modulation::PSK8, 3, Family::Linear, true, true, true},
+        {Modulation::QAM16, 4, Family::Linear, true, true, true},
+        {Modulation::QAM64, 6, Family::Linear, true, true, true},
+        {Modulation::WGN, 0, Family::Noise, false, false, false},
     };
     std::set<int> ids;
     std::set<std::string> names;
-    for (const auto& entry : expected) {
-        const auto& info = iq::waveform_descriptor(entry.m);
-        EXPECT_EQ(info.bits_per_symbol, entry.bps);
-        EXPECT_EQ(info.family, entry.family);
-        EXPECT_EQ(info.shaped, entry.shaped);
-        EXPECT_EQ(info.explicit_input, entry.explicit_input);
-        EXPECT_EQ(info.awgn_supported, entry.awgn);
-        EXPECT_EQ(iq::bits_per_symbol(entry.m), entry.bps);
-        EXPECT_EQ(iq::waveform_family(entry.m), entry.family);
-        EXPECT_EQ(std::string(iq::modulation_name(entry.m)), std::string(info.canonical_name));
-        EXPECT_TRUE(ids.insert(iq::waveform_id(entry.m)).second);
-        EXPECT_TRUE(names.insert(std::string(info.canonical_name)).second);
+    for (const auto &entry : expected) {
+        const auto &info = GetWaveformDescriptor(entry.Waveform);
+        EXPECT_EQ(info.BitsPerSymbol, entry.BitCount);
+        EXPECT_EQ(info.Family, entry.ExpectedFamily);
+        EXPECT_EQ(info.Shaped, entry.Shaped);
+        EXPECT_EQ(info.ExplicitInput, entry.ExplicitInput);
+        EXPECT_EQ(info.AwgnSupported, entry.Awgn);
+        EXPECT_EQ(BitsPerSymbol(entry.Waveform), entry.BitCount);
+        EXPECT_EQ(WaveformFamily(entry.Waveform), entry.ExpectedFamily);
+        EXPECT_EQ(std::string(ModulationName(entry.Waveform)), std::string(info.CanonicalName));
+        EXPECT_TRUE(ids.insert(WaveformId(entry.Waveform)).second);
+        EXPECT_TRUE(names.insert(std::string(info.CanonicalName)).second);
     }
-    EXPECT_EQ(iq::waveform_id(Modulation::BPSK), 0);
-    EXPECT_EQ(iq::waveform_id(Modulation::WGN), 5);
-    EXPECT_FALSE(iq::is_valid(static_cast<Modulation>(99)));
-    EXPECT_THROW(iq::waveform_descriptor(static_cast<Modulation>(99)), std::invalid_argument);
+    EXPECT_EQ(WaveformId(Modulation::BPSK), 0);
+    EXPECT_EQ(WaveformId(Modulation::WGN), 5);
+    EXPECT_FALSE(IsValid(static_cast<Modulation>(99)));
+    EXPECT_THROW(GetWaveformDescriptor(static_cast<Modulation>(99)), std::invalid_argument);
 }
 
 TEST(Waveform, CaseInsensitiveNameParsing) {
-    iq::Modulation m;
-    const std::pair<const char*, iq::Modulation> cases[] = {
-        {"bpsk", iq::Modulation::BPSK}, {"QPSK", iq::Modulation::QPSK},
-        {"8-psk", iq::Modulation::PSK8}, {"8-PSK", iq::Modulation::PSK8},
-        {"16-qam", iq::Modulation::QAM16}, {"64-QAM", iq::Modulation::QAM64},
-        {"wgn", iq::Modulation::WGN},
+    Modulation parsed;
+    const std::pair<const char *, Modulation> cases[] = {
+        {"bpsk", Modulation::BPSK},  {"QPSK", Modulation::QPSK},    {"8-psk", Modulation::PSK8},
+        {"8-PSK", Modulation::PSK8}, {"16-qam", Modulation::QAM16}, {"64-QAM", Modulation::QAM64},
+        {"wgn", Modulation::WGN},
     };
-    for (const auto& [text, value] : cases) {
-        ASSERT_TRUE(iq::parse_modulation(text, m)) << text;
-        EXPECT_EQ(m, value);
+    for (const auto &[text, value] : cases) {
+        ASSERT_TRUE(ParseModulation(text, parsed)) << text;
+        EXPECT_EQ(parsed, value);
     }
-    EXPECT_FALSE(iq::parse_modulation("GFSK", m));
-    EXPECT_FALSE(iq::parse_modulation("", m));
-    iq::Pulse pulse;
-    EXPECT_TRUE(iq::parse_pulse("rrc", pulse));
-    EXPECT_EQ(pulse, iq::Pulse::RRC);
-    EXPECT_TRUE(iq::parse_pulse("RRC", pulse));
-    EXPECT_TRUE(iq::parse_pulse("rectangular", pulse));
-    EXPECT_EQ(pulse, iq::Pulse::Rectangular);
-    EXPECT_FALSE(iq::parse_pulse("gaussian", pulse));
+    EXPECT_FALSE(ParseModulation("GFSK", parsed));
+    EXPECT_FALSE(ParseModulation("", parsed));
+    Pulse pulse;
+    EXPECT_TRUE(ParsePulse("rrc", pulse));
+    EXPECT_EQ(pulse, Pulse::RRC);
+    EXPECT_TRUE(ParsePulse("RRC", pulse));
+    EXPECT_TRUE(ParsePulse("rectangular", pulse));
+    EXPECT_EQ(pulse, Pulse::Rectangular);
+    EXPECT_FALSE(ParsePulse("gaussian", pulse));
 }
+
+} // namespace Core

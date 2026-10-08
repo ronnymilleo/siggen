@@ -7,7 +7,47 @@ on:
 permissions:
   contents: read
 
+# A newer push to the same branch makes the older run pointless
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
+  # Formatting and naming need the same clang-format/clang-tidy as development, so they run on Arch Linux.
+  # The GUI is configured too, so clang-tidy also sees app-gui/ in the compile database
+  lint:
+    runs-on: ubuntu-latest
+    container: archlinux:latest
+    steps:
+      # git must exist before checkout, or the submodules are not fetched
+      - name: Install build dependencies
+        run: >-
+          pacman -Syu --noconfirm --needed git cmake ninja gcc clang
+          libx11 libxrandr libxinerama libxcursor libxi mesa libglvnd
+
+      - name: Check out the repository
+        uses: actions/checkout@v7
+        with:
+          submodules: recursive
+
+      - name: Trust the workspace
+        run: git config --global --add safe.directory "$GITHUB_WORKSPACE"
+
+      - name: Configure
+        run: cmake --preset dev
+
+      # Building siggen runs clang-format on every source, so any change means unformatted code was committed.
+      # Only C++ files are compared, so other local edits (act copies the working tree) do not count
+      - name: Build
+        run: cmake --build --preset dev --target siggen
+
+      - name: Check formatting
+        run: git diff --exit-code -- '*.cpp' '*.h'
+
+      - name: Check naming
+        # python/csrc is a C ABI loaded with ctypes, so its siggen_* names stay C-style
+        run: clang-tidy -p build/dev --warnings-as-errors='*' $(git ls-files '*.cpp' ':!python/')
+
   linux-headless:
     runs-on: ubuntu-24.04
     steps:

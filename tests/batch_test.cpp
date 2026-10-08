@@ -1,15 +1,21 @@
+/**
+ * @file    batch_test.cpp
+ * @brief   Tests for batch frame generation, seed derivation and dataset output.
+ */
+
 #include "batch.h"
+
 #include "analysis.h"
 #include "iq_export.h"
-#include "recording.h"
-#include <nlohmann/json.hpp>
 #include "noise.h"
-#include <gtest/gtest.h>
+#include "recording.h"
 #include <chrono>
 #include <cmath>
 #include <filesystem>
 #include <fstream>
+#include <gtest/gtest.h>
 #include <iomanip>
+#include <nlohmann/json.hpp>
 #include <sstream>
 #ifdef __linux__
 #include <csignal>
@@ -17,136 +23,145 @@
 #include <sys/resource.h>
 #endif
 
-using namespace iq;
+namespace Core {
 
 namespace {
-std::filesystem::path unique_dir(const char* prefix) {
+
+std::filesystem::path UniqueDir(const char *prefix) {
     return std::filesystem::temp_directory_path() /
            (std::string(prefix) + std::to_string(std::chrono::steady_clock::now().time_since_epoch().count()));
 }
-std::string read_file(const std::filesystem::path& path) {
+std::string ReadFile(const std::filesystem::path &path) {
     std::ifstream file(path);
     std::ostringstream buffer;
     buffer << file.rdbuf();
     return buffer.str();
 }
-std::vector<std::string> read_lines(const std::filesystem::path& path) {
+std::vector<std::string> ReadLines(const std::filesystem::path &path) {
     std::vector<std::string> lines;
     std::ifstream file(path);
     std::string line;
-    while (std::getline(file, line))
-        if (!line.empty()) lines.push_back(line);
+    while (std::getline(file, line)) {
+        if (!line.empty()) {
+            lines.push_back(line);
+        }
+    }
     return lines;
 }
-}
+
+} // namespace
 
 TEST(Batch, SeedDerivationDeterministicAndSnrIndependent) {
-    const auto data = derive_data_seed(42, Modulation::BPSK, 3);
-    EXPECT_EQ(data, derive_data_seed(42, Modulation::BPSK, 3));
-    EXPECT_NE(data, derive_data_seed(42, Modulation::BPSK, 4));
-    EXPECT_NE(data, derive_data_seed(43, Modulation::BPSK, 3));
-    EXPECT_NE(data, derive_data_seed(42, Modulation::QPSK, 3));
-    EXPECT_NE(data, derive_noise_seed(42, Modulation::BPSK, 3, 5490));
+    const auto data = DeriveDataSeed(42, Modulation::BPSK, 3);
+    EXPECT_EQ(data, DeriveDataSeed(42, Modulation::BPSK, 3));
+    EXPECT_NE(data, DeriveDataSeed(42, Modulation::BPSK, 4));
+    EXPECT_NE(data, DeriveDataSeed(43, Modulation::BPSK, 3));
+    EXPECT_NE(data, DeriveDataSeed(42, Modulation::QPSK, 3));
+    EXPECT_NE(data, DeriveNoiseSeed(42, Modulation::BPSK, 3, 5490));
     // The configured noise seed participates in noise derivation only.
-    EXPECT_EQ(derive_noise_seed(42, Modulation::BPSK, 3, 5490), derive_noise_seed(42, Modulation::BPSK, 3, 5490));
-    EXPECT_NE(derive_noise_seed(42, Modulation::BPSK, 3, 5490), derive_noise_seed(42, Modulation::BPSK, 3, 5491));
-    EXPECT_EQ(derive_data_seed(42, Modulation::BPSK, 3), derive_data_seed(42, Modulation::BPSK, 3));
+    EXPECT_EQ(DeriveNoiseSeed(42, Modulation::BPSK, 3, 5490), DeriveNoiseSeed(42, Modulation::BPSK, 3, 5490));
+    EXPECT_NE(DeriveNoiseSeed(42, Modulation::BPSK, 3, 5490), DeriveNoiseSeed(42, Modulation::BPSK, 3, 5491));
+    EXPECT_EQ(DeriveDataSeed(42, Modulation::BPSK, 3), DeriveDataSeed(42, Modulation::BPSK, 3));
 }
 
 TEST(Batch, FrameGeometryRRCAndRectangular) {
     GenerationConfig base;
     const int frame_size = 256;
-    const auto rrc = generate_frame(base, frame_size, 0, std::nullopt);
-    EXPECT_EQ(rrc.samples.size(), 256u);
-    EXPECT_EQ(rrc.filter_delay_samples, 40u);
-    EXPECT_EQ(rrc.crop_offset, 10u * 8u + 40u); // span*SPS + filter delay.
-    EXPECT_FALSE(rrc.noise.awgn_applied);
+    const auto rrc = GenerateFrame(base, frame_size, 0, std::nullopt);
+    EXPECT_EQ(rrc.Samples.size(), 256u);
+    EXPECT_EQ(rrc.FilterDelaySamples, 40u);
+    EXPECT_EQ(rrc.CropOffset, 10u * 8u + 40u); // span*SPS + filter delay.
+    EXPECT_FALSE(rrc.Noise.AwgnApplied);
     // The frame equals the middle of the guarded full generation with the derived seed.
     auto full_config = base;
-    full_config.seed = rrc.data_seed;
-    full_config.symbol_count = 256 / 8 + 2 * 10; // N + 2G
-    const auto full = generate(full_config);
-    ASSERT_GE(full.samples.size(), rrc.crop_offset + 256u);
-    for (std::size_t k = 0; k < 256; ++k)
-        EXPECT_EQ(rrc.samples[k], full.samples[rrc.crop_offset + k]);
+    full_config.Seed = rrc.DataSeed;
+    full_config.SymbolCount = 256 / 8 + 2 * 10; // N + 2G
+    const auto full = Generate(full_config);
+    ASSERT_GE(full.Samples.size(), rrc.CropOffset + 256u);
+    for (std::size_t k = 0; k < 256; ++k) {
+        EXPECT_EQ(rrc.Samples[k], full.Samples[rrc.CropOffset + k]);
+    }
 
-    base.pulse = Pulse::Rectangular;
-    const auto rect = generate_frame(base, frame_size, 0, std::nullopt);
-    EXPECT_EQ(rect.samples.size(), 256u);
-    EXPECT_EQ(rect.crop_offset, 0u);
-    EXPECT_EQ(rect.filter_delay_samples, 0u);
+    base.Pulse = Pulse::Rectangular;
+    const auto rect = GenerateFrame(base, frame_size, 0, std::nullopt);
+    EXPECT_EQ(rect.Samples.size(), 256u);
+    EXPECT_EQ(rect.CropOffset, 0u);
+    EXPECT_EQ(rect.FilterDelaySamples, 0u);
     // Frame size not divisible by SPS still yields exact length.
-    const auto odd = generate_frame(base, 100, 0, std::nullopt);
-    EXPECT_EQ(odd.samples.size(), 100u);
+    const auto odd = GenerateFrame(base, 100, 0, std::nullopt);
+    EXPECT_EQ(odd.Samples.size(), 100u);
 }
 
 TEST(Batch, WGNFramesIgnoreSnrAxis) {
     GenerationConfig base;
-    base.modulation = Modulation::WGN;
-    base.noise_source.sample_count = 999; // Overridden by the frame size.
-    const auto frame = generate_frame(base, 128, 0, std::optional<double>(10));
-    EXPECT_EQ(frame.samples.size(), 128u);
-    EXPECT_FALSE(frame.noise.awgn_applied);
-    EXPECT_EQ(frame.crop_offset, 0u);
-    EXPECT_DOUBLE_EQ(frame.sample_rate_hz, base.noise_source.sample_rate_hz);
+    base.Modulation = Modulation::WGN;
+    base.NoiseSource.SampleCount = 999; // Overridden by the frame size.
+    const auto frame = GenerateFrame(base, 128, 0, std::optional<double>(10));
+    EXPECT_EQ(frame.Samples.size(), 128u);
+    EXPECT_FALSE(frame.Noise.AwgnApplied);
+    EXPECT_EQ(frame.CropOffset, 0u);
+    EXPECT_DOUBLE_EQ(frame.SampleRateHz, base.NoiseSource.SampleRateHz);
     // The frame is exactly the seeded WGN stream at configured power.
-    const auto expected = gaussian_noise(128, base.noise_source.noise_power, frame.noise_seed);
-    EXPECT_EQ(frame.samples, expected);
+    const auto expected = GaussianNoise(128, base.NoiseSource.NoisePower, frame.NoiseSeed);
+    EXPECT_EQ(frame.Samples, expected);
 }
 
 TEST(Batch, FrameAwgnAppliesAfterCrop) {
     GenerationConfig base;
-    base.symbol_count = 512; // Ignored; frame size fixes length.
-    const auto clean = generate_frame(base, 256, 0, std::nullopt);
-    const auto noisy = generate_frame(base, 256, 0, std::optional<double>(10));
-    EXPECT_EQ(clean.data_seed, noisy.data_seed);
-    EXPECT_EQ(clean.noise_seed, noisy.noise_seed);
-    EXPECT_TRUE(noisy.noise.awgn_applied);
-    EXPECT_EQ(noisy.noise.reference_begin, 0u);
-    EXPECT_EQ(noisy.noise.reference_end, 256u);
+    base.SymbolCount = 512; // Ignored; frame size fixes length.
+    const auto clean = GenerateFrame(base, 256, 0, std::nullopt);
+    const auto noisy = GenerateFrame(base, 256, 0, std::optional<double>(10));
+    EXPECT_EQ(clean.DataSeed, noisy.DataSeed);
+    EXPECT_EQ(clean.NoiseSeed, noisy.NoiseSeed);
+    EXPECT_TRUE(noisy.Noise.AwgnApplied);
+    EXPECT_EQ(noisy.Noise.ReferenceBegin, 0u);
+    EXPECT_EQ(noisy.Noise.ReferenceEnd, 256u);
     double reference = 0;
-    for (const auto& sample : clean.samples) reference += std::norm(sample);
+    for (const auto &sample : clean.Samples) {
+        reference += std::norm(sample);
+    }
     reference /= 256;
-    EXPECT_NEAR(noisy.noise.reference_power, reference, 1e-9);
-    const auto noise = gaussian_noise(256, noisy.noise.added_noise_power, noisy.noise_seed);
-    for (std::size_t k = 0; k < 256; ++k)
-        EXPECT_FLOAT_EQ((clean.samples[k] + noise[k]).real(), noisy.samples[k].real());
+    EXPECT_NEAR(noisy.Noise.ReferencePower, reference, 1e-9);
+    const auto noise = GaussianNoise(256, noisy.Noise.AddedNoisePower, noisy.NoiseSeed);
+    for (std::size_t k = 0; k < 256; ++k) {
+        EXPECT_FLOAT_EQ((clean.Samples[k] + noise[k]).real(), noisy.Samples[k].real());
+    }
     // SNR does not enter seed derivation: realizations stay paired.
-    const auto louder = generate_frame(base, 256, 0, std::optional<double>(20));
-    EXPECT_EQ(louder.data_seed, noisy.data_seed);
-    EXPECT_EQ(louder.noise_seed, noisy.noise_seed);
+    const auto louder = GenerateFrame(base, 256, 0, std::optional<double>(20));
+    EXPECT_EQ(louder.DataSeed, noisy.DataSeed);
+    EXPECT_EQ(louder.NoiseSeed, noisy.NoiseSeed);
 }
 
 TEST(Batch, FrameLimitsAndInvalidRequests) {
     GenerationConfig base;
-    EXPECT_THROW(generate_frame(base, 0, 0, std::nullopt), std::invalid_argument);
-    EXPECT_THROW(validate_frame_request(base, static_cast<Modulation>(99), 64), std::invalid_argument);
+    EXPECT_THROW(GenerateFrame(base, 0, 0, std::nullopt), std::invalid_argument);
+    EXPECT_THROW(ValidateFrameRequest(base, static_cast<Modulation>(99), 64), std::invalid_argument);
     // Rectangular SPS=1 frames are limited by the 65536-symbol payload bound.
-    base.pulse = Pulse::Rectangular;
-    base.samples_per_symbol = 1;
-    EXPECT_THROW(validate_frame_request(base, Modulation::BPSK, 65537), std::length_error);
-    EXPECT_NO_THROW(validate_frame_request(base, Modulation::BPSK, 65536));
+    base.Pulse = Pulse::Rectangular;
+    base.SamplesPerSymbol = 1;
+    EXPECT_THROW(ValidateFrameRequest(base, Modulation::BPSK, 65537), std::length_error);
+    EXPECT_NO_THROW(ValidateFrameRequest(base, Modulation::BPSK, 65536));
     // RRC guards count toward the symbol limit.
     base = {};
-    base.samples_per_symbol = 2;
-    base.span_symbols = 100;
-    EXPECT_THROW(validate_frame_request(base, Modulation::BPSK, 200000), std::length_error);
+    base.SamplesPerSymbol = 2;
+    base.SpanSymbols = 100;
+    EXPECT_THROW(ValidateFrameRequest(base, Modulation::BPSK, 200000), std::length_error);
 }
 
 TEST(Batch, RunWritesFramesSidecarsAndManifest) {
-    const auto dir = unique_dir("iq-batch-run-");
+    const auto dir = UniqueDir("iq-batch-run-");
     BatchRequest request;
-    request.waveforms = {Modulation::BPSK, Modulation::WGN};
-    request.seeds = {42};
-    request.snrs_db = {0, 10};
-    request.frame_size = 64;
-    request.frames_per_point = 2;
-    request.output_dir = dir;
-    const auto summary = run_batch(request);
+    request.Waveforms = {Modulation::BPSK, Modulation::WGN};
+    request.Seeds = {42};
+    request.SnrsDb = {0, 10};
+    request.FrameSize = 64;
+    request.FramesPerPoint = 2;
+    request.OutputDir = dir;
+    const auto summary = RunBatch(request);
     // BPSK has two SNR points, WGN ignores the SNR axis: three points, six frames.
-    EXPECT_EQ(summary.point_count, 3u);
-    EXPECT_EQ(summary.frame_count, 6u);
-    const auto manifest = read_lines(dir / "manifest.jsonl");
+    EXPECT_EQ(summary.PointCount, 3u);
+    EXPECT_EQ(summary.FrameCount, 6u);
+    const auto manifest = ReadLines(dir / "manifest.jsonl");
     ASSERT_EQ(manifest.size(), 8u); // header + six frames + summary
     EXPECT_NE(manifest.front().find("\"kind\":\"batch_header\""), std::string::npos);
     EXPECT_NE(manifest.front().find("\"manifest_version\":1"), std::string::npos);
@@ -155,15 +170,17 @@ TEST(Batch, RunWritesFramesSidecarsAndManifest) {
     EXPECT_NE(manifest.back().find("\"completed\":true"), std::string::npos);
     EXPECT_NE(manifest.back().find("\"frame_count\":6"), std::string::npos);
     // User list order is preserved: BPSK points first, then WGN with a null SNR.
-    for (std::size_t k = 1; k <= 4; ++k)
+    for (std::size_t k = 1; k <= 4; ++k) {
         EXPECT_NE(manifest[k].find("\"waveform\":\"BPSK\""), std::string::npos) << k;
-    for (std::size_t k = 5; k <= 6; ++k)
+    }
+    for (std::size_t k = 5; k <= 6; ++k) {
         EXPECT_NE(manifest[k].find("\"waveform\":\"WGN\""), std::string::npos) << k;
+    }
     EXPECT_NE(manifest[5].find("\"snr_db\":null"), std::string::npos);
     EXPECT_NE(manifest[1].find("\"snr_db\":0"), std::string::npos);
     EXPECT_NE(manifest[3].find("\"snr_db\":10"), std::string::npos);
     // Deterministic indexed filenames, binary default, exact byte size.
-    for (std::size_t point = 0; point < 3; ++point)
+    for (std::size_t point = 0; point < 3; ++point) {
         for (std::size_t frame = 0; frame < 2; ++frame) {
             std::ostringstream name;
             name << "frame_" << std::string(6 - std::to_string(point).size(), '0') << point << '_'
@@ -171,7 +188,7 @@ TEST(Batch, RunWritesFramesSidecarsAndManifest) {
             const auto data = dir / name.str();
             ASSERT_TRUE(std::filesystem::exists(data)) << name.str();
             EXPECT_EQ(std::filesystem::file_size(data), 64u * 8u);
-            const auto sidecar = read_file(iq::metadata_path(dir / name.str()));
+            const auto sidecar = ReadFile(MetadataPath(dir / name.str()));
             EXPECT_NE(sidecar.find("\"kind\": \"batch_frame\""), std::string::npos);
             EXPECT_NE(sidecar.find("\"version\": 2"), std::string::npos);
             EXPECT_NE(sidecar.find("\"frame_start_s\": 0"), std::string::npos);
@@ -184,13 +201,14 @@ TEST(Batch, RunWritesFramesSidecarsAndManifest) {
                 EXPECT_EQ(sidecar.find("\"crop\""), std::string::npos);
             }
         }
+    }
     // Derived seeds in the manifest match the documented derivation.
-    EXPECT_NE(manifest[1].find("\"data_seed\":" + std::to_string(derive_data_seed(42, Modulation::BPSK, 0))),
+    EXPECT_NE(manifest[1].find("\"data_seed\":" + std::to_string(DeriveDataSeed(42, Modulation::BPSK, 0))),
               std::string::npos);
-    EXPECT_NE(manifest[1].find("\"noise_seed\":" + std::to_string(derive_noise_seed(42, Modulation::BPSK, 0, 5490))),
+    EXPECT_NE(manifest[1].find("\"noise_seed\":" + std::to_string(DeriveNoiseSeed(42, Modulation::BPSK, 0, 5490))),
               std::string::npos);
     // Paired SNR points share data and noise derivations.
-    const auto seed_field = [](const std::string& record, const char* key) {
+    const auto seed_field = [](const std::string &record, const char *key) {
         const auto start = record.find(key) + std::string(key).size();
         return record.substr(start, record.find(',', start) - start);
     };
@@ -200,13 +218,13 @@ TEST(Batch, RunWritesFramesSidecarsAndManifest) {
 }
 
 TEST(Batch, CsvFramesHaveHeaderAndExactRows) {
-    const auto dir = unique_dir("iq-batch-csv-");
+    const auto dir = UniqueDir("iq-batch-csv-");
     BatchRequest request;
-    request.frame_size = 32;
-    request.format = ExportFormat::CSV;
-    request.output_dir = dir;
-    run_batch(request);
-    const auto csv = read_file(dir / "frame_000000_000000.csv");
+    request.FrameSize = 32;
+    request.Format = ExportFormat::CSV;
+    request.OutputDir = dir;
+    RunBatch(request);
+    const auto csv = ReadFile(dir / "frame_000000_000000.csv");
     std::istringstream input(csv);
     std::string line;
     std::getline(input, line);
@@ -226,76 +244,76 @@ TEST(Batch, CsvFramesHaveHeaderAndExactRows) {
 }
 
 TEST(Batch, ValidationRejectsBadRequestsBeforeOutput) {
-    const auto dir = unique_dir("iq-batch-invalid-");
+    const auto dir = UniqueDir("iq-batch-invalid-");
     BatchRequest request;
-    request.output_dir = dir;
+    request.OutputDir = dir;
     // Existing directory is never touched.
     std::filesystem::create_directory(dir);
-    EXPECT_THROW(run_batch(request), std::runtime_error);
+    EXPECT_THROW(RunBatch(request), std::runtime_error);
     EXPECT_TRUE(std::filesystem::is_empty(dir));
     std::filesystem::remove_all(dir);
     // Duplicates on any axis.
-    request.waveforms = {Modulation::BPSK, Modulation::BPSK};
-    EXPECT_THROW(validate_batch(request), std::invalid_argument);
-    request.waveforms = {};
-    request.seeds = {7, 7};
-    EXPECT_THROW(validate_batch(request), std::invalid_argument);
-    request.seeds = {};
-    request.snrs_db = {0, 10, 0};
-    EXPECT_THROW(validate_batch(request), std::invalid_argument);
-    request.snrs_db = {NAN};
-    EXPECT_THROW(validate_batch(request), std::invalid_argument);
-    request.snrs_db = {};
+    request.Waveforms = {Modulation::BPSK, Modulation::BPSK};
+    EXPECT_THROW(ValidateBatch(request), std::invalid_argument);
+    request.Waveforms = {};
+    request.Seeds = {7, 7};
+    EXPECT_THROW(ValidateBatch(request), std::invalid_argument);
+    request.Seeds = {};
+    request.SnrsDb = {0, 10, 0};
+    EXPECT_THROW(ValidateBatch(request), std::invalid_argument);
+    request.SnrsDb = {NAN};
+    EXPECT_THROW(ValidateBatch(request), std::invalid_argument);
+    request.SnrsDb = {};
     // Explicit-bit input is rejected.
-    request.base.data_source = DataSource::Explicit;
-    request.base.bits.assign(256, '0');
-    EXPECT_THROW(validate_batch(request), std::invalid_argument);
-    request.base.data_source = DataSource::Random;
-    request.base.bits.clear();
+    request.Base.DataSource = DataSource::Explicit;
+    request.Base.Bits.assign(256, '0');
+    EXPECT_THROW(ValidateBatch(request), std::invalid_argument);
+    request.Base.DataSource = DataSource::Random;
+    request.Base.Bits.clear();
     // Frame accounting limits.
-    request.frames_per_point = 0;
-    EXPECT_THROW(validate_batch(request), std::invalid_argument);
-    request.frames_per_point = 100001;
-    EXPECT_THROW(validate_batch(request), std::length_error);
-    request.frames_per_point = 1;
-    request.frame_size = 0;
-    EXPECT_THROW(validate_batch(request), std::invalid_argument);
+    request.FramesPerPoint = 0;
+    EXPECT_THROW(ValidateBatch(request), std::invalid_argument);
+    request.FramesPerPoint = 100001;
+    EXPECT_THROW(ValidateBatch(request), std::length_error);
+    request.FramesPerPoint = 1;
+    request.FrameSize = 0;
+    EXPECT_THROW(ValidateBatch(request), std::invalid_argument);
     EXPECT_FALSE(std::filesystem::exists(dir));
 }
 
 TEST(Batch, InvalidAwgnSweepLeavesNoOutput) {
-    const auto dir = unique_dir("iq-batch-preflight-");
-    BatchRequest r;
-    r.output_dir = dir;
+    const auto dir = UniqueDir("iq-batch-preflight-");
+    BatchRequest request;
+    request.OutputDir = dir;
     // A valid first point must not be written before rejecting a later point.
-    r.snrs_db = {10, 4000};
-    EXPECT_THROW(run_batch(r), std::invalid_argument);
+    request.SnrsDb = {10, 4000};
+    EXPECT_THROW(RunBatch(request), std::invalid_argument);
     EXPECT_FALSE(std::filesystem::exists(dir));
-    r.snrs_db = {10, -4000};
-    EXPECT_THROW(run_batch(r), std::invalid_argument);
+    request.SnrsDb = {10, -4000};
+    EXPECT_THROW(RunBatch(request), std::invalid_argument);
     EXPECT_FALSE(std::filesystem::exists(dir));
-    r.snrs_db = {10};
-    r.base.amplitude_gain = 0;
-    EXPECT_THROW(run_batch(r), std::invalid_argument);
+    request.SnrsDb = {10};
+    request.Base.AmplitudeGain = 0;
+    EXPECT_THROW(RunBatch(request), std::invalid_argument);
     EXPECT_FALSE(std::filesystem::exists(dir));
-    r.snrs_db.clear();
-    r.base.awgn.enabled = true;
-    EXPECT_THROW(run_batch(r), std::invalid_argument);
+    request.SnrsDb.clear();
+    request.Base.Awgn.Enabled = true;
+    EXPECT_THROW(RunBatch(request), std::invalid_argument);
     EXPECT_FALSE(std::filesystem::exists(dir));
 }
 
 TEST(Batch, PresetNoiseSettingRetainedWithoutSnrAxis) {
-    const auto dir = unique_dir("iq-batch-preset-");
+    const auto dir = UniqueDir("iq-batch-preset-");
     BatchRequest request;
-    request.base.awgn.enabled = true;
-    request.base.awgn.snr_db = 5;
-    request.frame_size = 64;
-    request.output_dir = dir;
-    run_batch(request);
-    const auto sidecar = read_file(dir / "frame_000000_000000.sigmf-meta");
+    request.Base.Awgn.Enabled = true;
+    request.Base.Awgn.SnrDb = 5;
+    request.FrameSize = 64;
+    request.OutputDir = dir;
+    RunBatch(request);
+    const auto sidecar = ReadFile(dir / "frame_000000_000000.sigmf-meta");
     EXPECT_NE(sidecar.find("\"requested_snr_db\": 5"), std::string::npos);
     EXPECT_NE(sidecar.find("\"snr_db\": null"), std::string::npos);
-    const auto manifest = read_lines(dir / "manifest.jsonl");
+    const auto manifest = ReadLines(dir / "manifest.jsonl");
     EXPECT_NE(manifest[1].find("\"snr_db\":null"), std::string::npos);
     EXPECT_NE(manifest[1].find("\"requested_snr_db\":5"), std::string::npos);
     std::filesystem::remove_all(dir);
@@ -303,33 +321,43 @@ TEST(Batch, PresetNoiseSettingRetainedWithoutSnrAxis) {
 
 #ifdef __linux__
 TEST(Batch, WriteFailurePreservesCompletedFrames) {
-    const auto dir = unique_dir("iq-batch-write-failure-");
+    const auto dir = UniqueDir("iq-batch-write-failure-");
     // Restrict file size in a child: frame files fit, but the manifest eventually
     // exceeds the limit. This exercises real stream failures without filling disk.
-    ASSERT_EXIT({
-        rlimit limit{};
-        limit.rlim_cur = 4096;
-        limit.rlim_max = 4096;
-        if (setrlimit(RLIMIT_FSIZE, &limit) != 0) std::_Exit(2);
-        std::signal(SIGXFSZ, SIG_IGN);
-        BatchRequest request;
-            request.output_dir = dir;
-        request.frame_size = 32;
-        request.frames_per_point = 100;
-        try { run_batch(request); }
-        catch (const std::ios_base::failure&) { std::_Exit(0); }
-        catch (...) { std::_Exit(3); }
-        std::_Exit(1);
-    }, ::testing::ExitedWithCode(0), "");
-    const auto lines = read_lines(dir / "manifest.jsonl");
+    ASSERT_EXIT(
+        {
+            rlimit limit{};
+            limit.rlim_cur = 4096;
+            limit.rlim_max = 4096;
+            if (setrlimit(RLIMIT_FSIZE, &limit) != 0) {
+                std::_Exit(2);
+            }
+            std::signal(SIGXFSZ, SIG_IGN);
+            BatchRequest request;
+            request.OutputDir = dir;
+            request.FrameSize = 32;
+            request.FramesPerPoint = 100;
+            try {
+                RunBatch(request);
+            } catch (const std::ios_base::failure &) {
+                std::_Exit(0);
+            } catch (...) {
+                std::_Exit(3);
+            }
+            std::_Exit(1);
+        },
+        ::testing::ExitedWithCode(0), "");
+    const auto lines = ReadLines(dir / "manifest.jsonl");
     std::size_t completed = 0;
-    for (const auto& line : lines) {
+    for (const auto &line : lines) {
         EXPECT_EQ(line.find("\"kind\":\"summary\""), std::string::npos);
-        if (line.find("\"kind\":\"frame\"") == std::string::npos || line.back() != '}') continue;
+        if (line.find("\"kind\":\"frame\"") == std::string::npos || line.back() != '}') {
+            continue;
+        }
         std::ostringstream name;
         name << "frame_000000_" << std::setw(6) << std::setfill('0') << completed << ".sigmf-data";
         EXPECT_EQ(std::filesystem::file_size(dir / name.str()), 32u * 8u);
-        const auto sidecar = read_file(iq::metadata_path(dir / name.str()));
+        const auto sidecar = ReadFile(MetadataPath(dir / name.str()));
         EXPECT_NE(sidecar.find("\"kind\": \"batch_frame\""), std::string::npos);
         ++completed;
     }
@@ -340,56 +368,58 @@ TEST(Batch, WriteFailurePreservesCompletedFrames) {
 #endif
 
 TEST(Batch, SigmfFramesCarryMetadataAndAnalyze) {
-    const auto dir = unique_dir("iq-batch-sigmf-");
+    const auto dir = UniqueDir("iq-batch-sigmf-");
     BatchRequest request;
-    request.waveforms = {Modulation::QPSK};
-    request.snrs_db = {10};
-    request.frame_size = 2048;
-    request.output_dir = dir;
-    ASSERT_EQ(request.format, ExportFormat::SigMF);
-    run_batch(request);
+    request.Waveforms = {Modulation::QPSK};
+    request.SnrsDb = {10};
+    request.FrameSize = 2048;
+    request.OutputDir = dir;
+    ASSERT_EQ(request.Format, ExportFormat::SigMF);
+    RunBatch(request);
     EXPECT_EQ(std::filesystem::file_size(dir / "frame_000000_000000.sigmf-data"), 2048u * 8);
     EXPECT_FALSE(std::filesystem::exists(dir / "frame_000000_000000.sigmf-data.json"));
-    const auto meta = nlohmann::json::parse(read_file(dir / "frame_000000_000000.sigmf-meta"));
+    const auto meta = nlohmann::json::parse(ReadFile(dir / "frame_000000_000000.sigmf-meta"));
     EXPECT_EQ(meta.at("global").at("core:datatype"), "cf32_le");
     EXPECT_EQ(meta.at("global").at("siggen:metadata").at("kind"), "batch_frame");
     EXPECT_EQ(meta.at("global").at("siggen:metadata").at("axes").at("snr_db"), 10);
-    const auto manifest = read_lines(dir / "manifest.jsonl");
+    const auto manifest = ReadLines(dir / "manifest.jsonl");
     EXPECT_NE(manifest[0].find("\"format\":\"sigmf\""), std::string::npos);
     EXPECT_NE(manifest[1].find("\"sidecar\":\"frame_000000_000000.sigmf-meta\""), std::string::npos);
-    const auto recording = read_recording(dir / "frame_000000_000000.sigmf-meta");
-    EXPECT_EQ(recording.samples.size(), 2048u);
-    ASSERT_TRUE(recording.config.has_value());
-    ASSERT_TRUE(recording.frame.has_value());
-    EXPECT_EQ(recording.frame->size, 2048u);
-    // EVM is scored on the frame interior only, so it tracks the requested 10 dB per-sample SNR.
-    const auto report = analyze_recording(recording);
-    ASSERT_TRUE(report.accuracy.has_value());
-    EXPECT_GT(report.accuracy->symbol_count, 100u);
-    EXPECT_LT(report.accuracy->symbol_count, 256u);
-    EXPECT_NEAR(report.sample_snr_db, 10.0, 1.5);
+    const auto recording = ReadRecording(dir / "frame_000000_000000.sigmf-meta");
+    EXPECT_EQ(recording.Samples.size(), 2048u);
+    ASSERT_TRUE(recording.Config.has_value());
+    ASSERT_TRUE(recording.Frame.has_value());
+    EXPECT_EQ(recording.Frame->Size, 2048u);
+    // EVM is scored on the frame interior only, so it tracks the requested 10 dB per-sample SNR
+    const auto report = AnalyzeRecording(recording);
+    ASSERT_TRUE(report.Accuracy.has_value());
+    EXPECT_GT(report.Accuracy->SymbolCount, 100u);
+    EXPECT_LT(report.Accuracy->SymbolCount, 256u);
+    EXPECT_NEAR(report.SampleSnrDb, 10.0, 1.5);
 }
 
 TEST(Batch, CleanSigmfFrameScoresAlmostZeroEvm) {
-    const auto dir = unique_dir("iq-batch-sigmf-clean-");
+    const auto dir = UniqueDir("iq-batch-sigmf-clean-");
     BatchRequest request;
-    request.waveforms = {Modulation::QAM16};
-    request.frame_size = 1024;
-    request.base.awgn.enabled = false;
-    request.output_dir = dir;
-    run_batch(request);
-    const auto report = analyze_recording(read_recording(dir / "frame_000000_000000.sigmf-meta"));
-    ASSERT_TRUE(report.accuracy.has_value());
-    EXPECT_LT(report.accuracy->evm_rms, 0.01);
+    request.Waveforms = {Modulation::QAM16};
+    request.FrameSize = 1024;
+    request.Base.Awgn.Enabled = false;
+    request.OutputDir = dir;
+    RunBatch(request);
+    const auto report = AnalyzeRecording(ReadRecording(dir / "frame_000000_000000.sigmf-meta"));
+    ASSERT_TRUE(report.Accuracy.has_value());
+    EXPECT_LT(report.Accuracy->EvmRms, 0.01);
 }
 
 TEST(Batch, WgnSigmfFrameHasNoEvm) {
-    const auto dir = unique_dir("iq-batch-sigmf-wgn-");
+    const auto dir = UniqueDir("iq-batch-sigmf-wgn-");
     BatchRequest request;
-    request.waveforms = {Modulation::WGN};
-    request.frame_size = 256;
-    request.output_dir = dir;
-    run_batch(request);
-    const auto report = analyze_recording(read_recording(dir / "frame_000000_000000.sigmf-meta"));
-    EXPECT_FALSE(report.accuracy.has_value());
+    request.Waveforms = {Modulation::WGN};
+    request.FrameSize = 256;
+    request.OutputDir = dir;
+    RunBatch(request);
+    const auto report = AnalyzeRecording(ReadRecording(dir / "frame_000000_000000.sigmf-meta"));
+    EXPECT_FALSE(report.Accuracy.has_value());
 }
+
+} // namespace Core
