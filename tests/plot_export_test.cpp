@@ -58,6 +58,21 @@ Decoded Decode(const std::vector<std::uint8_t> &png) {
     return image;
 }
 
+// Dark ink on a light page: every channel below 128, which leaves out the light background, the grid and saturated
+// series colours. Unlike a match on one colour, the count barely depends on which font draws the text
+std::size_t CountInk(const Decoded &image) {
+    std::size_t count = 0;
+    for (int y = 0; y < image.Height; ++y) {
+        for (int x = 0; x < image.Width; ++x) {
+            const auto *pixel = image.At(x, y);
+            if (pixel[0] < 128 && pixel[1] < 128 && pixel[2] < 128) {
+                ++count;
+            }
+        }
+    }
+    return count;
+}
+
 std::size_t CountNear(const Decoded &image, Rgb colour, int tolerance = 40) {
     std::size_t count = 0;
     for (int y = 0; y < image.Height; ++y) {
@@ -135,8 +150,8 @@ TEST(PlotExport, PngHasRequestedSizeBackgroundAndSeriesColour) {
     EXPECT_EQ(image.Height, 360);
     EXPECT_EQ(image.At(2, 2)[0], 255); // white page
     EXPECT_EQ(image.At(2, 2)[2], 255);
-    EXPECT_GT(CountNear(image, {255, 0, 0}), 200u);     // the curve
-    EXPECT_GT(CountNear(image, {32, 36, 44}, 60), 40u); // axes, ticks and text
+    EXPECT_GT(CountNear(image, {255, 0, 0}), 200u); // the curve
+    EXPECT_GT(CountInk(image), 40u);                // axes, ticks and text
     const auto dark = Decode(RenderPng(LineFigure({255, 0, 0}), {640, 360, true}));
     EXPECT_LT(dark.At(2, 2)[0], 60);
 }
