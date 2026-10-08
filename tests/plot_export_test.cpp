@@ -9,6 +9,7 @@
 #include "measurements.h"
 #include "pipeline.h"
 #include "plot_figures.h"
+#include <array>
 #include <filesystem>
 #include <fstream>
 #include <gtest/gtest.h>
@@ -252,6 +253,24 @@ TEST(PlotFigures, BuiltFromARealSignal) {
     }
     // A request beyond the signal is clamped, not an error.
     EXPECT_NO_THROW(PipelineFigure(stages, 1000, 1000, false));
+}
+
+TEST(PlotExport, LogarithmicAxisDrawsDecadeTicksAndSkipsNonPositiveValues) {
+    Panel panel;
+    panel.YLog = true;
+    panel.XLabel = "Eb/N0 (dB)";
+    panel.YLabel = "BER";
+    Series series;
+    series.X = {0, 1, 2, 3};
+    series.Y = {0.1, 0.01, 0.0, 1e-4}; // The zero cannot be shown on a log axis
+    panel.Series.push_back(series);
+    const Figure figure{"BER", {panel}};
+    const auto svg = RenderSvg(figure);
+    EXPECT_NE(svg.find("1e-1"), std::string::npos);
+    EXPECT_NE(svg.find("1e-4"), std::string::npos);
+    EXPECT_EQ(svg.find("nan"), std::string::npos);
+    panel.YLimits = std::array<double, 2>{1e-5, 1};
+    EXPECT_NO_THROW(RenderPng(Figure{"BER", {panel}}));
 }
 
 } // namespace Core

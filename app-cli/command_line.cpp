@@ -8,17 +8,18 @@
 namespace Console {
 
 /**
- * @brief   Declares every option, check and exclusion of the root command and of the batch subcommand.
+ * @brief   Declares every option, check and exclusion of the root command and of the batch, analyze and ber
+ *          subcommands.
  * @param[in] version  Version printed by --version, after "Siggen ".
  */
 CommandLine::CommandLine(const std::string &version) {
     auto *gui_option = App.add_flag("--gui", Gui, "Open the GUI, optionally initialized by preset/signal options");
 
-    App.add_option("-o,--output", Output, "Sample destination (default: signal.csv or signal.iq)")
+    App.add_option("-o,--output", Output, "Sample destination (default: signal.csv or signal.sigmf-data)")
         ->excludes(gui_option);
     App.add_flag("--overwrite", Overwrite, "Replace existing sample and metadata files")->excludes(gui_option);
     App.add_option("--format", Format, "Single-generation output format")
-        ->check(CLI::IsMember({"csv", "cf32"}))
+        ->check(CLI::IsMember({"csv", "sigmf"}))
         ->excludes(gui_option);
 
     App.add_option("--preset", Preset, "Load a preset before applying explicit options");
@@ -36,11 +37,33 @@ CommandLine::CommandLine(const std::string &version) {
     Batch->add_option("--frame-size", FrameSize, "Samples per frame (default: 2048)");
     Batch->add_option("--frames-per-point", FramesPerPoint, "Frames per sweep point (default: 1)");
     Batch->add_option("--output-dir", OutputDir, "New output directory (must not exist; default: dataset)");
-    Batch->add_option("--format", BatchFormat, "Frame format (default: cf32)")->check(CLI::IsMember({"csv", "cf32"}));
+    Batch->add_option("--format", BatchFormat, "Frame format (default: sigmf)")->check(CLI::IsMember({"csv", "sigmf"}));
     Batch->add_flag("--overwrite", BatchOverwrite, "Rejected; batches never replace an existing directory");
     Batch->add_option("--preset", Preset, "Load a preset before applying explicit batch overrides");
     AddSignalOptions(*Batch);
     Batch->excludes(gui_option);
+
+    Analyze = App.add_subcommand(
+        "analyze", "Measure a SigMF recording (single signal or batch frame) (power, PAPR, spectrum, EVM)");
+    Analyze->add_option("file", AnalyzeFile, "SigMF .sigmf-meta or .sigmf-data")->required();
+    Analyze->add_option("--window", AnalyzeWindow, "Welch window (default: hann)")
+        ->check(CLI::IsMember({"hann", "hamming", "blackman", "rectangular"}));
+    Analyze->add_option("--segment", AnalyzeSegment, "Welch segment length in samples (default: 1024)");
+    Analyze->add_flag("--json", AnalyzeJson, "Print the report as JSON");
+    Analyze->excludes(gui_option);
+
+    Ber = App.add_subcommand("ber", "Measure bit error rate against Eb/N0 with the ideal reference receiver");
+    Ber->add_option("--eb-n0-db", BerEbN0Db,
+                    "Eb/N0 points in dB, e.g. --eb-n0-db=0,2,4,6 (default: 0 to 10 in steps of 2)")
+        ->delimiter(',')
+        ->expected(-1);
+    Ber->add_option("--min-errors", BerMinErrors, "Stop a point after this many bit errors (default: 100)");
+    Ber->add_option("--max-bits", BerMaxBits, "Stop a point after this many bits (default: 2000000)");
+    Ber->add_option("--block-symbols", BerBlockSymbols, "Symbols generated per block (default: 4096)");
+    Ber->add_flag("--json", BerJson, "Print the curve as JSON");
+    Ber->add_option("--preset", Preset, "Load a preset before applying explicit options");
+    AddSignalOptions(*Ber);
+    Ber->excludes(gui_option);
 }
 
 /**
@@ -49,6 +72,22 @@ CommandLine::CommandLine(const std::string &version) {
  */
 bool CommandLine::BatchSelected() const {
     return Batch != nullptr && Batch->parsed();
+}
+
+/**
+ * @brief   Tells whether the analyze subcommand was given.
+ * @return  True after parsing a command line that contains "analyze".
+ */
+bool CommandLine::AnalyzeSelected() const {
+    return Analyze != nullptr && Analyze->parsed();
+}
+
+/**
+ * @brief   Tells whether the ber subcommand was given.
+ * @return  True after parsing a command line that contains "ber".
+ */
+bool CommandLine::BerSelected() const {
+    return Ber != nullptr && Ber->parsed();
 }
 
 /**

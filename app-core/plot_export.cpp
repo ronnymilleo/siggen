@@ -646,8 +646,9 @@ void DrawGrid(Canvas &canvas, const Theme &theme, const Panel &panel, const Axes
     }
 }
 
-void DrawFrameAndTicks(Canvas &canvas, const Theme &theme, const Axes &axes, const std::vector<double> &x_ticks,
-                       const std::vector<double> &y_ticks, const double scale, const double tick_font) {
+void DrawFrameAndTicks(Canvas &canvas, const Theme &theme, const Panel &panel, const Axes &axes,
+                       const std::vector<double> &x_ticks, const std::vector<double> &y_ticks, const double scale,
+                       const double tick_font) {
     const double frame_width = std::max(1.0, 1.4 * scale);
     canvas.Polyline({{axes.X0, axes.Y0},
                      {axes.X0 + axes.W, axes.Y0},
@@ -665,8 +666,10 @@ void DrawFrameAndTicks(Canvas &canvas, const Theme &theme, const Axes &axes, con
     }
     for (double tick : y_ticks) {
         canvas.Line(axes.X0 - 5 * scale, axes.Py(tick), axes.X0, axes.Py(tick), theme.Muted, 0.7, frame_width);
-        canvas.Text(axes.X0 - 9 * scale, axes.Py(tick) + tick_font * 0.35, FormatTick(tick, y_step), tick_font,
-                    theme.Muted, Anchor::End, false);
+        const auto label =
+            panel.YLog ? "1e" + std::to_string(static_cast<int>(std::lround(tick))) : FormatTick(tick, y_step);
+        canvas.Text(axes.X0 - 9 * scale, axes.Py(tick) + tick_font * 0.35, label, tick_font, theme.Muted, Anchor::End,
+                    false);
     }
 }
 
@@ -737,6 +740,33 @@ void DrawLegend(Canvas &canvas, const Theme &theme, const Panel &panel, const Ax
     }
 }
 
+// The axes of a logarithmic panel hold log10(y): a tick at each decade, thinned when the range spans many
+std::vector<double> DecadeTicks(const Axes &axes, const double scale) {
+    const int first = static_cast<int>(std::ceil(axes.Ylo - 1e-9));
+    const int last = static_cast<int>(std::floor(axes.Yhi + 1e-9));
+    const int stride = std::max(1, (last - first + 1) / std::clamp(static_cast<int>(axes.H / (40 * scale)), 2, 10));
+    std::vector<double> ticks;
+    for (int decade = first; decade <= last; decade += stride) {
+        ticks.push_back(decade);
+    }
+    return ticks;
+}
+
+// A logarithmic panel is drawn as log10(y) on a linear axis; values that are not positive vanish
+Panel ToLogScale(const Panel &panel) {
+    Panel shown = panel;
+    for (auto &series : shown.Series) {
+        for (auto &value : series.Y) {
+            value = value > 0 ? std::log10(value) : std::numeric_limits<double>::quiet_NaN();
+        }
+    }
+    if (panel.YLimits) {
+        shown.YLimits = std::array<double, 2>{std::log10(std::max((*panel.YLimits)[0], 1e-300)),
+                                              std::log10(std::max((*panel.YLimits)[1], 1e-300))};
+    }
+    return shown;
+}
+
 /**
  * @brief   Draws a panel: background, grid, series (clipped to the plot), frame, ticks, labels and legend.
  * @param[in] axes  Plot rectangle and data limits; widened here when the panel asks for an equal aspect.
@@ -749,14 +779,16 @@ void DrawPanel(Canvas &canvas, const Theme &theme, const Panel &panel, Axes axes
     }
     canvas.FillRect(axes.X0, axes.Y0, axes.W, axes.H, theme.PlotBackground, 1);
     const auto x_ticks = NiceTicks(axes.Xlo, axes.Xhi, std::clamp(static_cast<int>(axes.W / (95 * scale)), 3, 12));
-    const auto y_ticks = NiceTicks(axes.Ylo, axes.Yhi, std::clamp(static_cast<int>(axes.H / (55 * scale)), 2, 10));
+    const auto y_ticks =
+        panel.YLog ? DecadeTicks(axes, scale)
+                   : NiceTicks(axes.Ylo, axes.Yhi, std::clamp(static_cast<int>(axes.H / (55 * scale)), 2, 10));
     DrawGrid(canvas, theme, panel, axes, x_ticks, y_ticks, scale);
     canvas.Clip(axes.X0, axes.Y0, axes.W, axes.H);
     for (const auto &series : panel.Series) {
         DrawSeries(canvas, axes, series, scale);
     }
     canvas.Unclip();
-    DrawFrameAndTicks(canvas, theme, axes, x_ticks, y_ticks, scale, tick_font);
+    DrawFrameAndTicks(canvas, theme, panel, axes, x_ticks, y_ticks, scale, tick_font);
     DrawLabels(canvas, theme, panel, axes, scale, tick_font);
     DrawLegend(canvas, theme, panel, axes, scale, tick_font);
 }
@@ -786,10 +818,19 @@ void DrawFigure(Canvas &canvas, const Figure &figure, const ImageStyle &style) {
     double y = top;
     for (const auto &panel : figure.Panels) {
         y += panel.Title.empty() ? 10 * scale : 34 * scale;
-        const auto x_range = panel.XLimits ? *panel.XLimits : Padded(DataRange(panel, true));
-        const auto y_range = panel.YLimits ? *panel.YLimits : Padded(DataRange(panel, false));
+        const Panel shown = panel.YLog ? ToLogScale(panel) : panel;
+        const auto x_range = shown.XLimits ? *shown.XLimits : Padded(DataRange(shown, true));
+        const auto y_data = DataRange(shown, false);
+        auto y_range = Padded(y_data);
+        if (shown.YLog && !panel.YLimits) {
+            // Whole decades, at least one
+            y_range = {std::floor(y_data[0]), std::max(std::ceil(y_data[1]), std::floor(y_data[0]) + 1)};
+        }
+        if (shown.YLimits) {
+            y_range = *shown.YLimits;
+        }
         const Axes axes{left, y, width - left - right, plot_height, x_range[0], x_range[1], y_range[0], y_range[1]};
-        DrawPanel(canvas, theme, panel, axes, scale);
+        DrawPanel(canvas, theme, shown, axes, scale);
         y += plot_height + tick_row + (panel.XLabel.empty() ? 0 : 28 * scale);
     }
 }

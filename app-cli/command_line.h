@@ -7,6 +7,7 @@
 #define SIGGEN_COMMAND_LINE_H
 
 #include <CLI/CLI.hpp>
+#include <cstddef>
 #include <cstdint>
 #include <string>
 #include <vector>
@@ -15,7 +16,8 @@ namespace Console {
 
 /**
  * @struct  CommandLine
- * @brief   The CLI11 parser and the raw values of every option, for single generation, the GUI and batch.
+ * @brief   The CLI11 parser and the raw values of every option, for single generation, the GUI, batch, analyze and
+ *          ber.
  * @details Parsing stays independent of graphics, logging and library resolution. Precedence is defaults ->
  *          loaded preset -> explicitly supplied options; the resolver inspects each option's count() on the parsed
  *          App or subcommand, so unspecified options never clobber preset values.
@@ -24,6 +26,8 @@ struct CommandLine {
     explicit CommandLine(const std::string &version);
 
     bool BatchSelected() const;
+    bool AnalyzeSelected() const;
+    bool BerSelected() const;
 
     CLI::App App{"Siggen: complex baseband generation and analysis"};
 
@@ -32,7 +36,7 @@ struct CommandLine {
     bool Gui = false;
 
     // Single-generation export controls (incompatible with --gui and batch)
-    std::string Output; // Empty selects signal.csv / signal.iq by format
+    std::string Output; // Empty selects signal.csv / signal.sigmf-data by format
     bool Overwrite = false;
     std::string Format = "csv";
 
@@ -70,7 +74,7 @@ struct CommandLine {
 
     // Batch subcommand state
     CLI::App *Batch = nullptr;
-    std::string BatchFormat = "cf32";
+    std::string BatchFormat = "sigmf";
     std::vector<std::string> BatchModulations;
     std::vector<std::uint32_t> BatchSeeds;
     std::vector<double> BatchSnrsDb;
@@ -78,6 +82,21 @@ struct CommandLine {
     int FramesPerPoint = 1;
     std::string OutputDir = "dataset";
     bool BatchOverwrite = false;
+
+    // Analyze subcommand state
+    CLI::App *Analyze = nullptr;
+    std::string AnalyzeFile;
+    std::string AnalyzeWindow = "hann";
+    int AnalyzeSegment = 1024;
+    bool AnalyzeJson = false;
+
+    // Ber subcommand state
+    CLI::App *Ber = nullptr;
+    std::vector<double> BerEbN0Db;
+    std::size_t BerMinErrors = 100;
+    std::size_t BerMaxBits = 2000000;
+    int BerBlockSymbols = 4096;
+    bool BerJson = false;
 
 private:
     void AddSignalOptions(CLI::App &target);

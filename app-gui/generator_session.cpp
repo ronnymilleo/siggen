@@ -125,12 +125,18 @@ bool GeneratorSession::IsGenerating() const {
 }
 
 /**
- * @brief   Takes the result of a finished generation and computes every analysis shown for it. Call once per frame,
- *          before the windows draw.
+ * @brief   Collects a finished BER sweep, then takes the result of a finished generation and computes every
+ *          analysis shown for it. Call once per frame, before the windows draw.
  * @note    A failed generation or analysis is logged and kept for GetError() instead of propagating; a failed
  *          generation keeps the previous result.
  */
 void GeneratorSession::Update() {
+    if (m_BerJob.Poll()) {
+        ++m_BerVersion;
+        if (!m_BerJob.Error().empty()) {
+            m_Error = m_BerJob.Error();
+        }
+    }
     try {
         if (m_Job.Poll()) {
             const auto &result = *m_Job.Result();
@@ -200,6 +206,29 @@ const std::optional<Core::SymbolAccuracy> &GeneratorSession::GetSymbolAccuracy()
 }
 
 /**
+ * @brief   Returns the bit errors of the reference demodulator on the last result.
+ * @return  Symbol and bit errors against the transmitted bits, or nothing for waveforms without a reference
+ *          receiver.
+ */
+const std::optional<Core::BitErrors> &GeneratorSession::GetBitErrors() const {
+    return m_Errors;
+}
+
+/**
+ * @brief   Returns the Eb/N0 implied by the measured SNR after the matched filter of the last result.
+ * @return  Eb/N0 in dB, or nothing when the result has no symbol accuracy.
+ */
+std::optional<double> GeneratorSession::GetMeasuredEbN0Db() const {
+    const auto &result = m_Job.Result();
+    if (!result || !m_Accuracy) {
+        return std::nullopt;
+    }
+    return Core::SnrToEnergyRatios(m_Accuracy->SnrAfterMatchedDb - m_Accuracy->ExpectedOffsetDb,
+                                   result->Config.SamplesPerSymbol, Core::BitsPerSymbol(result->Config.Modulation))
+        .EbN0Db;
+}
+
+/**
  * @brief   Returns the eye diagram of the last result.
  * @return  The traces; empty for noise and FSK signals.
  */
@@ -257,7 +286,42 @@ std::size_t GeneratorSession::GetSpectrumVersion() const {
 }
 
 /**
- * @brief   Recomputes plot data, measurements, eye diagram, pipeline stages and spectrum.
+ * @brief   Starts a BER sweep on the settings of the last result.
+ * @param[in] settings  Eb/N0 points and stopping rules.
+ * @note    Does nothing without a result or while a sweep is running.
+ */
+void GeneratorSession::StartBerSweep(Core::BerSweepSettings settings) {
+    const auto &result = m_Job.Result();
+    if (result) {
+        m_BerJob.Start(result->Config, std::move(settings));
+    }
+}
+
+/**
+ * @brief   Asks the running BER sweep to stop; it keeps the points finished so far.
+ */
+void GeneratorSession::CancelBerSweep() {
+    m_BerJob.Cancel();
+}
+
+/**
+ * @brief   Returns the BER sweep, for its progress and points.
+ * @return  The job; read only.
+ */
+const Core::BerJob &GeneratorSession::GetBerSweep() const {
+    return m_BerJob;
+}
+
+/**
+ * @brief   Returns a counter that changes whenever a BER sweep finishes.
+ * @return  The counter; the BER view refits its axes when it changes.
+ */
+std::size_t GeneratorSession::GetBerVersion() const {
+    return m_BerVersion;
+}
+
+/**
+ * @brief   Recomputes plot data, measurements, bit errors, eye diagram, pipeline stages and spectrum.
  * @param[in] result  The newly generated signal.
  */
 void GeneratorSession::RefreshAnalysis(const Core::GeneratedSignal &result) {
@@ -270,6 +334,7 @@ void GeneratorSession::RefreshAnalysis(const Core::GeneratedSignal &result) {
     m_Plots = Core::MakePlotData(result);
     m_Power = Core::MeasurePowerStatistics(result.Samples);
     m_Accuracy = Core::MeasureSymbolAccuracy(result);
+    m_Errors = Core::CountBitErrors(result);
     m_Eye = result.Family == Core::Family::Linear ? Core::BuildEyeDiagram(result) : Core::EyeDiagram{};
     m_Pipeline.reset();
     if (result.Family == Core::Family::Linear) {

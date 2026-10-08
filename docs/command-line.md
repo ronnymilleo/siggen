@@ -12,7 +12,7 @@ current directory, then exits. Use `--gui` to open the desktop interface instead
 ./build/dev/bin/siggen
 ./build/dev/bin/siggen --output captures/example.csv
 ./build/dev/bin/siggen --output signal.csv --overwrite
-./build/dev/bin/siggen --modulation 64-QAM --symbols 512 --sps 4 --format cf32
+./build/dev/bin/siggen --modulation 64-QAM --symbols 512 --sps 4 --format sigmf
 ./build/dev/bin/siggen --modulation qpsk --snr-db 10 --noise-seed 7 -o noisy.csv
 ./build/dev/bin/siggen --modulation wgn --samples 8192 --sample-rate 16000 --noise-power 2
 ./build/dev/bin/siggen --preset custom.preset --gain 2 --output preset.csv
@@ -36,8 +36,8 @@ are `--samples`, `--sample-rate`, `--noise-power`, `--noise-seed`, and
 impairment options for linear waveforms are `--cfo-hz`, `--phase-noise-hz`,
 `--iq-gain-db`, `--iq-phase-deg`, `--dc-i`, `--dc-q`, `--adc-bits`, and
 `--impairment-seed` (see [Noise, SNR and channel impairments](noise-and-impairments.md)). Export
-options are `--format csv|cf32`, `--output`/`-o`, and `--overwrite`. Without an
-output path, CSV uses `signal.csv` and binary uses `signal.iq`.
+options are `--format csv|sigmf`, `--output`/`-o`, and `--overwrite`. Without an
+output path, CSV uses `signal.csv` and SigMF uses `signal.sigmf-data` (plus `signal.sigmf-meta`).
 
 Options incompatible with the selected waveform are rejected: noise-source
 options require `--modulation WGN`, and linear options (including `--snr-db`)
@@ -58,6 +58,38 @@ window, including on Wayland. The content follows window resizing and scrolls
 when needed; detached platform windows and saved floating-panel positions are
 disabled.
 
+### Analyzing a recording
+
+`siggen analyze <file>` measures a SigMF recording (`.sigmf-meta` or `.sigmf-data`, including batch frames) without opening the GUI, using the same
+estimators: sample count and rate, mean power, PAPR, the strongest spectral bin, the
+99 % occupied bandwidth and, for a recording made by siggen, the waveform, EVM,
+SNR after the matched filter, the measured Eb/N0 and the bit errors of the reference receiver. `--window hann|hamming|blackman|rectangular` and
+`--segment N` select the Welch estimator, and `--json` prints the report as JSON.
+See [Analysis, SigMF and Python](analysis-and-python.md).
+
+### Measuring BER
+
+`siggen ber` sweeps Eb/N0 and measures the bit error rate of the ideal reference receiver, next
+to the textbook value. It takes the same signal options as single generation
+(`--modulation`, `--sps`, `--pulse`, `--cfo-hz`, ...), but `--symbols`, `--bits`, `--data-source` and
+`--snr-db` are rejected because the sweep controls them.
+
+```sh
+siggen ber --modulation QPSK --eb-n0-db=0,2,4,6,8
+siggen ber --modulation DQPSK --eb-n0-db=4,8 --cfo-hz 20 --json
+```
+
+```text
+waveform: QPSK, 8 samples/symbol, RRC pulse, ideal reference receiver
+ Eb/N0 dB   SNR dB       bits     errors          BER       theory
+     0.00     -6.02       8152        637    7.814e-02    7.865e-02
+```
+
+`--eb-n0-db` is a comma list (default 0 to 10 in steps of 2), `--min-errors N` (default 100) and
+`--max-bits N` (default 2000000) stop a point, `--block-symbols N` sets the symbols per generated block
+(default 4096) and `--json` prints the curve as JSON. Only linear waveforms are accepted. See
+[Bit error rate and the reference receiver](ber-and-receiver.md).
+
 ### Batch dataset generation
 
 `siggen batch` sweeps waveform, seed, and SNR lists and writes fixed-length
@@ -68,11 +100,11 @@ signal overrides with single generation:
 ./build/dev/bin/siggen batch --modulations BPSK QPSK 8-PSK 16-QAM 64-QAM WGN \
   --seeds 42 43 --snrs-db=-10,0,10 \
   --frame-size 2048 --frames-per-point 100 \
-  --output-dir dataset --format cf32
+  --output-dir dataset --format sigmf
 ```
 
 Batch defaults are the resolved waveform and seed (or the explicit lists), one
-frame per point, 2048 samples, and binary `cf32` frames. Lists preserve user
+frame per point, 2048 samples, and SigMF frames (`--format csv` writes CSV instead). Lists preserve user
 order and reject duplicates; `--snrs-db` accepts a comma-separated list (use the
 `--snrs-db=-10,0,10` form for negative values). Without an SNR list, the
 resolved single-signal noise setting is retained. WGN ignores the SNR axis: it
@@ -105,7 +137,7 @@ realizations.
 
 The output directory must not exist; existing directories are never touched.
 Files are named `frame_<point>_<frame>` with zero-padded indices preserving
-user list order, each with a JSON sidecar (`<file>.json`). A versioned
+user list order, each with its metadata file: `<name>.sigmf-meta` for SigMF (any SigMF tool opens the frames; the frame description sits under `siggen:metadata`, with the generator preset and crop position beside it so `siggen analyze` can report EVM on the frame interior) or `<file>.json` for CSV. A versioned
 `manifest.jsonl` starts with a `batch_header` record, gains one `frame`
 completion record (relative path, waveform, axis values, derived seeds, frame
 size, format, and crop/noise provenance) appended and flushed only after that

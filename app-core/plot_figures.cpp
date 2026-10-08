@@ -5,6 +5,8 @@
 
 #include "plot_figures.h"
 
+#include "theory.h"
+
 #include <algorithm>
 #include <array>
 #include <cmath>
@@ -291,6 +293,100 @@ Core::Figure PipelineFigure(const Core::PipelineStages &stages, const int first,
     figure.Panels.push_back(ShapedPanel(stages, view));
     figure.Panels.push_back(ReceivedPanel(stages, view));
     return figure;
+}
+
+/**
+ * @brief   Splits a BER sweep for plotting.
+ * @param[in] points      The measured points.
+ * @param[in] modulation  Waveform of the sweep, for the textbook curve.
+ * @return  The measured points with errors, the error-free points drawn at their 1 / bits upper bound, and the
+ *          textbook curve sampled at 121 points over the swept range. The curve stops where the waveform has no
+ *          closed form or where it drops below what the measurement could resolve.
+ */
+BerPlot MakeBerPlot(const std::vector<BerPoint> &points, const Modulation modulation) {
+    BerPlot plot;
+    double lo = INFINITY, hi = -INFINITY;
+    const double floor_ber = LowestResolvableBer(points);
+    for (const auto &point : points) {
+        lo = std::min(lo, point.EbN0Db);
+        hi = std::max(hi, point.EbN0Db);
+        if (point.Errors.BitErrorCount > 0) {
+            plot.X.push_back(point.EbN0Db);
+            plot.Y.push_back(point.Ber());
+        } else if (point.Errors.BitCount > 0) {
+            plot.BoundX.push_back(point.EbN0Db);
+            plot.BoundY.push_back(1.0 / static_cast<double>(point.Errors.BitCount));
+        }
+    }
+    if (points.empty() || !(hi > lo)) {
+        return plot;
+    }
+    for (int k = 0; k <= 120; ++k) {
+        const double eb_n0_db = lo + (hi - lo) * k / 120.0;
+        const auto ber = TheoreticalBer(modulation, eb_n0_db);
+        // Below what the measurement could resolve: leave the axis alone
+        if (!ber || *ber < floor_ber * 0.3) {
+            break;
+        }
+        plot.TheoryX.push_back(eb_n0_db);
+        plot.TheoryY.push_back(*ber);
+    }
+    return plot;
+}
+
+/**
+ * @brief   Returns the smallest BER the sweep could resolve: one error in the most bits compared at any point.
+ * @param[in] points  The measured points.
+ * @return  1 / (most bits compared), or 1 when no point compared any bit.
+ */
+double LowestResolvableBer(const std::vector<BerPoint> &points) {
+    double floor_ber = 1;
+    for (const auto &point : points) {
+        if (point.Errors.BitCount > 0) {
+            floor_ber = std::min(floor_ber, 1.0 / static_cast<double>(point.Errors.BitCount));
+        }
+    }
+    return floor_ber;
+}
+
+/**
+ * @brief   Builds the BER-against-Eb/N0 figure, on a logarithmic BER axis down to the resolvable decade.
+ * @param[in] points      The measured points.
+ * @param[in] modulation  Waveform of the sweep.
+ * @param[in] current     Optional Eb/N0 (dB) and BER of the displayed signal, marked when its BER is positive.
+ * @return  The figure: textbook curve, measured line and markers, error-free upper bounds and the current signal.
+ */
+Core::Figure BerFigure(const std::vector<BerPoint> &points, const Modulation modulation,
+                       const std::optional<std::array<double, 2>> current) {
+    const auto plot = MakeBerPlot(points, modulation);
+    Core::Panel panel;
+    panel.XLabel = "Eb/N0 (dB)";
+    panel.YLabel = "Bit error rate";
+    panel.YLog = true;
+    const double floor_ber = LowestResolvableBer(points);
+    panel.YLimits = std::array<double, 2>{std::pow(10.0, std::floor(std::log10(std::max(floor_ber, 1e-12)))), 1.0};
+    if (!plot.TheoryX.empty()) {
+        panel.Series.push_back(
+            MakeLineSeries("Theory (ideal receiver)", plot.TheoryX, plot.TheoryY, QuadratureColor, 2.0));
+    }
+    auto measured = MakeLineSeries("Measured", plot.X, plot.Y, InPhaseColor, 2.0);
+    panel.Series.push_back(measured);
+    measured.Kind = SeriesKind::Scatter;
+    measured.Label = "";
+    measured.Width = 5.0;
+    panel.Series.push_back(measured);
+    if (!plot.BoundX.empty()) {
+        auto bound =
+            MakeLineSeries("No errors seen (BER below this)", plot.BoundX, plot.BoundY, Core::Rgb{139, 148, 163}, 5.0);
+        bound.Kind = SeriesKind::Scatter;
+        panel.Series.push_back(bound);
+    }
+    if (current && (*current)[1] > 0) {
+        auto now = MakeLineSeries("Displayed signal", {(*current)[0]}, {(*current)[1]}, Core::Rgb{110, 220, 140}, 8.0);
+        now.Kind = SeriesKind::Scatter;
+        panel.Series.push_back(now);
+    }
+    return {std::string("BER against Eb/N0: ") + ModulationName(modulation), {panel}};
 }
 
 } // namespace Core

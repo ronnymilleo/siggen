@@ -8,6 +8,7 @@
 #include "signal_analysis.h"
 #include "signal_processing.h"
 #include <cmath>
+#include <limits>
 #include <stdexcept>
 
 namespace Core {
@@ -67,26 +68,42 @@ PowerStatistics MeasurePowerStatistics(const std::vector<std::complex<float>> &s
  *          steady-state symbols and when the ideal symbols have no energy.
  */
 std::optional<SymbolAccuracy> MeasureSymbolAccuracy(const GeneratedSignal &signal) {
+    return MeasureSymbolAccuracy(signal, 0, std::numeric_limits<std::size_t>::max());
+}
+
+/**
+ * @brief   Measures EVM over the symbols with an index in [first_symbol, end_symbol) only.
+ * @param[in] signal        A generated signal.
+ * @param[in] first_symbol  First symbol index scored.
+ * @param[in] end_symbol    One past the last symbol index scored.
+ * @return  The accuracy of those symbols, or nothing for noise and FSK signals and when none of them is a
+ *          steady-state symbol.
+ * @note    Scores the part of a buffer that carries real data, for example the interior of a batch frame.
+ */
+std::optional<SymbolAccuracy> MeasureSymbolAccuracy(const GeneratedSignal &signal, const std::size_t first_symbol,
+                                                    const std::size_t end_symbol) {
     if (signal.Family != Family::Linear) {
         return std::nullopt;
     }
     const auto observations = MatchedSymbols(signal);
-    if (observations.Values.empty()) {
-        return std::nullopt;
-    }
     double error = 0;
     double reference = 0;
+    std::size_t used = 0;
     for (std::size_t i = 0; i < observations.Values.size(); ++i) {
+        if (observations.SymbolIndices[i] < first_symbol || observations.SymbolIndices[i] >= end_symbol) {
+            continue;
+        }
+        ++used;
         const auto ideal =
             std::complex<double>(signal.Symbols[observations.SymbolIndices[i]]) * signal.Config.AmplitudeGain;
         error += std::norm(std::complex<double>(observations.Values[i]) - ideal);
         reference += std::norm(ideal);
     }
-    if (reference <= 0) {
+    if (used == 0 || reference <= 0) {
         return std::nullopt;
     }
     SymbolAccuracy accuracy;
-    accuracy.SymbolCount = observations.Values.size();
+    accuracy.SymbolCount = used;
     accuracy.EvmRms = std::sqrt(error / reference);
     // Floor keeps the dB values finite for a noiseless signal
     accuracy.EvmDb = 20 * std::log10(std::max(accuracy.EvmRms, 1e-12));

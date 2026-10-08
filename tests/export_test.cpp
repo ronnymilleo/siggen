@@ -62,7 +62,7 @@ TEST(Export, CSVPrecisionCountAndMetadata) {
 TEST(Export, BinaryByteOrderAndWriteFailure) {
     auto result = Fixture();
     std::ostringstream out;
-    WriteSamples(out, result, ExportFormat::BinaryFloat32);
+    WriteSamples(out, result, ExportFormat::SigMF);
     const unsigned char bytes[] = {0, 0, 128, 63, 0, 0, 0, 0, 0, 0, 128, 191, 0, 0, 0, 0};
     EXPECT_EQ(out.str(), std::string(reinterpret_cast<const char *>(bytes), sizeof bytes));
     std::ostringstream bad;
@@ -76,9 +76,9 @@ TEST(Export, FilePairAndOverwriteProtection) {
     auto dir = std::filesystem::temp_directory_path() /
                ("iq-export-test-" + std::to_string(std::chrono::steady_clock::now().time_since_epoch().count()));
     std::filesystem::create_directory(dir);
-    const auto path = dir / "test.iq";
+    const auto path = dir / "test.sigmf-data";
     const auto result = Fixture();
-    ExportSignal(path, result, ExportFormat::BinaryFloat32);
+    ExportSignal(path, result, ExportFormat::SigMF);
     EXPECT_EQ(std::filesystem::file_size(path), 16u);
     EXPECT_TRUE(std::filesystem::exists(MetadataPath(path)));
     EXPECT_THROW(ExportSignal(path, result, ExportFormat::CSV), std::runtime_error);
@@ -121,7 +121,7 @@ TEST(Export, Version2LinearAndAwgnMetadata) {
     config.Awgn.Enabled = true;
     config.Awgn.SnrDb = 10;
     const auto noisy = Generate(config);
-    const auto metadata = ExportMetadata(noisy, ExportFormat::BinaryFloat32);
+    const auto metadata = ExportMetadata(noisy, ExportFormat::SigMF);
     EXPECT_NE(metadata.find("\"awgn\""), std::string::npos);
     EXPECT_NE(metadata.find("\"requested_snr_db\": 10"), std::string::npos);
     EXPECT_NE(metadata.find("\"reference_interval\": {\"begin\": 80, \"end\": 512}"), std::string::npos);
@@ -129,7 +129,7 @@ TEST(Export, Version2LinearAndAwgnMetadata) {
     EXPECT_NE(metadata.find("\"noise_seed\": 5490"), std::string::npos);
     // Byte layout is unchanged: little-endian float32 I/Q pairs.
     std::ostringstream out;
-    WriteSamples(out, noisy, ExportFormat::BinaryFloat32);
+    WriteSamples(out, noisy, ExportFormat::SigMF);
     EXPECT_EQ(out.str().size(), noisy.Samples.size() * 8);
 }
 
@@ -162,8 +162,8 @@ TEST(Export, RawSpanWriterMatchesSignalWriter) {
     const auto result = Fixture();
     std::ostringstream direct, via_signal;
     WriteSamples(direct, std::span<const std::complex<float>>(result.Samples), result.SampleRateHz,
-                 ExportFormat::BinaryFloat32);
-    WriteSamples(via_signal, result, ExportFormat::BinaryFloat32);
+                 ExportFormat::SigMF);
+    WriteSamples(via_signal, result, ExportFormat::SigMF);
     EXPECT_EQ(direct.str(), via_signal.str());
     std::ostringstream bad;
     EXPECT_THROW(WriteSamples(bad, std::span<const std::complex<float>>(result.Samples), 0, ExportFormat::CSV),

@@ -12,6 +12,7 @@
 #include <cstdint>
 #include <filesystem>
 #include <optional>
+#include <string>
 #include <vector>
 
 namespace Core {
@@ -32,6 +33,9 @@ struct FrameResult {
     NoiseRecord Noise;               // AWGN provenance when applied
     bool ImpairmentsApplied = false; // Channel impairments run after AWGN on the cropped frame
     std::uint32_t ImpairmentSeed = 0;
+    // Preset of the full (guarded, uncropped, noise-free) buffer the frame was cut from; linear waveforms only.
+    // It lets a reader regenerate the ideal symbols and measure EVM on the frame interior
+    std::string GeneratorPreset;
 };
 
 /**
@@ -45,7 +49,7 @@ struct BatchRequest {
     std::vector<double> SnrsDb;        // Empty retains the base noise setting
     int FrameSize = 2048;
     int FramesPerPoint = 1;
-    ExportFormat Format = ExportFormat::BinaryFloat32;
+    ExportFormat Format = ExportFormat::SigMF;
     std::filesystem::path OutputDir;
 };
 

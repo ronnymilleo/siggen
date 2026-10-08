@@ -53,6 +53,11 @@ realization. A clean RRC signal shows a small EVM floor (about -43 dB for the
 default span 10, roll-off 0.2) from the truncated filter. Noise sources and FSK
 signals have power statistics only (no symbol-rate observations to compare).
 
+For linear signals the Measurements block also shows the bit error rate of the ideal reference receiver
+(BER, bit errors over bits compared, SER), the Eb/N0 implied by the measured EVM and the textbook BER at that Eb/N0. The
+**BER** tab sweeps Eb/N0 in the background and plots the measured curve against theory, with an upper bound where no error was
+seen and an **Export image...** button like the other tabs; see [Bit error rate and the reference receiver](ber-and-receiver.md).
+
 The **Eye** tab overlays up to 200 matched-filter traces, each two symbol periods
 wide and centred on a decision instant, for the I or Q component. Traces cover the
 same steady-state symbols as the constellation.

@@ -335,10 +335,11 @@ void ControlsWindow::DrawExportDialog() {
     if (ImGui::InputText("Destination", m_ExportPath, sizeof m_ExportPath)) {
         m_ConfirmOverwrite = false;
     }
-    if (ImGui::Combo("Format", &m_ExportFormat, "CSV\0Binary float32 I/Q\0")) {
+    if (ImGui::Combo("Format", &m_ExportFormat, "CSV\0SigMF (cf32 + .sigmf-meta)\0")) {
         m_ConfirmOverwrite = false;
     }
-    ImGui::TextWrapped("Metadata is written beside the samples as <destination>.json.");
+    ImGui::TextWrapped("Metadata is written beside the samples as <destination>.json (SigMF: use a .sigmf-data "
+                       "destination; <name>.sigmf-meta is written beside it).");
     if (ImGui::Button("Export")) {
         try {
             m_ConfirmOverwrite =
@@ -377,7 +378,8 @@ void ControlsWindow::DrawExportDialog() {
  */
 void ControlsWindow::Export(bool overwrite) {
     try {
-        Core::ExportSignal(m_ExportPath, *m_ExportResult, static_cast<Core::ExportFormat>(m_ExportFormat), overwrite);
+        Core::ExportSignal(m_ExportPath, *m_ExportResult,
+                           m_ExportFormat == 0 ? Core::ExportFormat::CSV : Core::ExportFormat::SigMF, overwrite);
         spdlog::info("Exported {} complex samples to {}", m_ExportResult->Samples.size(), m_ExportPath);
         m_ExportStatus = "Exported samples and JSON metadata.";
         m_ConfirmOverwrite = false;

@@ -19,3 +19,6 @@
 [submodule "vendor/cli11"]
 	path = vendor/cli11
 	url = https://github.com/CLIUtils/CLI11.git
+[submodule "vendor/json"]
+	path = vendor/json
+	url = https://github.com/nlohmann/json.git

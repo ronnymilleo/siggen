@@ -1,6 +1,6 @@
 /**
  * @file    iq_export.h
- * @brief   Writes generated I/Q samples as CSV or little-endian float32 with a JSON metadata sidecar.
+ * @brief   Writes generated I/Q samples as CSV with a JSON sidecar, or as a SigMF recording.
  */
 
 #ifndef SIGGEN_IQ_EXPORT_H
@@ -18,11 +18,12 @@ namespace Core {
 
 /**
  * @enum    ExportFormat
- * @brief   Sample file formats: CSV text (time_s,i,q) or interleaved I/Q float32 little-endian (cf32_le).
+ * @brief   Sample file formats: CSV text (time_s,i,q), or SigMF: interleaved I/Q float32 little-endian
+ *          (`cf32_le`) in a `.sigmf-data` file with a `.sigmf-meta` JSON beside it.
  */
 enum class ExportFormat {
     CSV,
-    BinaryFloat32
+    SigMF
 };
 
 std::filesystem::path MetadataPath(const std::filesystem::path &destination);

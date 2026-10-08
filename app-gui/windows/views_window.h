@@ -18,8 +18,8 @@ namespace GUI {
 
 /**
  * @class   ViewsWindow
- * @brief   Shows the last result as tabs of plots (waveform, frequency, constellation, eye, pipeline, spectrum) and
- *          saves any of them as a PNG or SVG image.
+ * @brief   Shows the last result as tabs of plots (waveform, frequency, constellation, eye, pipeline, BER,
+ *          spectrum) and saves any of them as a PNG or SVG image.
  * @details Each tab appears only for the waveform families it applies to. The window keeps the view state (zoom
  *          requests, selected component, pipeline window, image dialog) and resets it when the session analyses a new
  *          result.
@@ -42,6 +42,9 @@ private:
     void DrawPipelineTab(const Core::GeneratedSignal &result);
     void DrawPipelineControls();
     void DrawPipelineStages(const Core::GeneratedSignal &result);
+    void DrawBerTab(const Core::GeneratedSignal &result);
+    void DrawBerControls();
+    void DrawBerPlot(const Core::GeneratedSignal &result);
     void DrawSpectrumTab();
 
     // Image export
@@ -52,6 +55,7 @@ private:
     GeneratorSession &m_Session;
     std::size_t m_SeenResultVersion = 0;
     std::size_t m_SeenSpectrumVersion = 0;
+    std::size_t m_SeenBerVersion = 0;
 
     // View state
     bool m_WaveformFit = true;
@@ -62,6 +66,14 @@ private:
     int m_PipelineCount = 12;
     bool m_PipelineAlign = true;
     bool m_PipelineFit = true;
+
+    // BER sweep settings
+    double m_BerFrom = 0;
+    double m_BerTo = 12;
+    double m_BerStep = 1;
+    int m_BerMinErrors = 100;
+    int m_BerMaxKbits = 1000;
+    bool m_BerFit = true;
 
     // Image export of the plot on screen (PNG or SVG), for slides and reports
     std::optional<Core::Figure> m_ImageFigure;

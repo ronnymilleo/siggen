@@ -1,14 +1,16 @@
 /**
  * @file    batch.cpp
  * @brief   Generates sweeps of fixed-length frames over waveforms, seeds and SNRs into a dataset directory.
- * @details The output directory holds one sample file and one JSON sidecar per frame, plus manifest.jsonl: a
- *          header record, one record per completed frame and a final summary record.
+ * @details The output directory holds one sample file and one JSON metadata file per frame (a SigMF `.sigmf-meta`
+ *          for SigMF frames), plus manifest.jsonl: a header record, one record per completed frame and a final
+ *          summary record.
  */
 
 #include "batch.h"
 
 #include "impairments.h"
 #include "noise.h"
+#include "preset.h"
 #include "signal_processing.h"
 #include <cmath>
 #include <cstddef>
@@ -86,6 +88,7 @@ FrameResult GenerateSymbolFrame(GenerationConfig &config, const int frame_size, 
     const auto guard = GuardSymbols(config);
     config.SymbolCount = static_cast<int>(PayloadSymbols(frame_size, samples_per_symbol) + 2 * guard);
     auto full = Generate(config);
+    frame.GeneratorPreset = SerializePreset(config);
     frame.CropOffset = guard * samples_per_symbol + full.FilterDelaySamples;
     frame.FilterDelaySamples = full.FilterDelaySamples;
     frame.SampleRateHz = full.SampleRateHz;
@@ -116,7 +119,7 @@ void ValidateBatchSettings(const BatchRequest &request) {
     if (request.FramesPerPoint < 1) {
         throw std::invalid_argument("Frames per point must be at least 1");
     }
-    if (request.Format != ExportFormat::CSV && request.Format != ExportFormat::BinaryFloat32) {
+    if (request.Format != ExportFormat::CSV && request.Format != ExportFormat::SigMF) {
         throw std::invalid_argument("Unsupported batch format");
     }
     if (request.OutputDir.empty()) {
@@ -179,12 +182,17 @@ void ValidateAwgnSettings(const Modulation waveform, const BatchRequest &request
 
 // region Output records
 
+// Manifest format: how a frame is stored. Sidecars describe the sample encoding instead
 const char *FormatName(const ExportFormat format) {
+    return format == ExportFormat::CSV ? "csv" : "sigmf";
+}
+
+const char *DataFormatName(const ExportFormat format) {
     return format == ExportFormat::CSV ? "csv" : "cf32_le";
 }
 
 const char *FormatExtension(const ExportFormat format) {
-    return format == ExportFormat::CSV ? ".csv" : ".cf32";
+    return format == ExportFormat::CSV ? ".csv" : ".sigmf-data";
 }
 
 std::string FrameBasename(const std::size_t point_index, const std::size_t frame_index) {
@@ -276,7 +284,7 @@ std::string FrameSidecar(const BatchRequest &request, const FrameLocation &locat
                          const std::string &data_name) {
     auto out = JsonStream();
     const auto family = WaveformFamily(location.Waveform);
-    out << "{\n  \"version\": 2,\n  \"kind\": \"batch_frame\",\n  \"format\": \"" << FormatName(request.Format)
+    out << "{\n  \"version\": 2,\n  \"kind\": \"batch_frame\",\n  \"format\": \"" << DataFormatName(request.Format)
         << "\",\n  \"waveform\": " << JsonQuote(ModulationName(location.Waveform)) << ",\n  \"family\": \""
         << FamilyName(family) << "\",\n  \"frame_size\": " << frame.Samples.size()
         << ",\n  \"sample_rate_hz\": " << frame.SampleRateHz
@@ -306,6 +314,33 @@ std::string FrameSidecar(const BatchRequest &request, const FrameLocation &locat
 }
 
 /**
+ * @brief   Wraps the frame sidecar in a SigMF 1.0.0 metadata document, under `siggen:metadata`.
+ * @param[in] frame    Generated frame.
+ * @param[in] sidecar  The frame sidecar from FrameSidecar().
+ * @return  The `.sigmf-meta` JSON document. Linear frames also carry `siggen:preset` and `siggen:frame` (crop
+ *          offset and size), so a reader can regenerate the ideal symbols and measure EVM on the frame.
+ */
+std::string SigmfFrameMetadata(const FrameResult &frame, const std::string &sidecar) {
+    auto out = JsonStream();
+    auto detail = sidecar;
+    while (!detail.empty() && (detail.back() == '\n' || detail.back() == ' ')) {
+        detail.pop_back();
+    }
+    out << "{\n  \"global\": {\n    \"core:datatype\": \"cf32_le\",\n    \"core:sample_rate\": " << frame.SampleRateHz
+        << ",\n    \"core:version\": \"1.0.0\",\n    \"core:description\": \"Synthetic frame from siggen batch\""
+        << ",\n    \"core:recorder\": \"siggen\"";
+    if (!frame.GeneratorPreset.empty()) {
+        out << ",\n    \"siggen:preset\": " << JsonQuote(frame.GeneratorPreset)
+            << ",\n    \"siggen:frame\": {\"crop_offset_samples\": " << frame.CropOffset
+            << ", \"frame_size\": " << frame.Samples.size() << "}";
+    }
+    out << ",\n    \"siggen:metadata\": " << detail
+        << "\n  },\n  \"captures\": [\n    {\"core:sample_start\": 0, \"core:frequency\": 0}\n  ],\n  "
+           "\"annotations\": []\n}\n";
+    return out.str();
+}
+
+/**
  * @brief   Builds the manifest record (kind "frame") of one completed frame, one JSON object per line.
  * @param[in] request   Batch request.
  * @param[in] location  Axis values and indices of the frame.
@@ -317,7 +352,7 @@ std::string ManifestRecord(const BatchRequest &request, const FrameLocation &loc
                            const std::string &data_name) {
     auto out = JsonStream();
     out << "{\"kind\":\"frame\",\"point_index\":" << location.PointIndex << ",\"frame_index\":" << location.FrameIndex
-        << ",\"path\":" << JsonQuote(data_name) << ",\"sidecar\":" << JsonQuote(data_name + ".json")
+        << ",\"path\":" << JsonQuote(data_name) << ",\"sidecar\":" << JsonQuote(MetadataPath(data_name).string())
         << ",\"waveform\":" << JsonQuote(ModulationName(location.Waveform)) << ",\"family\":\""
         << FamilyName(WaveformFamily(location.Waveform)) << "\",\"seed\":" << location.Seed << ",\"snr_db\":";
     AppendOptionalNumber(out, location.SnrDb);
@@ -415,10 +450,13 @@ void WriteFrame(const BatchRequest &request, const GenerationConfig &config, con
                 std::ofstream &manifest) {
     const auto frame = GenerateFrame(config, request.FrameSize, location.FrameIndex, location.SnrDb);
     const auto data_name = FrameBasename(location.PointIndex, location.FrameIndex) + FormatExtension(request.Format);
-    const auto sidecar = FrameSidecar(request, location, frame, data_name);
+    auto sidecar = FrameSidecar(request, location, frame, data_name);
+    if (request.Format == ExportFormat::SigMF) {
+        sidecar = SigmfFrameMetadata(frame, sidecar);
+    }
     {
         std::ofstream data_file(request.OutputDir / data_name, std::ios::binary | std::ios::noreplace);
-        std::ofstream sidecar_file(request.OutputDir / (data_name + ".json"), std::ios::binary | std::ios::noreplace);
+        std::ofstream sidecar_file(request.OutputDir / MetadataPath(data_name), std::ios::binary | std::ios::noreplace);
         data_file.exceptions(std::ios::badbit | std::ios::failbit);
         sidecar_file.exceptions(std::ios::badbit | std::ios::failbit);
         WriteSamples(data_file, std::span<const std::complex<float>>(frame.Samples), frame.SampleRateHz,

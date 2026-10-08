@@ -250,9 +250,9 @@ TEST(CliConfig, SnrControl) {
 
 TEST(CliConfig, WgnSourceOptions) {
     CommandLine cli("test");
-    const char *argv[] = {"siggen", "--modulation",  "wgn", "--samples",    "512", "--sample-rate",
-                          "16000",  "--noise-power", "2",   "--noise-seed", "21",  "--gain",
-                          "1.5",    "--format",      "cf32"};
+    const char *argv[] = {"siggen", "--modulation",  "wgn",  "--samples",    "512", "--sample-rate",
+                          "16000",  "--noise-power", "2",    "--noise-seed", "21",  "--gain",
+                          "1.5",    "--format",      "sigmf"};
     cli.App.parse(std::size(argv), argv);
     const auto resolved = ResolveConfig(cli);
     EXPECT_EQ(resolved.Modulation, Core::Modulation::WGN);
@@ -260,9 +260,9 @@ TEST(CliConfig, WgnSourceOptions) {
     EXPECT_DOUBLE_EQ(resolved.NoiseSource.SampleRateHz, 16000);
     EXPECT_DOUBLE_EQ(resolved.NoiseSource.NoisePower, 2);
     EXPECT_EQ(resolved.NoiseSeed, 21u);
-    EXPECT_EQ(ResolveOutput(cli), "signal.iq");
+    EXPECT_EQ(ResolveOutput(cli), "signal.sigmf-data");
     CommandLine named("test");
-    const char *named_argv[] = {"siggen", "--format", "cf32", "--output", "custom.dat"};
+    const char *named_argv[] = {"siggen", "--format", "sigmf", "--output", "custom.dat"};
     named.App.parse(std::size(named_argv), named_argv);
     EXPECT_EQ(ResolveOutput(named), "custom.dat");
 }
@@ -342,7 +342,7 @@ TEST(CliConfig, BatchDefaultsUseResolvedWaveformAndSeed) {
     EXPECT_EQ(request.Base.Seed, 123u);
     EXPECT_EQ(request.FrameSize, 2048);
     EXPECT_EQ(request.FramesPerPoint, 1);
-    EXPECT_EQ(request.Format, Core::ExportFormat::BinaryFloat32);
+    EXPECT_EQ(request.Format, Core::ExportFormat::SigMF);
 }
 
 TEST(CliConfig, ImpairmentOptionsResolveAndRejectWgn) {
@@ -402,6 +402,43 @@ TEST(CliConfig, FskOptionsResolveAndRejectInapplicableOnes) {
                            "--sps",  "8"};
     batch.App.parse(std::size(mixed), mixed);
     EXPECT_EQ(ResolveBatch(batch).Base.ToneSpacingHz, 800);
+}
+
+TEST(CliConfig, BerResolvesPointsAndStoppingRules) {
+    CommandLine cli("test");
+    const char *args[] = {"siggen",       "ber", "--modulation", "16-QAM", "--sps",           "4",  "--eb-n0-db=2,4,6",
+                          "--min-errors", "50",  "--max-bits",   "5000",   "--block-symbols", "256"};
+    cli.App.parse(static_cast<int>(std::size(args)), args);
+    ASSERT_TRUE(cli.BerSelected());
+    const auto request = ResolveBer(cli);
+    EXPECT_EQ(request.Config.Modulation, Core::Modulation::QAM16);
+    EXPECT_EQ(request.Config.SamplesPerSymbol, 4);
+    EXPECT_FALSE(request.Config.Awgn.Enabled);
+    EXPECT_EQ(request.Settings.EbN0Db, (std::vector<double>{2, 4, 6}));
+    EXPECT_EQ(request.Settings.MinErrors, 50u);
+    EXPECT_EQ(request.Settings.MaxBits, 5000u);
+    EXPECT_EQ(request.Settings.BlockSymbols, 256);
+}
+
+TEST(CliConfig, BerDefaultsAndRejections) {
+    {
+        CommandLine cli("test");
+        const char *args[] = {"siggen", "ber"};
+        cli.App.parse(static_cast<int>(std::size(args)), args);
+        EXPECT_EQ(ResolveBer(cli).Settings.EbN0Db.size(), 6u);
+    }
+    for (const auto &args : std::vector<std::vector<const char *>>{{"siggen", "ber", "--modulation", "WGN"},
+                                                                   {"siggen", "ber", "--modulation", "MSK"},
+                                                                   {"siggen", "ber", "--snr-db", "5"},
+                                                                   {"siggen", "ber", "--bits", "1010"},
+                                                                   {"siggen", "ber", "--symbols", "100"},
+                                                                   {"siggen", "ber", "--min-errors", "0"},
+                                                                   {"siggen", "ber", "--block-symbols", "8"},
+                                                                   {"siggen", "--gain", "2", "ber"}}) {
+        CommandLine cli("test");
+        cli.App.parse(static_cast<int>(args.size()), args.data());
+        EXPECT_THROW(ResolveBer(cli), std::invalid_argument);
+    }
 }
 
 } // namespace Console

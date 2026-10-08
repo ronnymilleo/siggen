@@ -16,10 +16,13 @@ Complex baseband signal generator in C++23: a command-line tool and an optional 
     `WindowManager` owns it and hands it to every window by reference
   - `windows/` holds the dockable windows: each derives from `AppWindow`, which wraps `Draw()` in Begin/End;
     windows keep only view state (selected view, zoom requests, dialogs) and read or change the session
-- `main.cpp` → executable `siggen`
+- `main.cpp` → executable `siggen` (single generation, `batch`, `analyze`, `ber`, `--gui`)
+- `python/` → `siggen_c` shared library (`SIGGEN_BUILD_PYTHON=ON`), a plain C interface loaded by the `siggen` Python
+  package with ctypes; its `siggen_*` functions are an ABI and keep C naming
 - `tests/` → GoogleTest executables `siggen-tests` (core), `siggen-cli-tests` (+ `CLI.EndToEnd`, which runs the real
   executable) and `siggen-gui-tests` (needs a display)
-- `vendor/` is never edited: `imgui`, `implot`, `glfw`, `stb`, `spdlog`, `cli11` and `googletest` are submodules;
+- `vendor/` is never edited: `imgui`, `implot`, `glfw`, `stb`, `spdlog`, `cli11`, `json` (nlohmann/json, header-only,
+  reads SigMF metadata) and `googletest` are submodules;
   `vendor/CMakeLists.txt` builds them
 - `cmake/ProjectOptions.cmake` sets C++23, warnings and sanitizers per target through `siggen_target_options()`
 
@@ -36,7 +39,7 @@ cmake --workflow --preset dev        # configure, build (also runs clang-format 
 Naming check (`CMAKE_CXX_SCAN_FOR_MODULES` is off, so the compile database has no GCC module flags):
 
 ```
-clang-tidy -p build/dev $(git ls-files '*.cpp')
+clang-tidy -p build/dev $(git ls-files '*.cpp' ':!python/')   # python/csrc is a C ABI, exempt
 ```
 
 Verification is a clean build, all tests passing and clang-tidy without warnings. GitHub Actions

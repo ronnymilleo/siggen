@@ -5,13 +5,17 @@
 
 #include "batch.h"
 
+#include "analysis.h"
+#include "iq_export.h"
 #include "noise.h"
+#include "recording.h"
 #include <chrono>
 #include <cmath>
 #include <filesystem>
 #include <fstream>
 #include <gtest/gtest.h>
 #include <iomanip>
+#include <nlohmann/json.hpp>
 #include <sstream>
 #ifdef __linux__
 #include <csignal>
@@ -180,11 +184,11 @@ TEST(Batch, RunWritesFramesSidecarsAndManifest) {
         for (std::size_t frame = 0; frame < 2; ++frame) {
             std::ostringstream name;
             name << "frame_" << std::string(6 - std::to_string(point).size(), '0') << point << '_'
-                 << std::string(6 - std::to_string(frame).size(), '0') << frame << ".cf32";
+                 << std::string(6 - std::to_string(frame).size(), '0') << frame << ".sigmf-data";
             const auto data = dir / name.str();
             ASSERT_TRUE(std::filesystem::exists(data)) << name.str();
             EXPECT_EQ(std::filesystem::file_size(data), 64u * 8u);
-            const auto sidecar = ReadFile(dir / (name.str() + ".json"));
+            const auto sidecar = ReadFile(MetadataPath(dir / name.str()));
             EXPECT_NE(sidecar.find("\"kind\": \"batch_frame\""), std::string::npos);
             EXPECT_NE(sidecar.find("\"version\": 2"), std::string::npos);
             EXPECT_NE(sidecar.find("\"frame_start_s\": 0"), std::string::npos);
@@ -306,7 +310,7 @@ TEST(Batch, PresetNoiseSettingRetainedWithoutSnrAxis) {
     request.FrameSize = 64;
     request.OutputDir = dir;
     RunBatch(request);
-    const auto sidecar = ReadFile(dir / "frame_000000_000000.cf32.json");
+    const auto sidecar = ReadFile(dir / "frame_000000_000000.sigmf-meta");
     EXPECT_NE(sidecar.find("\"requested_snr_db\": 5"), std::string::npos);
     EXPECT_NE(sidecar.find("\"snr_db\": null"), std::string::npos);
     const auto manifest = ReadLines(dir / "manifest.jsonl");
@@ -351,9 +355,9 @@ TEST(Batch, WriteFailurePreservesCompletedFrames) {
             continue;
         }
         std::ostringstream name;
-        name << "frame_000000_" << std::setw(6) << std::setfill('0') << completed << ".cf32";
+        name << "frame_000000_" << std::setw(6) << std::setfill('0') << completed << ".sigmf-data";
         EXPECT_EQ(std::filesystem::file_size(dir / name.str()), 32u * 8u);
-        const auto sidecar = ReadFile(dir / (name.str() + ".json"));
+        const auto sidecar = ReadFile(MetadataPath(dir / name.str()));
         EXPECT_NE(sidecar.find("\"kind\": \"batch_frame\""), std::string::npos);
         ++completed;
     }
@@ -362,5 +366,60 @@ TEST(Batch, WriteFailurePreservesCompletedFrames) {
     std::filesystem::remove_all(dir);
 }
 #endif
+
+TEST(Batch, SigmfFramesCarryMetadataAndAnalyze) {
+    const auto dir = UniqueDir("iq-batch-sigmf-");
+    BatchRequest request;
+    request.Waveforms = {Modulation::QPSK};
+    request.SnrsDb = {10};
+    request.FrameSize = 2048;
+    request.OutputDir = dir;
+    ASSERT_EQ(request.Format, ExportFormat::SigMF);
+    RunBatch(request);
+    EXPECT_EQ(std::filesystem::file_size(dir / "frame_000000_000000.sigmf-data"), 2048u * 8);
+    EXPECT_FALSE(std::filesystem::exists(dir / "frame_000000_000000.sigmf-data.json"));
+    const auto meta = nlohmann::json::parse(ReadFile(dir / "frame_000000_000000.sigmf-meta"));
+    EXPECT_EQ(meta.at("global").at("core:datatype"), "cf32_le");
+    EXPECT_EQ(meta.at("global").at("siggen:metadata").at("kind"), "batch_frame");
+    EXPECT_EQ(meta.at("global").at("siggen:metadata").at("axes").at("snr_db"), 10);
+    const auto manifest = ReadLines(dir / "manifest.jsonl");
+    EXPECT_NE(manifest[0].find("\"format\":\"sigmf\""), std::string::npos);
+    EXPECT_NE(manifest[1].find("\"sidecar\":\"frame_000000_000000.sigmf-meta\""), std::string::npos);
+    const auto recording = ReadRecording(dir / "frame_000000_000000.sigmf-meta");
+    EXPECT_EQ(recording.Samples.size(), 2048u);
+    ASSERT_TRUE(recording.Config.has_value());
+    ASSERT_TRUE(recording.Frame.has_value());
+    EXPECT_EQ(recording.Frame->Size, 2048u);
+    // EVM is scored on the frame interior only, so it tracks the requested 10 dB per-sample SNR
+    const auto report = AnalyzeRecording(recording);
+    ASSERT_TRUE(report.Accuracy.has_value());
+    EXPECT_GT(report.Accuracy->SymbolCount, 100u);
+    EXPECT_LT(report.Accuracy->SymbolCount, 256u);
+    EXPECT_NEAR(report.SampleSnrDb, 10.0, 1.5);
+}
+
+TEST(Batch, CleanSigmfFrameScoresAlmostZeroEvm) {
+    const auto dir = UniqueDir("iq-batch-sigmf-clean-");
+    BatchRequest request;
+    request.Waveforms = {Modulation::QAM16};
+    request.FrameSize = 1024;
+    request.Base.Awgn.Enabled = false;
+    request.OutputDir = dir;
+    RunBatch(request);
+    const auto report = AnalyzeRecording(ReadRecording(dir / "frame_000000_000000.sigmf-meta"));
+    ASSERT_TRUE(report.Accuracy.has_value());
+    EXPECT_LT(report.Accuracy->EvmRms, 0.01);
+}
+
+TEST(Batch, WgnSigmfFrameHasNoEvm) {
+    const auto dir = UniqueDir("iq-batch-sigmf-wgn-");
+    BatchRequest request;
+    request.Waveforms = {Modulation::WGN};
+    request.FrameSize = 256;
+    request.OutputDir = dir;
+    RunBatch(request);
+    const auto report = AnalyzeRecording(ReadRecording(dir / "frame_000000_000000.sigmf-meta"));
+    EXPECT_FALSE(report.Accuracy.has_value());
+}
 
 } // namespace Core

@@ -26,27 +26,34 @@ Core modules:
 - `app-core/signal_analysis.*`: matched observations and Welch PSD with selectable window.
 - `app-core/measurements.*`: power statistics (PAPR), EVM, measured SNR and eye traces.
 - `app-core/pipeline.*`: the staged signal (bits, symbols, zero-inserted, filtered, noisy) behind the Pipeline tab.
+- `app-core/demodulator.*`, `app-core/theory.*`, `app-core/ber.*`: the ideal reference receiver and its bit
+  errors, the textbook BER curves, and the Eb/N0 sweep behind `siggen ber`, the BER tab and the Python `ber_curve`.
 - `app-core/impairments.*`: carrier offset, phase noise, IQ imbalance, DC offset and quantization.
 - `app-core/plot_export.*`: renderer that draws a `Figure` (panels, series, axes, legend) to SVG or PNG;
   `app-core/plot_figures.*` builds the figures from the plotted data.
-- `app-core/preset.*`, `app-core/iq_export.*`: validated file I/O.
-- `app-core/generation_job.*`: owned worker and immutable completed snapshot.
+- `app-core/preset.*`, `app-core/iq_export.*`: validated file I/O (CSV, SigMF).
+- `app-core/recording.*`, `app-core/analysis.*`: recording import (SigMF; JSON via the vendored nlohmann/json)
+  and the report behind `siggen analyze`.
+- `app-core/generation_job.*`: owned worker and immutable completed snapshot; `app-core/ber_job.*` runs a BER
+  sweep the same way, with cancellation and progress.
 - `app-core/plot_data.*`: plot-ready, reduced copies of a generated signal.
 - `presets/`: guided lesson presets (`NN-name.preset`, with `#` note lines).
 
-Command line and GUI:
+Command line, GUI and Python:
 
 - `app-cli/command_line.*`, `app-cli/cli_config.*`: CLI parsing and
   defaults → preset → explicit-option resolution.
 - `app-gui/generator_session.*`: the document shared by the windows: settings,
-  the owned generation job and the analysis of the last result. Analysis runs once
-  on result completion; generation is asynchronous, while export and analysis are
-  synchronous.
+  the owned generation job and BER sweep, and the analysis of the last result.
+  Analysis runs once on result completion; generation and BER sweeps are
+  asynchronous, while export and analysis are synchronous.
 - `app-gui/windows/`: dockable windows deriving from `AppWindow` that keep only
   view state: Signal Setup (`controls_window.*`), Signal Summary
-  (`summary_window.*`) and Signal Views (`views_window.*`, plots and image export).
+  (`summary_window.*`) and Signal Views (`views_window.*`, plots, BER and image export).
 - `app-gui/window_manager.*`: owns the session and the windows, and builds the
   default dock layout (also from View > Reset Layout).
+- `python/`: C interface (`csrc/siggen_c.*`), the `siggen` Python package, its tests and the notebooks. The
+  `siggen_*` C functions are an ABI loaded with ctypes, so they keep C naming.
 
 CLI tests exercise argument validation, configuration precedence, family
 switching, incompatible-option rejection, batch resolution, and the real

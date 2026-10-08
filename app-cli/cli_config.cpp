@@ -7,6 +7,7 @@
 
 #include "preset.h"
 #include <charconv>
+#include <cmath>
 #include <cstdlib>
 #include <stdexcept>
 
@@ -321,16 +322,16 @@ Core::GenerationConfig ResolveConfig(const CommandLine &cli) {
 
 /**
  * @brief   Maps a --format value to an export format.
- * @param[in] format  "csv" or "cf32".
+ * @param[in] format  "csv" or "sigmf".
  * @return  The export format.
  * @note    Throws std::invalid_argument on any other value.
  */
 Core::ExportFormat ResolveFormat(const std::string &format) {
-    if (format == "cf32") {
-        return Core::ExportFormat::BinaryFloat32;
-    }
     if (format == "csv") {
         return Core::ExportFormat::CSV;
+    }
+    if (format == "sigmf") {
+        return Core::ExportFormat::SigMF;
     }
     throw std::invalid_argument("Unknown --format: " + format);
 }
@@ -338,13 +339,13 @@ Core::ExportFormat ResolveFormat(const std::string &format) {
 /**
  * @brief   Chooses the sample destination of a single generation.
  * @param[in] cli  Parsed command line.
- * @return  The explicit --output, else signal.csv for CSV and signal.iq for binary.
+ * @return  The explicit --output, else signal.csv or signal.sigmf-data by format.
  */
 std::string ResolveOutput(const CommandLine &cli) {
     if (!cli.Output.empty()) {
         return cli.Output;
     }
-    return ResolveFormat(cli.Format) == Core::ExportFormat::CSV ? "signal.csv" : "signal.iq";
+    return ResolveFormat(cli.Format) == Core::ExportFormat::CSV ? "signal.csv" : "signal.sigmf-data";
 }
 
 /**
@@ -380,6 +381,73 @@ Core::BatchRequest ResolveBatch(const CommandLine &cli) {
     request.Format = ResolveFormat(cli.BatchFormat);
     request.OutputDir = cli.OutputDir;
     return request;
+}
+
+/**
+ * @brief   Resolves a BER sweep: the preset and signal options given after "ber", plus the Eb/N0 points and
+ *          stopping rules.
+ * @param[in] cli  Parsed command line with the ber subcommand selected.
+ * @return  The request. The sweep sets the noise and draws random data itself, so AWGN is off, the data source is
+ *          random and explicit bits are cleared. Without --eb-n0-db the points are 0 to 10 dB in steps of 2.
+ * @note    Throws std::invalid_argument on root options other than --log-level, on --symbols, --bits,
+ *          --data-source or --snr-db, on waveforms without a reference receiver and on out-of-range settings.
+ */
+BerRequest ResolveBer(const CommandLine &cli) {
+    for (const auto *option : cli.App.get_options()) {
+        if (option->count() && option->get_name() != "--log-level") {
+            throw std::invalid_argument("With ber, put signal options after 'ber'; root option: " + option->get_name());
+        }
+    }
+    Reject(Supplied(*cli.Ber, "--symbols") || Supplied(*cli.Ber, "--bits") || Supplied(*cli.Ber, "--data-source") ||
+               Supplied(*cli.Ber, "--snr-db"),
+           "ber rejects --symbols/--bits/--data-source/--snr-db; use --block-symbols and --eb-n0-db");
+    BerRequest request;
+    request.Config = ResolveBase(*cli.Ber, cli, false);
+    request.Config.Awgn.Enabled = false; // The sweep sets the noise itself
+    request.Config.DataSource = Core::DataSource::Random;
+    request.Config.Bits.clear();
+    if (!Core::HasReferenceDemodulator(request.Config.Modulation)) {
+        throw std::invalid_argument(std::string("ber needs a linear waveform; ") +
+                                    Core::ModulationName(request.Config.Modulation) + " has no reference receiver");
+    }
+    request.Settings.EbN0Db = cli.BerEbN0Db;
+    if (request.Settings.EbN0Db.empty()) {
+        for (int db = 0; db <= 10; db += 2) {
+            request.Settings.EbN0Db.push_back(db);
+        }
+    }
+    for (double db : request.Settings.EbN0Db) {
+        Reject(!std::isfinite(db) || std::abs(db) > 60, "--eb-n0-db values must be finite and within 60 dB");
+    }
+    Reject(cli.BerMinErrors == 0, "--min-errors must be positive");
+    Reject(cli.BerMaxBits == 0 || cli.BerMaxBits > 1000000000ULL, "--max-bits must be 1 to 1000000000");
+    Reject(cli.BerBlockSymbols < 64 || cli.BerBlockSymbols > 65536, "--block-symbols must be 64 to 65536");
+    request.Settings.MinErrors = cli.BerMinErrors;
+    request.Settings.MaxBits = cli.BerMaxBits;
+    request.Settings.BlockSymbols = cli.BerBlockSymbols;
+    return request;
+}
+
+/**
+ * @brief   Maps a --window value to a Welch window.
+ * @param[in] name  "hann", "hamming", "blackman" or "rectangular".
+ * @return  The window.
+ * @note    Throws std::invalid_argument on any other value.
+ */
+Core::Window ResolveWindow(const std::string &name) {
+    if (name == "hann") {
+        return Core::Window::Hann;
+    }
+    if (name == "hamming") {
+        return Core::Window::Hamming;
+    }
+    if (name == "blackman") {
+        return Core::Window::Blackman;
+    }
+    if (name == "rectangular") {
+        return Core::Window::Rectangular;
+    }
+    throw std::invalid_argument("Unknown --window: " + name);
 }
 
 } // namespace Console

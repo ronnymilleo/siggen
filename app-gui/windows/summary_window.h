@@ -13,7 +13,8 @@ namespace GUI {
 
 /**
  * @class   SummaryWindow
- * @brief   Shows the parameters, noise and impairment record and measurements of the last generated signal.
+ * @brief   Shows the parameters, noise and impairment record, measurements and bit errors of the last generated
+ *          signal.
  * @details Warns when the settings changed since that signal was generated. Holds no state of its own.
  */
 class SummaryWindow : public AppWindow {
@@ -26,6 +27,7 @@ private:
     void DrawNoiseSummary(const Core::GeneratedSignal &result);
     void DrawSymbolSummary(const Core::GeneratedSignal &result);
     void DrawMeasurements(const Core::GeneratedSignal &result);
+    void DrawBitErrors(const Core::GeneratedSignal &result);
 
     const GeneratorSession &m_Session;
 };

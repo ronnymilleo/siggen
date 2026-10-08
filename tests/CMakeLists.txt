@@ -15,6 +15,7 @@ include(GoogleTest)
 
 add_executable(siggen-tests
             batch_test.cpp
+            ber_test.cpp
             cross_offset_modulation_test.cpp
             export_test.cpp
             generation_job_test.cpp
@@ -27,6 +28,7 @@ add_executable(siggen-tests
             plot_export_test.cpp
             preset_test.cpp
             signal_analysis_test.cpp
+            sigmf_test.cpp
             signal_processing_test.cpp
             waveform_test.cpp
 )

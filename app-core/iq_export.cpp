@@ -1,11 +1,12 @@
 /**
  * @file    iq_export.cpp
- * @brief   Writes generated I/Q samples as CSV or little-endian float32 with a JSON metadata sidecar.
+ * @brief   Writes generated I/Q samples as CSV with a JSON sidecar, or as a SigMF recording.
  */
 
 #include "iq_export.h"
 
 #include "impairments.h"
+#include "preset.h"
 #include "signal_processing.h"
 #include <bit>
 #include <cmath>
@@ -20,6 +21,10 @@
 namespace Core {
 
 namespace {
+
+bool IsSupported(const ExportFormat format) {
+    return format == ExportFormat::CSV || format == ExportFormat::SigMF;
+}
 
 void ValidateLinear(const GeneratedSignal &signal) {
     const auto &config = signal.Config;
@@ -60,7 +65,7 @@ void ValidateNoise(const GeneratedSignal &signal) {
  */
 void ValidateResult(const GeneratedSignal &signal, const ExportFormat format) {
     Validate(signal.Config);
-    if (format != ExportFormat::CSV && format != ExportFormat::BinaryFloat32) {
+    if (!IsSupported(format)) {
         throw std::invalid_argument("Unsupported export format");
     }
     if (signal.Family != WaveformFamily(signal.Config.Modulation)) {
@@ -146,46 +151,8 @@ void WriteLittleEndianFloat(std::ostream &out, const float value) {
     }
 }
 
-} // namespace
-
-/**
- * @brief   Returns the path of the JSON metadata sidecar of an exported file.
- * @param[in] destination   Path of the sample file.
- * @return  The same path with ".json" appended.
- */
-std::filesystem::path MetadataPath(const std::filesystem::path &destination) {
-    return destination.string() + ".json";
-}
-
-/**
- * @brief   Quotes text as a JSON string; minimal escaping shared by export and batch sidecars and manifests.
- * @param[in] text  Raw bytes.
- * @return  The quoted string; quotes and backslashes are escaped, control and non-ASCII bytes become \u00XX.
- */
-std::string JsonQuote(const std::string_view text) {
-    std::ostringstream out;
-    out << '"';
-    for (const unsigned char character : text) {
-        if (character == '"' || character == '\\') {
-            out << '\\' << character;
-        } else if (character < 32 || character >= 127) {
-            out << "\\u00" << std::hex << std::setw(2) << std::setfill('0') << static_cast<unsigned>(character);
-        } else {
-            out << character;
-        }
-    }
-    out << '"';
-    return out.str();
-}
-
-/**
- * @brief   Builds the JSON metadata sidecar (version 2) of an export.
- * @param[in] signal    Generated signal; must be consistent with its configuration.
- * @param[in] format    Sample file format named in the metadata.
- * @return  The JSON document, numbers written with max_digits10 in the classic locale.
- * @note    Throws std::invalid_argument when the signal or the format cannot be exported.
- */
-std::string ExportMetadata(const GeneratedSignal &signal, const ExportFormat format) {
+// siggen's own metadata document (version 2): the CSV sidecar, and the `siggen:metadata` of a SigMF recording
+std::string SiggenMetadata(const GeneratedSignal &signal, const ExportFormat format) {
     ValidateResult(signal, format);
     const auto &config = signal.Config;
     std::ostringstream out;
@@ -216,18 +183,88 @@ std::string ExportMetadata(const GeneratedSignal &signal, const ExportFormat for
     return out.str();
 }
 
+std::string Trimmed(std::string text) {
+    while (!text.empty() && (text.back() == '\n' || text.back() == ' ')) {
+        text.pop_back();
+    }
+    return text;
+}
+
+} // namespace
+
+/**
+ * @brief   Returns the path of the metadata file of an exported sample file.
+ * @param[in] destination   Path of the sample file.
+ * @return  The `.sigmf-meta` sibling of a `.sigmf-data` file; otherwise the same path with ".json" appended.
+ */
+std::filesystem::path MetadataPath(const std::filesystem::path &destination) {
+    if (destination.extension() == ".sigmf-data") {
+        return std::filesystem::path(destination).replace_extension(".sigmf-meta");
+    }
+    return destination.string() + ".json";
+}
+
+/**
+ * @brief   Quotes text as a JSON string; minimal escaping shared by export and batch sidecars and manifests.
+ * @param[in] text  Raw bytes.
+ * @return  The quoted string; quotes and backslashes are escaped, control and non-ASCII bytes become \u00XX.
+ */
+std::string JsonQuote(const std::string_view text) {
+    std::ostringstream out;
+    out << '"';
+    for (const unsigned char character : text) {
+        if (character == '"' || character == '\\') {
+            out << '\\' << character;
+        } else if (character < 32 || character >= 127) {
+            out << "\\u00" << std::hex << std::setw(2) << std::setfill('0') << static_cast<unsigned>(character);
+        } else {
+            out << character;
+        }
+    }
+    out << '"';
+    return out.str();
+}
+
+/**
+ * @brief   Builds the metadata document of an export.
+ * @param[in] signal    Generated signal; must be consistent with its configuration.
+ * @param[in] format    Export format.
+ * @return  For CSV, siggen's JSON sidecar (version 2). For SigMF, a SigMF 1.0.0 `.sigmf-meta` document whose
+ *          `core:` fields describe the recording, with the generator preset under `siggen:preset` and siggen's
+ *          sidecar under `siggen:metadata`. Numbers are written with max_digits10 in the classic locale.
+ * @note    Throws std::invalid_argument when the signal or the format cannot be exported.
+ */
+std::string ExportMetadata(const GeneratedSignal &signal, const ExportFormat format) {
+    if (format != ExportFormat::SigMF) {
+        return SiggenMetadata(signal, format);
+    }
+    const auto detail = SiggenMetadata(signal, ExportFormat::SigMF);
+    std::ostringstream out;
+    out.imbue(std::locale::classic());
+    out << std::setprecision(std::numeric_limits<double>::max_digits10)
+        << "{\n  \"global\": {\n    \"core:datatype\": \"cf32_le\",\n    \"core:sample_rate\": " << signal.SampleRateHz
+        << ",\n    \"core:version\": \"1.0.0\",\n    \"core:description\": "
+        << JsonQuote(std::string("Synthetic ") + ModulationName(signal.Config.Modulation) +
+                     " baseband signal from siggen")
+        << ",\n    \"core:recorder\": \"siggen\",\n    \"siggen:preset\": " << JsonQuote(SerializePreset(signal.Config))
+        << ",\n    \"siggen:metadata\": " << Trimmed(detail)
+        << "\n  },\n  \"captures\": [\n    {\"core:sample_start\": 0, \"core:frequency\": 0}\n  ],\n  "
+           "\"annotations\": []\n}\n";
+    return out.str();
+}
+
 /**
  * @brief   Writes raw samples in an export format.
  * @param[out] stream           Destination stream; switched to the classic locale and max_digits10 precision.
  * @param[in]  samples          Samples to write; all must be finite.
  * @param[in]  sample_rate_hz   Sample rate for the CSV time column; must be positive and finite.
- * @param[in]  format           CSV with a "time_s,i,q" header, or interleaved float32 little-endian.
+ * @param[in]  format           CSV with a "time_s,i,q" header, or SigMF: interleaved float32 little-endian.
  * @note    Throws std::invalid_argument for a bad format, sample rate or a non-finite sample (samples before it are
  *          already written), and std::runtime_error when writing or flushing fails.
  */
 void WriteSamples(std::ostream &stream, const std::span<const std::complex<float>> samples, const double sample_rate_hz,
                   const ExportFormat format) {
-    if (format != ExportFormat::CSV && format != ExportFormat::BinaryFloat32) {
+    if (!IsSupported(format)) {
         throw std::invalid_argument("Unsupported export format");
     }
     if (!std::isfinite(sample_rate_hz) || sample_rate_hz <= 0) {
@@ -268,7 +305,7 @@ void WriteSamples(std::ostream &stream, const GeneratedSignal &signal, const Exp
 }
 
 /**
- * @brief   Writes a sample file and its JSON metadata sidecar (MetadataPath()).
+ * @brief   Writes a sample file and its metadata file (MetadataPath()).
  * @param[in] destination   Sample file path; must not be empty.
  * @param[in] signal        Generated signal.
  * @param[in] format        Sample file format.

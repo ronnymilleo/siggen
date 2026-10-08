@@ -6,6 +6,9 @@
 #ifndef SIGGEN_GENERATOR_SESSION_H
 #define SIGGEN_GENERATOR_SESSION_H
 
+#include "ber.h"
+#include "ber_job.h"
+#include "demodulator.h"
 #include "generation_job.h"
 #include "generator.h"
 #include "measurements.h"
@@ -23,8 +26,9 @@ namespace GUI {
 /**
  * @class   GeneratorSession
  * @brief   The settings being edited and the last generated signal, shared by the windows that edit or show them.
- * @details Generation runs in the background; Update() picks up a finished generation once per frame and computes
- *          everything the windows show for it (plot data, measurements, eye diagram, pipeline stages, spectrum), so
+ * @details Generation and BER sweeps run in the background; Update() picks up a finished sweep or generation once
+ *          per frame and computes everything the windows show for a new result (plot data, measurements, bit
+ *          errors, eye diagram, pipeline stages, spectrum), so
  *          the windows only read. The result may be older than the settings; compare its Config with GetConfig().
  *          Windows keep their own view state (zoom, selected view, dialogs) and reset it when GetResultVersion() or
  *          GetSpectrumVersion() changes. Failures of any operation are kept as one user-facing error message.
@@ -55,6 +59,8 @@ public:
     const Core::PlotData &GetPlots() const;
     const Core::PowerStatistics &GetPowerStatistics() const;
     const std::optional<Core::SymbolAccuracy> &GetSymbolAccuracy() const;
+    const std::optional<Core::BitErrors> &GetBitErrors() const;
+    std::optional<double> GetMeasuredEbN0Db() const;
     const Core::EyeDiagram &GetEyeDiagram() const;
     const std::optional<Core::PipelineStages> &GetPipeline() const;
 
@@ -64,6 +70,12 @@ public:
     Core::Window GetSpectrumWindow() const;
     void SetSpectrumWindow(Core::Window window);
     std::size_t GetSpectrumVersion() const;
+
+    // BER sweep
+    void StartBerSweep(Core::BerSweepSettings settings);
+    void CancelBerSweep();
+    const Core::BerJob &GetBerSweep() const;
+    std::size_t GetBerVersion() const;
 
 private:
     void RefreshAnalysis(const Core::GeneratedSignal &result);
@@ -82,6 +94,7 @@ private:
     Core::PlotData m_Plots;
     Core::PowerStatistics m_Power;
     std::optional<Core::SymbolAccuracy> m_Accuracy;
+    std::optional<Core::BitErrors> m_Errors; // Reference demodulator against the transmitted bits
     Core::EyeDiagram m_Eye;
     std::optional<Core::PipelineStages> m_Pipeline; // Linear waveforms only
 
@@ -90,6 +103,10 @@ private:
     Core::Spectrum m_Spectrum;
     std::vector<double> m_SpectrumDb;
     std::size_t m_SpectrumVersion = 0;
+
+    // BER sweep
+    Core::BerJob m_BerJob;
+    std::size_t m_BerVersion = 0;
 };
 
 } // namespace GUI

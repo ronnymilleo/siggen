@@ -8,12 +8,15 @@
 #include "help_topics.h"
 #include "implot.h"
 #include "plot_figures.h"
+#include "theory.h"
 #include "widgets.h"
 #include <algorithm>
+#include <array>
 #include <cmath>
 #include <complex>
 #include <cstdio>
 #include <filesystem>
+#include <optional>
 #include <spdlog/spdlog.h>
 #include <vector>
 
@@ -54,6 +57,9 @@ void ViewsWindow::Draw() {
         if (symbol_views && m_Session.GetPipeline()) {
             DrawPipelineTab(*result);
         }
+        if (symbol_views && Core::HasReferenceDemodulator(result->Config.Modulation)) {
+            DrawBerTab(*result);
+        }
         DrawSpectrumTab();
         ImPlot::PopStyleVar();
         ImGui::EndTabBar();
@@ -63,7 +69,8 @@ void ViewsWindow::Draw() {
 
 /**
  * @brief   Resets the view state when the session analysed a new result or recomputed the spectrum.
- * @note    A new result refits the plots and moves the pipeline view back to the first symbol.
+ * @note    A new result refits the plots and moves the pipeline view back to the first symbol; a finished BER sweep
+ *          refits the BER plot.
  */
 void ViewsWindow::FollowSession() {
     if (m_SeenResultVersion != m_Session.GetResultVersion()) {
@@ -75,6 +82,10 @@ void ViewsWindow::FollowSession() {
     if (m_SeenSpectrumVersion != m_Session.GetSpectrumVersion()) {
         m_SeenSpectrumVersion = m_Session.GetSpectrumVersion();
         m_SpectrumFit = true;
+    }
+    if (m_SeenBerVersion != m_Session.GetBerVersion()) {
+        m_SeenBerVersion = m_Session.GetBerVersion();
+        m_BerFit = true;
     }
 }
 
@@ -350,6 +361,146 @@ void ViewsWindow::DrawPipelineStages(const Core::GeneratedSignal &result) {
         ImPlot::EndSubplots();
     }
     m_PipelineFit = false;
+}
+
+/**
+ * @brief   Draws the BER tab: sweep settings, progress, and the measured curve against the textbook one.
+ * @param[in] result  The displayed signal; its settings are swept and its own BER is marked on the curve.
+ */
+void ViewsWindow::DrawBerTab(const Core::GeneratedSignal &result) {
+    if (!ImGui::BeginTabItem("BER")) {
+        return;
+    }
+    DrawBerControls();
+    DrawBerPlot(result);
+    ImGui::EndTabItem();
+}
+
+/**
+ * @brief   Draws the Eb/N0 range and stopping rules, Measure curve and, while measuring, Cancel and the progress.
+ * @note    The settings are clamped to sane ranges and locked while a sweep runs; at most 200 points are swept.
+ */
+void ViewsWindow::DrawBerControls() {
+    const auto &sweep = m_Session.GetBerSweep();
+    const bool busy = sweep.Busy();
+    ImGui::TextUnformatted("Bit error rate against Eb/N0");
+    HelpButton(BerHelp);
+    ImGui::TextWrapped("Measured with the ideal reference receiver on the settings of the displayed signal (waveform, "
+                       "pulse, rate and impairments); the sweep sets the noise itself.");
+    ImGui::BeginDisabled(busy);
+    ImGui::SetNextItemWidth(130);
+    ImGui::InputDouble("From (dB)", &m_BerFrom, 1, 5, "%.4g");
+    ImGui::SameLine(0, 28);
+    ImGui::SetNextItemWidth(130);
+    ImGui::InputDouble("To (dB)", &m_BerTo, 1, 5, "%.4g");
+    ImGui::SetNextItemWidth(130);
+    ImGui::InputDouble("Step (dB)", &m_BerStep, .5, 1, "%.4g");
+    ImGui::SameLine(0, 28);
+    ImGui::SetNextItemWidth(130);
+    ImGui::InputInt("Errors per point", &m_BerMinErrors, 50, 500);
+    Hint("A point stops after this many bit errors: the more, the smoother the curve (relative uncertainty is about 1 "
+         "/ sqrt(errors)).");
+    ImGui::SetNextItemWidth(130);
+    ImGui::InputInt("Max kbit per point", &m_BerMaxKbits, 100, 1000);
+    Hint("A point also stops after this many thousand bits, so low-BER points finish. A point without errors is drawn "
+         "as an upper bound.");
+    m_BerStep = std::clamp(m_BerStep, 0.05, 20.0);
+    m_BerFrom = std::clamp(m_BerFrom, -30.0, 40.0);
+    m_BerTo = std::clamp(m_BerTo, -30.0, 40.0);
+    m_BerMinErrors = std::clamp(m_BerMinErrors, 10, 10000);
+    m_BerMaxKbits = std::clamp(m_BerMaxKbits, 10, 100000);
+    if (ImGui::Button("Measure curve")) {
+        Core::BerSweepSettings settings;
+        for (double eb_n0_db = std::min(m_BerFrom, m_BerTo);
+             eb_n0_db <= std::max(m_BerFrom, m_BerTo) + 1e-9 && settings.EbN0Db.size() < 200; eb_n0_db += m_BerStep) {
+            settings.EbN0Db.push_back(eb_n0_db);
+        }
+        settings.MinErrors = static_cast<std::size_t>(m_BerMinErrors);
+        settings.MaxBits = static_cast<std::size_t>(m_BerMaxKbits) * 1000;
+        m_Session.StartBerSweep(std::move(settings));
+    }
+    ImGui::EndDisabled();
+    if (busy) {
+        ImGui::SameLine();
+        if (ImGui::Button("Cancel")) {
+            m_Session.CancelBerSweep();
+        }
+        ImGui::SameLine();
+        ImGui::Text("Measuring: %d / %d points", sweep.Done(), sweep.Total());
+    }
+}
+
+/**
+ * @brief   Draws the last BER curve on a logarithmic axis, with notes on how to read it and its image export.
+ * @param[in] result  The displayed signal, marked on the curve when the curve was measured for its waveform.
+ */
+void ViewsWindow::DrawBerPlot(const Core::GeneratedSignal &result) {
+    const auto &sweep = m_Session.GetBerSweep();
+    const bool busy = sweep.Busy();
+    const auto &points = sweep.Points();
+    if (points.empty()) {
+        ImGui::TextDisabled(busy ? "Waiting for the first point..." : "No curve yet. Select Measure curve.");
+        return;
+    }
+    const auto &swept = sweep.Config();
+    const auto plot = Core::MakeBerPlot(points, swept.Modulation);
+    const auto &errors = m_Session.GetBitErrors();
+    const auto eb_n0_db = m_Session.GetMeasuredEbN0Db();
+    std::optional<std::array<double, 2>> current;
+    if (errors && eb_n0_db && errors->BitErrorCount > 0 && result.Config.Modulation == swept.Modulation) {
+        current = std::array<double, 2>{*eb_n0_db, errors->Ber()};
+    }
+    if (!busy) {
+        ImGui::SameLine();
+        ExportImageButton("ber", [&] { return Core::BerFigure(points, swept.Modulation, current); });
+    }
+    if (swept != result.Config) {
+        ImGui::TextColored(WarningColor,
+                           "This curve was measured for %s with other settings than the displayed signal.",
+                           Core::ModulationName(swept.Modulation));
+    }
+    if (Core::IsDifferential(swept.Modulation)) {
+        ImGui::TextWrapped("Differential scheme: each decision uses two observations, so it needs about 1 dB more "
+                           "Eb/N0 than its coherent twin (more for DBPSK at low Eb/N0), but it survives a carrier "
+                           "offset.");
+    } else if (swept.Impairments.CfoHz != 0) {
+        ImGui::TextWrapped("A carrier offset is set: this receiver has no carrier recovery, so a coherent scheme fails "
+                           "at every Eb/N0. Compare a differential scheme.");
+    }
+    double first_db = points.front().EbN0Db, last_db = points.front().EbN0Db;
+    for (const auto &point : points) {
+        first_db = std::min(first_db, point.EbN0Db);
+        last_db = std::max(last_db, point.EbN0Db);
+    }
+    const double y_low = std::pow(10.0, std::floor(std::log10(std::max(Core::LowestResolvableBer(points), 1e-12))));
+    if (ImPlot::BeginPlot("BER", ImVec2(-1, std::max(ImGui::GetContentRegionAvail().y, 340.f)))) {
+        ImPlot::SetupAxes("Eb/N0 (dB)", "Bit error rate");
+        ImPlot::SetupLegend(ImPlotLocation_SouthWest);
+        ImPlot::SetupAxisScale(ImAxis_Y1, ImPlotScale_Log10);
+        ImPlot::SetupAxisLimits(ImAxis_X1, first_db - .5, last_db + .5, m_BerFit ? ImPlotCond_Always : ImPlotCond_Once);
+        ImPlot::SetupAxisLimits(ImAxis_Y1, y_low, 1.0, m_BerFit ? ImPlotCond_Always : ImPlotCond_Once);
+        m_BerFit = false;
+        if (!plot.TheoryX.empty()) {
+            ImPlot::SetNextLineStyle(QuadratureColor, 2.f);
+            ImPlot::PlotLine("Theory (ideal receiver)", plot.TheoryX.data(), plot.TheoryY.data(),
+                             static_cast<int>(plot.TheoryX.size()));
+        }
+        if (!plot.X.empty()) {
+            ImPlot::SetNextLineStyle(ImVec4(.2f, .6f, 1.f, .6f), 1.5f);
+            ImPlot::SetNextMarkerStyle(ImPlotMarker_Circle, 4, InPhaseColor);
+            ImPlot::PlotLine("Measured", plot.X.data(), plot.Y.data(), static_cast<int>(plot.X.size()));
+        }
+        if (!plot.BoundX.empty()) {
+            ImPlot::SetNextMarkerStyle(ImPlotMarker_Down, 5, ImVec4(.55f, .6f, .65f, 1.f));
+            ImPlot::PlotScatter("No errors seen (BER below this)", plot.BoundX.data(), plot.BoundY.data(),
+                                static_cast<int>(plot.BoundX.size()));
+        }
+        if (current) {
+            ImPlot::SetNextMarkerStyle(ImPlotMarker_Diamond, 8, ImVec4(.43f, .86f, .55f, 1.f));
+            ImPlot::PlotScatter("Displayed signal", &(*current)[0], &(*current)[1], 1);
+        }
+        ImPlot::EndPlot();
+    }
 }
 
 void ViewsWindow::DrawSpectrumTab() {

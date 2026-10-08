@@ -25,6 +25,7 @@ option(SIGGEN_BUILD_APP "Build the signal generator executable" ON)
 option(SIGGEN_BUILD_GUI "Include the optional ImGui interface" ON)
 option(SIGGEN_BUILD_TESTS "Build the tests" OFF)
 option(SIGGEN_ENABLE_WARNINGS "Enable project compiler warnings" ON)
+option(SIGGEN_BUILD_PYTHON "Build the shared library used by the Python package" OFF)
 
 set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 # Presets share one source tree, so outputs stay inside each build directory
@@ -77,6 +78,7 @@ function(siggen_require_submodule name file)
 endfunction()
 
 siggen_require_submodule(stb stb_image_write.h)
+siggen_require_submodule(json include/nlohmann/json.hpp)
 if(SIGGEN_BUILD_APP OR SIGGEN_BUILD_GUI OR SIGGEN_BUILD_TESTS)
     find_package(Threads REQUIRED)
 endif()
@@ -127,6 +129,15 @@ if(SIGGEN_BUILD_TESTS)
 endif()
 
 # =============================================================================
+# Python package
+# =============================================================================
+
+# Shared C interface loaded by the `siggen` Python package with ctypes
+if(SIGGEN_BUILD_PYTHON)
+    add_subdirectory(python)
+endif()
+
+# =============================================================================
 # Post-Build Commands
 # =============================================================================
 
@@ -162,6 +173,7 @@ message(STATUS "Build type:   ${CMAKE_BUILD_TYPE}")
 message(STATUS "Compiler:     ${CMAKE_CXX_COMPILER_ID} ${CMAKE_CXX_COMPILER_VERSION}")
 message(STATUS "App / GUI:    ${SIGGEN_BUILD_APP} / ${SIGGEN_BUILD_GUI}")
 message(STATUS "Tests:        ${SIGGEN_BUILD_TESTS}")
+message(STATUS "Python:       ${SIGGEN_BUILD_PYTHON}")
 message(STATUS "Sanitizer:    ${SIGGEN_SANITIZER}")
 message(STATUS "=================================================")
 message(STATUS "")
