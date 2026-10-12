@@ -45,6 +45,9 @@ private:
     float m_WindowScale = 1.0f;
     bool m_IsOpen = true;
 
+    // imgui.ini in the user's data folder; ImGui keeps only the pointer, so the path lives here
+    std::string m_SettingsPath;
+
     // Declared last so it is destroyed before the window and the ImGui context it draws with
     WindowManager m_WindowManager;
 };

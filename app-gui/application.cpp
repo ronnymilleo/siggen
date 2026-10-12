@@ -152,6 +152,13 @@ void Application::InitImGui() {
     ImPlot::CreateContext();
 
     ImGuiIO &io = ImGui::GetIO();
+    // The layout and the theme go to the user's data folder (~/.local/share/siggen on Linux, or under
+    // XDG_DATA_HOME), so they do not depend on where the program starts or need a writable install folder
+    if (char *pref_path = SDL_GetPrefPath(nullptr, "siggen")) {
+        m_SettingsPath = std::string(pref_path) + "imgui.ini";
+        SDL_free(pref_path);
+        io.IniFilename = m_SettingsPath.c_str();
+    }
     io.ConfigFlags |= ImGuiConfigFlags_NavEnableKeyboard;
     io.ConfigFlags |= ImGuiConfigFlags_NavEnableGamepad;
     // Windows float and dock inside the main window only
