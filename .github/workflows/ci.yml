@@ -13,13 +13,13 @@ concurrency:
   cancel-in-progress: true
 
 # The Linux jobs run in an archlinux container, the distribution the project is developed on: the pinned
-# CMake version is newer than Ubuntu's. GLFW comes from its vendor submodule; its build needs the X11
-# development headers, which the Arch glfw package lists as makedepends. The tests never open a window:
-# the UI smoke tests run on headless ImGui frames
+# CMake version is newer than Ubuntu's. SDL3 comes from its vendor submodule; its build dependencies are those
+# of the Arch sdl3 package (makedepends, without the audio ones), since SDL fails to configure when an X11
+# extension it enables is missing. The tests never open a window: the UI smoke tests run on headless ImGui frames
 env:
   PACKAGES: >-
     git cmake ninja gcc clang python pkgconf ccache python-numpy
-    libx11 libxrandr libxinerama libxcursor libxi mesa libglvnd
+    libxcursor libxi libxfixes libxinerama libxrandr libxss libxtst libxkbcommon wayland wayland-protocols libdecor mesa
   # Compiled objects are kept between runs, so a push only recompiles what changed
   CCACHE_MAXSIZE: 500M
   COMPILER_LAUNCHER: -DCMAKE_C_COMPILER_LAUNCHER=ccache -DCMAKE_CXX_COMPILER_LAUNCHER=ccache
@@ -113,7 +113,7 @@ jobs:
 
   windows:
     # windows-latest is the Windows Server 2025 image with Visual Studio 2026, and comes with CMake and
-    # Ninja; GLFW comes from its vendor submodule and needs nothing else
+    # Ninja; SDL3 comes from its vendor submodule and needs nothing else
     runs-on: windows-latest
     steps:
       - name: Check out the repository
@@ -135,7 +135,7 @@ jobs:
         run: ctest --test-dir build --output-on-failure
 
   macos:
-    # macos-latest is an Apple silicon image with the current Xcode; GLFW comes from its vendor submodule
+    # macos-latest is an Apple silicon image with the current Xcode; SDL3 comes from its vendor submodule
     runs-on: macos-latest
     steps:
       - name: Install build dependencies

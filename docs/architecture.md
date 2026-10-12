@@ -11,7 +11,7 @@ The code is split into three static libraries and two executables:
 - `app-cli/` → `siggen-cli-lib`, namespace `Console`: CLI11 parsing and
   configuration resolution, behind the `siggen-cli` executable
   (`app-cli/main.cpp`).
-- `app-gui/` → `siggen-gui-lib`, namespace `GUI`: the GLFW/OpenGL window, the ImGui
+- `app-gui/` → `siggen-gui-lib`, namespace `GUI`: the SDL3 window and GPU device, the ImGui
   layer, the `Application` main loop and the generator windows. Built only with
   `SIGGEN_BUILD_GUI=ON`.
 - `main.cpp` → `siggen`: opens the desktop application, which takes no arguments.
@@ -45,7 +45,7 @@ Command line, GUI and Python:
 
 - `app-cli/command_line.*`, `app-cli/cli_config.*`: CLI parsing and
   defaults → preset → explicit-option resolution, used by `app-cli/main.cpp`.
-- `app-gui/application.*`: owns the GLFW/OpenGL window, the ImGui layer and the
+- `app-gui/application.*`: owns the SDL3 window, the SDL GPU device, the ImGui layer and the
   frame loop (`Init`, `Run`, `Shutdown`); `main.cpp` only drives it.
 - `app-gui/generator_session.*`: the document shared by the windows: settings,
   the owned generation job and BER sweep, and the analysis of the last result.
@@ -72,7 +72,7 @@ statistical mean/variance/correlation, SNR tolerances, zero-power rejection,
 exact frame lengths, guard/crop timing, derived-seed pairing, manifest
 ordering, and worker lifetime.
 GUI tests exercise actual ImGui frames, window sizes, all views and failure states
-without requiring a display server by default. Optional real OpenGL captures:
+without requiring a display server by default. Optional real SDL GPU captures:
 
 ```sh
 SIGGEN_CAPTURE_DIR=build/ui-captures \

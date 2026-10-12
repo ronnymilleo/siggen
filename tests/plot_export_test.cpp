@@ -221,10 +221,13 @@ TEST(PlotExport, ExportWritesFilesAndProtectsExistingOnes) {
     ExportFigure(png, figure, ImageFormat::PNG, {400, 300});
     ExportFigure(svg, figure, ImageFormat::SVG, {400, 300});
     EXPECT_GT(std::filesystem::file_size(png), 500u);
-    std::ifstream in(svg);
-    std::stringstream text;
-    text << in.rdbuf();
-    EXPECT_NE(text.str().find("<svg"), std::string::npos);
+    {
+        // Scoped so the file is closed before the removes below: Windows cannot delete an open file
+        std::ifstream in(svg);
+        std::stringstream text;
+        text << in.rdbuf();
+        EXPECT_NE(text.str().find("<svg"), std::string::npos);
+    }
     EXPECT_THROW(ExportFigure(png, figure, ImageFormat::PNG, {400, 300}), std::runtime_error);
     EXPECT_NO_THROW(ExportFigure(png, figure, ImageFormat::PNG, {400, 300}, true));
     EXPECT_THROW(ExportFigure("", figure, ImageFormat::SVG), std::invalid_argument);

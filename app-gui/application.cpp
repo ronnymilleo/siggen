@@ -1,45 +1,50 @@
 /**
  * @file    application.cpp
- * @brief   Top-level GUI application: owns the window, the ImGui layer, the generator session and the main loop.
+ * @brief   Top-level GUI application: owns the window, the GPU device, the generator session and the main loop.
  */
 
 #include "application.h"
 
+#include "imgui_impl_sdl3.h"
+#include "imgui_impl_sdlgpu3.h"
 #include "imgui_layer.h"
+#include <SDL3/SDL.h>
 #include <spdlog/spdlog.h>
-#include <sstream>
 #include <stdexcept>
 #define STB_IMAGE_IMPLEMENTATION
 #include "stb_image.h"
 
 namespace GUI {
 
-/**
- * @brief   Validates the fixed window size; the window itself is created by Init().
- * @note    Throws std::invalid_argument when the size is out of range.
- */
-Application::Application() {
-    ValidateWindowDimensions(m_Width, m_Height);
-}
+namespace {
+
+// Debug builds ask for the validation layers of the GPU API; SDL runs without them when they are not installed
+#ifdef NDEBUG
+constexpr bool GPUDebugMode = false;
+#else
+constexpr bool GPUDebugMode = true;
+#endif
+
+} // namespace
 
 /**
- * @brief   Releases the ImGui layer, the window and GLFW, tolerating a partial Init().
+ * @brief   Releases the ImGui layer, the GPU device, the window and SDL, tolerating a partial Init().
  */
 Application::~Application() {
     Shutdown();
 }
 
 /**
- * @brief   Creates the window, the OpenGL context, the window icon and the ImGui layer.
- * @note    Throws std::runtime_error when GLFW, the window or OpenGL fail to initialize.
+ * @brief   Initializes SDL, the window, the GPU device, the window icon and the ImGui layer, in that order.
+ * @note    Throws std::runtime_error when SDL, the window or the GPU device cannot be set up.
  */
 void Application::Init() {
-    InitializeGLFW();
+    InitializeSDL();
     CreateWindow();
-    SetupOpenGL();
+    CreateGPUDevice();
     LoadAndSetIcon();
 
-    ImGuiLayer::Init(m_GLFWWindow);
+    ImGuiLayer::Init(m_SDLWindow, m_GPUDevice, m_WindowScale);
     m_Initialized = true;
 }
 
@@ -51,13 +56,19 @@ void Application::Init() {
  */
 int Application::Run() {
     spdlog::debug("Entering main loop");
-    while (!GetShouldClose()) {
+    while (m_IsOpen) {
+        PollEvents();
+
+        if (SDL_GetWindowFlags(m_SDLWindow) & SDL_WINDOW_MINIMIZED) {
+            SDL_Delay(10);
+            continue;
+        }
+
         try {
-            glfwPollEvents();
             ImGuiLayer::NewFrame();
             m_WindowManager.Render();
             ImGuiLayer::Render();
-            SwapBuffers();
+            EndFrame();
         } catch (const std::exception &error) {
             // Keep running so the user can see the error and carry on
             ShowErrorMessage("Runtime Error", error.what());
@@ -72,112 +83,126 @@ int Application::Run() {
  * @note    Safe to call more than once.
  */
 void Application::Shutdown() {
+    if (m_GPUDevice != nullptr) {
+        SDL_WaitForGPUIdle(m_GPUDevice);
+    }
     if (m_Initialized) {
         ImGuiLayer::Terminate();
         m_Initialized = false;
     }
-    if (m_GLFWWindow) {
-        glfwDestroyWindow(m_GLFWWindow);
-        m_GLFWWindow = nullptr;
+    if (m_GPUDevice != nullptr) {
+        SDL_ReleaseWindowFromGPUDevice(m_GPUDevice, m_SDLWindow);
+        SDL_DestroyGPUDevice(m_GPUDevice);
+        m_GPUDevice = nullptr;
     }
-    glfwTerminate();
+    if (m_SDLWindow != nullptr) {
+        SDL_DestroyWindow(m_SDLWindow);
+        m_SDLWindow = nullptr;
+    }
+    SDL_Quit();
     spdlog::debug("Application resources released");
 }
 
-void Application::ValidateWindowDimensions(GLint width, GLint height) {
-    if (width < MinWindowWidth || width > MaxWindowWidth || height < MinWindowHeight || height > MaxWindowHeight) {
-        throw std::invalid_argument("Window size must be within " + std::to_string(MinWindowWidth) + "x" +
-                                    std::to_string(MinWindowHeight) + " and " + std::to_string(MaxWindowWidth) + "x" +
-                                    std::to_string(MaxWindowHeight));
+void Application::InitializeSDL() {
+    if (!SDL_Init(SDL_INIT_VIDEO | SDL_INIT_GAMEPAD)) {
+        throw std::runtime_error(std::string("SDL_Init(): ") + SDL_GetError());
     }
 }
 
-void Application::InitializeGLFW() {
-    // Registered before initialization so startup failures include GLFW's diagnostic
-    glfwSetErrorCallback([](int error, const char *description) {
-        spdlog::error("GLFW error ({}): {}", error, description ? description : "Unknown error");
-    });
-    if (!glfwInit()) {
-        throw std::runtime_error("Failed to initialize GLFW");
+void Application::CreateWindow() {
+    m_WindowScale = SDL_GetDisplayContentScale(SDL_GetPrimaryDisplay());
+    constexpr int BaseWidth = 1280;
+    constexpr int BaseHeight = 800;
+    const SDL_WindowFlags flags = SDL_WINDOW_RESIZABLE | SDL_WINDOW_HIDDEN | SDL_WINDOW_HIGH_PIXEL_DENSITY;
+    m_SDLWindow = SDL_CreateWindow("Siggen", static_cast<int>(BaseWidth * m_WindowScale),
+                                   static_cast<int>(BaseHeight * m_WindowScale), flags);
+    if (m_SDLWindow == nullptr) {
+        throw std::runtime_error(std::string("SDL_CreateWindow(): ") + SDL_GetError());
     }
+}
 
-    glfwWindowHint(GLFW_CONTEXT_VERSION_MAJOR, 3);
-    glfwWindowHint(GLFW_CONTEXT_VERSION_MINOR, 3);
-    glfwWindowHint(GLFW_OPENGL_PROFILE, GLFW_OPENGL_CORE_PROFILE);
-    glfwWindowHint(GLFW_OPENGL_FORWARD_COMPAT, GL_TRUE);
-    glfwWindowHint(GLFW_SAMPLES, 8);
+// SDL picks the native API of the system (Direct3D 12 on Windows, Vulkan on Linux) among the shader formats the
+// Dear ImGui backend ships
+void Application::CreateGPUDevice() {
+    m_GPUDevice = SDL_CreateGPUDevice(SDL_GPU_SHADERFORMAT_SPIRV | SDL_GPU_SHADERFORMAT_DXIL |
+                                          SDL_GPU_SHADERFORMAT_MSL | SDL_GPU_SHADERFORMAT_METALLIB,
+                                      GPUDebugMode, nullptr);
+    if (m_GPUDevice == nullptr) {
+        throw std::runtime_error(std::string("SDL_CreateGPUDevice(): ") + SDL_GetError());
+    }
+    if (!SDL_ClaimWindowForGPUDevice(m_GPUDevice, m_SDLWindow)) {
+        throw std::runtime_error(std::string("SDL_ClaimWindowForGPUDevice(): ") + SDL_GetError());
+    }
+    SDL_SetGPUSwapchainParameters(m_GPUDevice, m_SDLWindow, SDL_GPU_SWAPCHAINCOMPOSITION_SDR,
+                                  SDL_GPU_PRESENTMODE_VSYNC);
+
+    SDL_SetWindowPosition(m_SDLWindow, SDL_WINDOWPOS_CENTERED, SDL_WINDOWPOS_CENTERED);
+    SDL_ShowWindow(m_SDLWindow);
 }
 
 /**
- * @brief   Sets the window icon from m_IconPath, relative to the working directory.
+ * @brief   Sets the window icon from assets/icon.png, relative to the working directory.
  * @note    A missing icon only logs a warning.
  */
 void Application::LoadAndSetIcon() {
-    if (m_IconPath.empty()) {
-        return;
-    }
-
+    const std::string icon_path = "assets/icon.png";
     int width = 0;
     int height = 0;
     int channels = 0;
     constexpr int RGBAChannels = 4;
-    unsigned char *pixels = stbi_load(m_IconPath.c_str(), &width, &height, &channels, RGBAChannels);
-    if (!pixels) {
-        spdlog::warn("Unable to load window icon: {}", m_IconPath);
+    unsigned char *pixels = stbi_load(icon_path.c_str(), &width, &height, &channels, RGBAChannels);
+    if (pixels == nullptr) {
+        spdlog::warn("Unable to load window icon: {}", icon_path);
         return;
     }
 
-    GLFWimage icon;
-    icon.width = width;
-    icon.height = height;
-    icon.pixels = pixels;
-    glfwSetWindowIcon(m_GLFWWindow, 1, &icon);
+    SDL_Surface *icon = SDL_CreateSurfaceFrom(width, height, SDL_PIXELFORMAT_RGBA32, pixels, width * RGBAChannels);
+    if (icon != nullptr) {
+        SDL_SetWindowIcon(m_SDLWindow, icon);
+        SDL_DestroySurface(icon);
+    }
     stbi_image_free(pixels);
 }
 
-void Application::CreateWindow() {
-    m_GLFWWindow = glfwCreateWindow(m_Width, m_Height, "Siggen", nullptr, nullptr);
-    if (!m_GLFWWindow) {
-        throw std::runtime_error("Failed to create GLFW window");
-    }
-
-    glfwGetFramebufferSize(m_GLFWWindow, &m_BufferWidth, &m_BufferHeight);
-    if (m_BufferWidth <= 0 || m_BufferHeight <= 0) {
-        throw std::runtime_error("Invalid framebuffer dimensions");
-    }
-
-    glfwMakeContextCurrent(m_GLFWWindow);
-    glfwSwapInterval(1); // vsync
-    glfwSetInputMode(m_GLFWWindow, GLFW_CURSOR, GLFW_CURSOR_NORMAL);
-    glfwSetWindowUserPointer(m_GLFWWindow, this);
-}
-
-void Application::SetupOpenGL() {
-    glEnable(GL_DEPTH_TEST);
-    GLenum error = glGetError();
-    if (error != GL_NO_ERROR) {
-        std::stringstream message;
-        message << "OpenGL error during setup: " << error;
-        throw std::runtime_error(message.str());
-    }
-
-    glViewport(0, 0, m_BufferWidth, m_BufferHeight);
-    error = glGetError();
-    if (error != GL_NO_ERROR) {
-        std::stringstream message;
-        message << "OpenGL error setting viewport: " << error;
-        throw std::runtime_error(message.str());
+void Application::PollEvents() {
+    SDL_Event event;
+    while (SDL_PollEvent(&event)) {
+        ImGui_ImplSDL3_ProcessEvent(&event);
+        const bool main_window_closed =
+            event.type == SDL_EVENT_WINDOW_CLOSE_REQUESTED && event.window.windowID == SDL_GetWindowID(m_SDLWindow);
+        if (event.type == SDL_EVENT_QUIT || main_window_closed) {
+            m_IsOpen = false;
+        }
     }
 }
 
-bool Application::GetShouldClose() const {
-    return m_GLFWWindow ? glfwWindowShouldClose(m_GLFWWindow) : true;
-}
-
-void Application::SwapBuffers() {
-    if (m_GLFWWindow) {
-        glfwSwapBuffers(m_GLFWWindow);
+void Application::EndFrame() {
+    SDL_GPUCommandBuffer *command_buffer = SDL_AcquireGPUCommandBuffer(m_GPUDevice);
+    if (command_buffer == nullptr) {
+        return;
     }
+
+    ImDrawData *draw_data = ImGui::GetDrawData();
+    SDL_GPUTexture *swapchain_texture = nullptr;
+    const bool is_minimized = draw_data->DisplaySize.x <= 0.0f || draw_data->DisplaySize.y <= 0.0f;
+    if (!is_minimized &&
+        SDL_WaitAndAcquireGPUSwapchainTexture(command_buffer, m_SDLWindow, &swapchain_texture, nullptr, nullptr) &&
+        swapchain_texture != nullptr) {
+        // Uploads the vertex and index buffers, which cannot happen inside a render pass
+        ImGui_ImplSDLGPU3_PrepareDrawData(draw_data, command_buffer);
+
+        const ImVec4 &background = ImGuiLayer::BackgroundColor();
+        SDL_GPUColorTargetInfo target_info{};
+        target_info.texture = swapchain_texture;
+        target_info.clear_color = SDL_FColor{background.x, background.y, background.z, background.w};
+        target_info.load_op = SDL_GPU_LOADOP_CLEAR;
+        target_info.store_op = SDL_GPU_STOREOP_STORE;
+        SDL_GPURenderPass *render_pass = SDL_BeginGPURenderPass(command_buffer, &target_info, 1, nullptr);
+        ImGui_ImplSDLGPU3_RenderDrawData(draw_data, command_buffer, render_pass);
+        SDL_EndGPURenderPass(render_pass);
+    }
+
+    SDL_SubmitGPUCommandBuffer(command_buffer);
 }
 
 /**

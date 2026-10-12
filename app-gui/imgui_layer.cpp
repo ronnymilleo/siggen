@@ -1,13 +1,12 @@
 /**
  * @file    imgui_layer.cpp
- * @brief   Dear ImGui and ImPlot setup, theme and per-frame calls for the GLFW/OpenGL 3 backends.
+ * @brief   Dear ImGui and ImPlot setup, theme and per-frame calls for the SDL3 and SDL GPU backends.
  */
 
 #include "imgui_layer.h"
 
-#include "imgui.h"
-#include "imgui_impl_glfw.h"
-#include "imgui_impl_opengl3.h"
+#include "imgui_impl_sdl3.h"
+#include "imgui_impl_sdlgpu3.h"
 #include "implot.h"
 #include <filesystem>
 
@@ -21,7 +20,7 @@ constexpr ImVec4 MakeColor(int red, int green, int blue, float alpha = 1.f) {
 }
 
 // Deep slate surfaces with a single blue accent; I/Q trace colors match the plot palette
-constexpr ImVec4 BackgroundColor = MakeColor(19, 22, 28);
+constexpr ImVec4 ThemeBackgroundColor = MakeColor(19, 22, 28);
 constexpr ImVec4 SurfaceColor = MakeColor(27, 31, 39);
 constexpr ImVec4 RaisedColor = MakeColor(38, 44, 55);
 constexpr ImVec4 RaisedHotColor = MakeColor(48, 56, 70);
@@ -56,7 +55,7 @@ void ApplyTheme() {
     ImVec4 *colors = style.Colors;
     colors[ImGuiCol_Text] = TextColor;
     colors[ImGuiCol_TextDisabled] = TextMutedColor;
-    colors[ImGuiCol_WindowBg] = BackgroundColor;
+    colors[ImGuiCol_WindowBg] = ThemeBackgroundColor;
     colors[ImGuiCol_ChildBg] = SurfaceColor;
     colors[ImGuiCol_PopupBg] = SurfaceColor;
     colors[ImGuiCol_Border] = BorderColor;
@@ -65,7 +64,7 @@ void ApplyTheme() {
     colors[ImGuiCol_FrameBgActive] = RaisedHotColor;
     colors[ImGuiCol_TitleBg] = SurfaceColor;
     colors[ImGuiCol_TitleBgActive] = SurfaceColor;
-    colors[ImGuiCol_ScrollbarBg] = BackgroundColor;
+    colors[ImGuiCol_ScrollbarBg] = ThemeBackgroundColor;
     colors[ImGuiCol_ScrollbarGrab] = RaisedColor;
     colors[ImGuiCol_ScrollbarGrabHovered] = RaisedHotColor;
     colors[ImGuiCol_ScrollbarGrabActive] = AccentDimColor;
@@ -95,7 +94,7 @@ void ApplyTheme() {
     plot_style.PlotBorderSize = 1.f;
     plot_style.LineWeight = 1.6f;
     plot_style.FitPadding = ImVec2(.15f, .15f);
-    plot_style.Colors[ImPlotCol_PlotBg] = BackgroundColor;
+    plot_style.Colors[ImPlotCol_PlotBg] = ThemeBackgroundColor;
     plot_style.Colors[ImPlotCol_PlotBorder] = BorderColor;
     plot_style.Colors[ImPlotCol_FrameBg] = SurfaceColor;
     plot_style.Colors[ImPlotCol_LegendBg] = MakeColor(27, 31, 39, 0.9f);
@@ -109,23 +108,32 @@ void ApplyTheme() {
 } // namespace
 
 /**
- * @brief   Creates the ImGui and ImPlot contexts, applies the theme and binds the GLFW and OpenGL 3 backends.
- * @param[in] window  The window whose OpenGL context is current.
+ * @brief   Creates the ImGui and ImPlot contexts, applies the theme and binds the SDL3 and SDL GPU backends.
+ * @param[in] window  The main window, whose swapchain format becomes the render target format.
+ * @param[in] device  The GPU device the backends render with.
+ * @param[in] scale   The display content scale applied to sizes and fonts.
  * @note    Loads the first system UI font found; falls back to the built-in one when none is installed.
  */
-void ImGuiLayer::Init(GLFWwindow *window) {
+void ImGuiLayer::Init(SDL_Window *window, SDL_GPUDevice *device, float scale) {
     IMGUI_CHECKVERSION();
     ImGui::CreateContext();
     ImPlot::CreateContext();
     ImGuiIO &io = ImGui::GetIO();
-    io.ConfigFlags |= ImGuiConfigFlags_NavEnableKeyboard | ImGuiConfigFlags_DockingEnable;
+    io.ConfigFlags |=
+        ImGuiConfigFlags_NavEnableKeyboard | ImGuiConfigFlags_NavEnableGamepad | ImGuiConfigFlags_DockingEnable;
     ImGui::StyleColorsDark();
     ApplyTheme();
-    ImGui_ImplGlfw_InitForOpenGL(window, true);
-    ImGui_ImplOpenGL3_Init("#version 330");
+    ImGuiStyle &style = ImGui::GetStyle();
+    style.ScaleAllSizes(scale);
+    style.FontScaleDpi = scale;
+    io.ConfigDpiScaleFonts = true;
     constexpr const char *FontCandidates[] = {
 #ifdef __APPLE__
         "/System/Library/Fonts/Helvetica.ttc",
+#elifdef _WIN32
+        "C:/Windows/Fonts/segoeui.ttf",
+        "C:/Windows/Fonts/calibri.ttf",
+        "C:/Windows/Fonts/arial.ttf",
 #else
         "/usr/share/fonts/truetype/inter/Inter-Regular.ttf",
         "/usr/share/fonts/truetype/noto/NotoSans-Regular.ttf",
@@ -142,39 +150,47 @@ void ImGuiLayer::Init(GLFWwindow *window) {
             break;
         }
     }
+
+    ImGui_ImplSDL3_InitForSDLGPU(window);
+    ImGui_ImplSDLGPU3_InitInfo init_info{};
+    init_info.Device = device;
+    init_info.ColorTargetFormat = SDL_GetGPUSwapchainTextureFormat(device, window);
+    ImGui_ImplSDLGPU3_Init(&init_info);
 }
 
 /**
  * @brief   Shuts down the backends and destroys the ImGui and ImPlot contexts.
+ * @note    Call only while the GPU device still exists: the backend frees its GPU resources here.
  */
 void ImGuiLayer::Terminate() {
-    ImGui_ImplOpenGL3_Shutdown();
-    ImGui_ImplGlfw_Shutdown();
-    ImGui::DestroyContext();
+    ImGui_ImplSDLGPU3_Shutdown();
+    ImGui_ImplSDL3_Shutdown();
     ImPlot::DestroyContext();
+    ImGui::DestroyContext();
 }
 
 /**
  * @brief   Starts a frame; every ImGui call of the frame goes between NewFrame() and Render().
  */
 void ImGuiLayer::NewFrame() {
-    ImGui_ImplOpenGL3_NewFrame();
-    ImGui_ImplGlfw_NewFrame();
+    ImGui_ImplSDLGPU3_NewFrame();
+    ImGui_ImplSDL3_NewFrame();
     ImGui::NewFrame();
 }
 
 /**
- * @brief   Clears the framebuffer with the theme background and draws the frame.
+ * @brief   Finalizes the frame's draw data; the GPU submission happens in the application.
  */
 void ImGuiLayer::Render() {
     ImGui::Render();
+}
 
-    const ImVec4 clear_color = BackgroundColor;
-    glClearColor(clear_color.x * clear_color.w, clear_color.y * clear_color.w, clear_color.z * clear_color.w,
-                 clear_color.w);
-    glClear(GL_COLOR_BUFFER_BIT);
-
-    ImGui_ImplOpenGL3_RenderDrawData(ImGui::GetDrawData());
+/**
+ * @brief   Returns the theme background color, used to clear the swapchain.
+ * @return  The background color.
+ */
+const ImVec4 &ImGuiLayer::BackgroundColor() {
+    return ThemeBackgroundColor;
 }
 
 } // namespace GUI

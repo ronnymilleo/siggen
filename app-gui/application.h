@@ -1,28 +1,28 @@
 /**
  * @file    application.h
- * @brief   Top-level GUI application: owns the window, the ImGui layer, the generator session and the main loop.
+ * @brief   Top-level GUI application: owns the window, the GPU device, the generator session and the main loop.
  */
 
 #ifndef SIGGEN_APPLICATION_H
 #define SIGGEN_APPLICATION_H
 
 #include "window_manager.h"
-#include <GLFW/glfw3.h>
+#include <SDL3/SDL_gpu.h>
+#include <SDL3/SDL_video.h>
 #include <string>
 
 namespace GUI {
 
 /**
  * @class   Application
- * @brief   Owns the GLFW window, its OpenGL 3.3 core context, the ImGui layer and the generator windows, and runs
- *          the main loop.
- * @details Call Init() once, then Run() if it succeeded, and always finish with Shutdown(). Init() throws when the
- *          window or the graphics context cannot be created; errors raised while drawing a frame are logged and the
- *          loop continues.
+ * @brief   Owns the SDL window, the SDL GPU device and the ImGui layer, and runs the main loop.
+ * @details Call Init() once, then Run() if it succeeded, and always finish with Shutdown(). Init() throws when SDL,
+ *          the GPU device or the ImGui layer cannot be set up; errors raised while drawing a frame are logged and
+ *          the loop continues. Dear ImGui renders through the SDL GPU API: Direct3D 12 on Windows, Vulkan on Linux.
  */
 class Application {
 public:
-    Application();
+    Application() = default;
     ~Application();
 
     void Init();
@@ -30,30 +30,22 @@ public:
     void Shutdown();
 
 private:
-    void ValidateWindowDimensions(GLint width, GLint height);
-    void InitializeGLFW();
-    void LoadAndSetIcon();
+    void InitializeSDL();
     void CreateWindow();
-    void SetupOpenGL();
-    bool GetShouldClose() const;
-    void SwapBuffers();
+    void CreateGPUDevice();
+    void LoadAndSetIcon();
+    void PollEvents();
+    void EndFrame();
     void ShowErrorMessage(const std::string &title, const std::string &message);
 
-    GLFWwindow *m_GLFWWindow = nullptr;
-    GLint m_Width = 1280;
-    GLint m_Height = 800;
-    GLint m_BufferWidth = 0;
-    GLint m_BufferHeight = 0;
+    SDL_Window *m_SDLWindow = nullptr;
+    SDL_GPUDevice *m_GPUDevice = nullptr;
+    float m_WindowScale = 1.0f;
+    bool m_IsOpen = true;
     bool m_Initialized = false;
-    std::string m_IconPath = "assets/icon.png";
 
     // Declared last so it is destroyed before the window and the ImGui context it draws with
     WindowManager m_WindowManager;
-
-    static constexpr GLint MinWindowWidth = 400;
-    static constexpr GLint MaxWindowWidth = 3840;
-    static constexpr GLint MinWindowHeight = 300;
-    static constexpr GLint MaxWindowHeight = 2160;
 };
 
 } // namespace GUI

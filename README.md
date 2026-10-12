@@ -32,21 +32,81 @@ training. This application generates complex baseband, not an RF carrier.
 
 ## Build and test
 
-Requirements: CMake 3.28+, a C++23 compiler and standard library (including
-`std::ios::noreplace`), and Ninja for the commands below. Vendor dependencies are
-pinned Git submodules; no dependency download occurs during CMake configuration.
+On every system the build needs:
+
+- CMake 3.28 or newer
+- A C++23 compiler and standard library, including `std::ios::noreplace` (the configure step
+  probes for it); tested with GCC 16, Apple Clang 21 and Visual Studio 2026
+- Ninja (or another CMake generator)
+- Git, for the submodules in `vendor/`: SDL3, Dear ImGui (`docking` branch), ImPlot, nlohmann/json,
+  spdlog, CLI11, stb and GoogleTest. SDL is compiled and linked statically with the project, so
+  every platform carries the same version
+
+Clone with the submodules (`git clone --recurse-submodules <repository-url>`), or, on an existing
+clone, run `git submodule update --init --recursive`. The binaries land in `out/<build-type>/bin/`:
+the default executable `siggen` opens the desktop application, and `siggen-cli` is the command-line
+tool (for example `./out/debug/bin/siggen-cli --help`).
+
+### Linux
+
+The GUI renders with Vulkan. Besides the common tools, it needs:
+
+- the build dependencies of SDL3 (X11, Wayland, libxkbcommon)
+- the Vulkan loader at run time (`vulkan-icd-loader` on Arch, `libvulkan1` on Ubuntu), which SDL
+  opens when the program starts, and the Vulkan driver for your GPU
+
+On Arch Linux:
 
 ```sh
-git submodule update --init --recursive
-cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Debug -DSIGGEN_BUILD_TESTS=ON -DSIGGEN_BUILD_PYTHON=ON
+sudo pacman -S cmake ninja gcc pkgconf vulkan-icd-loader \
+    libxcursor libxi libxfixes libxinerama libxrandr libxss libxtst libxkbcommon wayland wayland-protocols libdecor mesa
+```
+
+Also install the Vulkan driver for your GPU (for example `vulkan-radeon`). On Ubuntu 25.04 or newer:
+
+```sh
+sudo apt install cmake ninja-build g++ pkgconf libvulkan1 mesa-vulkan-drivers \
+    libx11-dev libxext-dev libxrandr-dev libxcursor-dev libxi-dev libxss-dev libxfixes-dev libxtst-dev \
+    libxkbcommon-dev libwayland-dev wayland-protocols libdecor-0-dev libegl-dev
+```
+
+These Ubuntu instructions are not tested regularly; please report what differs. Build and run:
+
+```sh
+cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Debug -DSIGGEN_BUILD_TESTS=ON
 cmake --build build
 ctest --test-dir build --output-on-failure
 ./out/debug/bin/siggen
 ```
 
-The default executable `siggen` opens the desktop application. Signal
-generation, batch, analysis and BER live in the separate command-line tool
-`siggen-cli` (for example `./out/debug/bin/siggen-cli --help`).
+### macOS
+
+The GUI renders with Metal, part of macOS. Install the Xcode Command Line Tools
+(`xcode-select --install`) — recent enough that the C++ library provides `std::ios::noreplace`,
+which the configure step probes — then, with [Homebrew](https://brew.sh):
+
+```sh
+brew install cmake ninja
+cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Debug -DSIGGEN_BUILD_TESTS=ON
+cmake --build build
+ctest --test-dir build --output-on-failure
+./out/debug/bin/siggen
+```
+
+### Windows
+
+Build with Visual Studio 2026 (the "Desktop development with C++" workload, which brings CMake and
+Ninja), from a Developer PowerShell. The GUI renders with Direct3D 12, part of Windows, and SDL3
+comes from its submodule, so nothing else is needed:
+
+```
+cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Debug -DSIGGEN_BUILD_TESTS=ON
+cmake --build build
+ctest --test-dir build --output-on-failure
+out\debug\bin\siggen.exe
+```
+
+### Build options
 
 The build is shaped by cache options:
 
@@ -65,7 +125,7 @@ Common configurations:
 # Release build of the GUI and the CLI
 cmake -S . -B build-release -G Ninja -DCMAKE_BUILD_TYPE=Release
 
-# Headless: CLI and tests only, no graphics libraries needed
+# Headless: CLI and tests only, no graphics dependencies at all (also the sanitizer configuration)
 cmake -S . -B build-headless -G Ninja -DCMAKE_BUILD_TYPE=Debug -DSIGGEN_BUILD_GUI=OFF -DSIGGEN_BUILD_TESTS=ON
 
 # Address + undefined-behavior sanitizers on the headless tests
@@ -78,9 +138,7 @@ cmake -S . -B build-lib -G Ninja -DSIGGEN_BUILD_GUI=OFF -DSIGGEN_BUILD_CLI=OFF
 
 Tests print failures on run. GoogleTest is included
 only when `SIGGEN_BUILD_TESTS=ON`; Threads is discovered only for the CLI, GUI, or tests.
-The GUI requires OpenGL and the platform development libraries used by the pinned
-GLFW. On Linux its default backend is X11, which also runs through XWayland.
-GLFW examples, tests, documentation, and installation default off. GoogleMock and ImGui/ImPlot demo sources are excluded from default builds.
+Unused SDL subsystems, tests and examples default off. GoogleMock and ImGui/ImPlot demo sources are excluded from default builds.
 
 Executables are in `out/<build-type>/bin/` and libraries in `out/<build-type>/lib/`
 of the source tree, while the CMake cache and objects stay in the build directory
@@ -88,8 +146,7 @@ of the source tree, while the CMake cache and objects stay in the build director
 repository root for editors and `clang-tidy`. In-source builds are rejected. If clang-format is
 available, building either executable first formats every project source
 (the `format` target), so commit the formatted files. Identifier naming is checked
-with `run-clang-tidy -p build '/(app-core|app-cli|app-gui|tests)/|/main\.cpp$'`; see `CLAUDE.md` for the
-code conventions.
+with `run-clang-tidy -p build '/(app-core|app-cli|app-gui|tests)/|/main\.cpp$'`.
 
 ## Documentation
 

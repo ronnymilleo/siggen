@@ -4,18 +4,21 @@
  */
 
 #include "help_topics.h"
-#include "imgui_impl_glfw.h"
-#include "imgui_impl_opengl3.h"
+#include "imgui_impl_sdl3.h"
+#include "imgui_impl_sdlgpu3.h"
 #include "imgui_internal.h"
 #include "implot.h"
 #include "implot_internal.h"
 #include "window_manager.h"
-#include <GLFW/glfw3.h>
+#include <SDL3/SDL.h>
+#include <SDL3/SDL_gpu.h>
 #include <gtest/gtest.h>
 #define STB_IMAGE_WRITE_IMPLEMENTATION
 #include "plot_figures.h"
 #include "stb_image_write.h"
+#include <algorithm>
 #include <cstdlib>
+#include <cstring>
 #include <filesystem>
 #include <thread>
 
@@ -132,39 +135,91 @@ struct GUITestAccess {
 
 TEST(UI, GeneratedViewsAndPendingClosure) {
     const char *capture = std::getenv("SIGGEN_CAPTURE_DIR");
-    GLFWwindow *native = nullptr;
+    constexpr int CaptureSize = 1100;
+    SDL_Window *native = nullptr;
+    SDL_GPUDevice *device = nullptr;
+    SDL_GPUTexture *canvas = nullptr;
+    SDL_GPUTransferBuffer *readback = nullptr;
     if (capture) {
-        ASSERT_TRUE(glfwInit());
-        glfwWindowHint(GLFW_VISIBLE, GLFW_FALSE);
-        glfwWindowHint(GLFW_CONTEXT_VERSION_MAJOR, 3);
-        glfwWindowHint(GLFW_CONTEXT_VERSION_MINOR, 3);
-        glfwWindowHint(GLFW_OPENGL_PROFILE, GLFW_OPENGL_CORE_PROFILE);
-        native = glfwCreateWindow(1100, 1100, "IQ validation", nullptr, nullptr);
+        ASSERT_TRUE(SDL_Init(SDL_INIT_VIDEO));
+        native = SDL_CreateWindow("IQ validation", CaptureSize, CaptureSize, SDL_WINDOW_HIDDEN);
         ASSERT_NE(native, nullptr);
-        glfwMakeContextCurrent(native);
+        device = SDL_CreateGPUDevice(SDL_GPU_SHADERFORMAT_SPIRV | SDL_GPU_SHADERFORMAT_DXIL | SDL_GPU_SHADERFORMAT_MSL |
+                                         SDL_GPU_SHADERFORMAT_METALLIB,
+                                     false, nullptr);
+        ASSERT_NE(device, nullptr);
+        // An offscreen target with a fixed channel order, so the capture needs no format conversion
+        SDL_GPUTextureCreateInfo texture_info{};
+        texture_info.type = SDL_GPU_TEXTURETYPE_2D;
+        texture_info.format = SDL_GPU_TEXTUREFORMAT_R8G8B8A8_UNORM;
+        texture_info.usage = SDL_GPU_TEXTUREUSAGE_COLOR_TARGET;
+        texture_info.width = CaptureSize;
+        texture_info.height = CaptureSize;
+        texture_info.layer_count_or_depth = 1;
+        texture_info.num_levels = 1;
+        canvas = SDL_CreateGPUTexture(device, &texture_info);
+        ASSERT_NE(canvas, nullptr);
+        SDL_GPUTransferBufferCreateInfo transfer_info{};
+        transfer_info.usage = SDL_GPU_TRANSFERBUFFERUSAGE_DOWNLOAD;
+        transfer_info.size = CaptureSize * CaptureSize * 4;
+        readback = SDL_CreateGPUTransferBuffer(device, &transfer_info);
+        ASSERT_NE(readback, nullptr);
         std::filesystem::create_directories(capture);
     }
-    CreateContexts(ImVec2(1100, 1100));
+    CreateContexts(ImVec2(CaptureSize, CaptureSize));
     if (native) {
-        ImGui_ImplGlfw_InitForOpenGL(native, true);
-        ImGui_ImplOpenGL3_Init("#version 330");
+        ImGui_ImplSDL3_InitForSDLGPU(native);
+        ImGui_ImplSDLGPU3_InitInfo init_info{};
+        init_info.Device = device;
+        init_info.ColorTargetFormat = SDL_GPU_TEXTUREFORMAT_R8G8B8A8_UNORM;
+        ImGui_ImplSDLGPU3_Init(&init_info);
     } else {
         BuildFontAtlas();
     }
     auto frame = [&](WindowManager &manager) {
         if (native) {
-            glfwPollEvents();
-            ImGui_ImplOpenGL3_NewFrame();
-            ImGui_ImplGlfw_NewFrame();
+            SDL_PumpEvents();
+            ImGui_ImplSDLGPU3_NewFrame();
+            ImGui_ImplSDL3_NewFrame();
+            ImGui::NewFrame();
+            manager.Render();
+            ImGui::Render();
+            SDL_GPUCommandBuffer *command_buffer = SDL_AcquireGPUCommandBuffer(device);
+            ImGui_ImplSDLGPU3_PrepareDrawData(ImGui::GetDrawData(), command_buffer);
+            SDL_GPUColorTargetInfo target{};
+            target.texture = canvas;
+            target.clear_color = SDL_FColor{0.1f, 0.1f, 0.1f, 1.0f};
+            target.load_op = SDL_GPU_LOADOP_CLEAR;
+            target.store_op = SDL_GPU_STOREOP_STORE;
+            SDL_GPURenderPass *pass = SDL_BeginGPURenderPass(command_buffer, &target, 1, nullptr);
+            ImGui_ImplSDLGPU3_RenderDrawData(ImGui::GetDrawData(), command_buffer, pass);
+            SDL_EndGPURenderPass(pass);
+            SDL_SubmitGPUCommandBuffer(command_buffer);
+        } else {
+            DrawFrame(manager);
         }
-        DrawFrame(manager);
-        if (native) {
-            glViewport(0, 0, 1100, 1100);
-            glClearColor(.1f, .1f, .1f, 1);
-            glClear(GL_COLOR_BUFFER_BIT);
-            ImGui_ImplOpenGL3_RenderDrawData(ImGui::GetDrawData());
-            glFinish();
+    };
+    auto capture_pixels = [&]() {
+        std::vector<unsigned char> pixels(CaptureSize * CaptureSize * 4);
+        SDL_GPUCommandBuffer *command_buffer = SDL_AcquireGPUCommandBuffer(device);
+        SDL_GPUCopyPass *copy_pass = SDL_BeginGPUCopyPass(command_buffer);
+        SDL_GPUTextureRegion source{};
+        source.texture = canvas;
+        source.w = CaptureSize;
+        source.h = CaptureSize;
+        source.d = 1;
+        SDL_GPUTextureTransferInfo destination{};
+        destination.transfer_buffer = readback;
+        destination.offset = 0;
+        SDL_DownloadFromGPUTexture(copy_pass, &source, &destination);
+        SDL_EndGPUCopyPass(copy_pass);
+        SDL_SubmitGPUCommandBuffer(command_buffer);
+        SDL_WaitForGPUIdle(device);
+        if (void *mapped = SDL_MapGPUTransferBuffer(device, readback, false); mapped != nullptr) {
+            std::memcpy(pixels.data(), mapped, pixels.size());
         }
+        SDL_UnmapGPUTransferBuffer(device, readback);
+        return pixels;
     };
     for (auto modulation :
          {Core::Modulation::BPSK, Core::Modulation::QPSK, Core::Modulation::PSK8, Core::Modulation::QAM16,
@@ -265,12 +320,13 @@ TEST(UI, GeneratedViewsAndPendingClosure) {
                 EXPECT_TRUE(checked);
             }
             if (capture) {
-                std::vector<unsigned char> pixels(1100 * 1100 * 4);
-                glReadPixels(0, 0, 1100, 1100, GL_RGBA, GL_UNSIGNED_BYTE, pixels.data());
-                stbi_flip_vertically_on_write(true);
-                const auto path = std::filesystem::path(capture) /
-                                  (std::string(Core::ModulationName(modulation)) + "-" + view + ".png");
-                EXPECT_TRUE(stbi_write_png(path.string().c_str(), 1100, 1100, 4, pixels.data(), 1100 * 4));
+                const auto pixels = capture_pixels();
+                // pi/4-DQPSK's canonical name carries a slash, which must not become a path separator
+                auto name = std::string(Core::ModulationName(modulation));
+                std::replace(name.begin(), name.end(), '/', '-');
+                const auto path = std::filesystem::path(capture) / (name + "-" + view + ".png");
+                EXPECT_TRUE(
+                    stbi_write_png(path.string().c_str(), CaptureSize, CaptureSize, 4, pixels.data(), CaptureSize * 4));
             }
         }
         auto previous = GUITestAccess::Result(window);
@@ -291,14 +347,17 @@ TEST(UI, GeneratedViewsAndPendingClosure) {
         // Destruction with an outstanding job must complete before destroying the UI context.
     }
     if (native) {
-        ImGui_ImplOpenGL3_Shutdown();
-        ImGui_ImplGlfw_Shutdown();
+        ImGui_ImplSDLGPU3_Shutdown();
+        ImGui_ImplSDL3_Shutdown();
     }
     ImPlot::DestroyContext();
     ImGui::DestroyContext();
     if (native) {
-        glfwDestroyWindow(native);
-        glfwTerminate();
+        SDL_ReleaseGPUTransferBuffer(device, readback);
+        SDL_ReleaseGPUTexture(device, canvas);
+        SDL_DestroyGPUDevice(device);
+        SDL_DestroyWindow(native);
+        SDL_Quit();
     }
 }
 
