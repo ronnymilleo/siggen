@@ -16,8 +16,7 @@ namespace Console {
 
 /**
  * @struct  CommandLine
- * @brief   The CLI11 parser and the raw values of every option, for single generation, the GUI, batch, analyze and
- *          ber.
+ * @brief   The CLI11 parser and the raw values of every option, for single generation, batch, analyze and ber.
  * @details Parsing stays independent of graphics, logging and library resolution. Precedence is defaults ->
  *          loaded preset -> explicitly supplied options; the resolver inspects each option's count() on the parsed
  *          App or subcommand, so unspecified options never clobber preset values.
@@ -33,14 +32,13 @@ struct CommandLine {
 
     // Runtime controls
     std::string LogLevel;
-    bool Gui = false;
 
-    // Single-generation export controls (incompatible with --gui and batch)
+    // Single-generation export controls (incompatible with batch)
     std::string Output; // Empty selects signal.csv / signal.sigmf-data by format
     bool Overwrite = false;
     std::string Format = "csv";
 
-    // Shared preset and signal settings (allowed with --gui and batch)
+    // Shared preset and signal settings (allowed with batch)
     std::string Preset;
     std::string Modulation;
     int Symbols = 0;

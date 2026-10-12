@@ -13,14 +13,9 @@ namespace Console {
  * @param[in] version  Version printed by --version, after "Siggen ".
  */
 CommandLine::CommandLine(const std::string &version) {
-    auto *gui_option = App.add_flag("--gui", Gui, "Open the GUI, optionally initialized by preset/signal options");
-
-    App.add_option("-o,--output", Output, "Sample destination (default: signal.csv or signal.sigmf-data)")
-        ->excludes(gui_option);
-    App.add_flag("--overwrite", Overwrite, "Replace existing sample and metadata files")->excludes(gui_option);
-    App.add_option("--format", Format, "Single-generation output format")
-        ->check(CLI::IsMember({"csv", "sigmf"}))
-        ->excludes(gui_option);
+    App.add_option("-o,--output", Output, "Sample destination (default: signal.csv or signal.sigmf-data)");
+    App.add_flag("--overwrite", Overwrite, "Replace existing sample and metadata files");
+    App.add_option("--format", Format, "Single-generation output format")->check(CLI::IsMember({"csv", "sigmf"}));
 
     App.add_option("--preset", Preset, "Load a preset before applying explicit options");
     AddSignalOptions(App);
@@ -41,7 +36,6 @@ CommandLine::CommandLine(const std::string &version) {
     Batch->add_flag("--overwrite", BatchOverwrite, "Rejected; batches never replace an existing directory");
     Batch->add_option("--preset", Preset, "Load a preset before applying explicit batch overrides");
     AddSignalOptions(*Batch);
-    Batch->excludes(gui_option);
 
     Analyze = App.add_subcommand(
         "analyze", "Measure a SigMF recording (single signal or batch frame) (power, PAPR, spectrum, EVM)");
@@ -50,7 +44,6 @@ CommandLine::CommandLine(const std::string &version) {
         ->check(CLI::IsMember({"hann", "hamming", "blackman", "rectangular"}));
     Analyze->add_option("--segment", AnalyzeSegment, "Welch segment length in samples (default: 1024)");
     Analyze->add_flag("--json", AnalyzeJson, "Print the report as JSON");
-    Analyze->excludes(gui_option);
 
     Ber = App.add_subcommand("ber", "Measure bit error rate against Eb/N0 with the ideal reference receiver");
     Ber->add_option("--eb-n0-db", BerEbN0Db,
@@ -63,7 +56,6 @@ CommandLine::CommandLine(const std::string &version) {
     Ber->add_flag("--json", BerJson, "Print the curve as JSON");
     Ber->add_option("--preset", Preset, "Load a preset before applying explicit options");
     AddSignalOptions(*Ber);
-    Ber->excludes(gui_option);
 }
 
 /**

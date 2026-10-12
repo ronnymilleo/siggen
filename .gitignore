@@ -1,5 +1,7 @@
 # Build artifacts and directories
-build/
+build*
+cmake-build*
+out/
 debug/
 release/
 Debug/
@@ -46,7 +48,10 @@ CMakeUserPresets.json
 *.d
 
 # Project specific
+.vs/
+.idea/
 .cache/
+.ccache/
 .nest/
 .venv/
 compile_commands.json

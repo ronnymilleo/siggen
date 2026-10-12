@@ -1,6 +1,6 @@
 /**
  * @file    application.cpp
- * @brief   Native GLFW window with its OpenGL context and the ImGui layer bound to it.
+ * @brief   Top-level GUI application: owns the window, the ImGui layer, the generator session and the main loop.
  */
 
 #include "application.h"
@@ -15,36 +15,18 @@
 namespace GUI {
 
 /**
- * @brief   Records the requested window size; the window itself is created by Init().
- * @param[in] window_width   Window width in screen coordinates, from MinWindowWidth to MaxWindowWidth.
- * @param[in] window_height  Window height in screen coordinates, from MinWindowHeight to MaxWindowHeight.
+ * @brief   Validates the fixed window size; the window itself is created by Init().
  * @note    Throws std::invalid_argument when the size is out of range.
  */
-Application::Application(GLint window_width, GLint window_height) : m_Width(window_width), m_Height(window_height) {
-    try {
-        ValidateWindowDimensions(window_width, window_height);
-    } catch (const std::exception &error) {
-        spdlog::error("Invalid application configuration: {}", error.what());
-        throw;
-    }
+Application::Application() {
+    ValidateWindowDimensions(m_Width, m_Height);
 }
 
 /**
- * @brief   Shuts down ImGui (if Init() reached it), destroys the window and terminates GLFW.
+ * @brief   Releases the ImGui layer, the window and GLFW, tolerating a partial Init().
  */
 Application::~Application() {
-    try {
-        if (m_Initialized) {
-            ImGuiLayer::Terminate();
-        }
-        if (m_GLFWWindow) {
-            glfwDestroyWindow(m_GLFWWindow);
-        }
-        glfwTerminate();
-        spdlog::debug("Application resources released");
-    } catch (const std::exception &error) {
-        spdlog::error("Application cleanup failed: {}", error.what());
-    }
+    Shutdown();
 }
 
 /**
@@ -52,44 +34,54 @@ Application::~Application() {
  * @note    Throws std::runtime_error when GLFW, the window or OpenGL fail to initialize.
  */
 void Application::Init() {
-    try {
-        InitializeGLFW();
-        CreateWindow();
-        SetupOpenGL();
-        LoadAndSetIcon();
+    InitializeGLFW();
+    CreateWindow();
+    SetupOpenGL();
+    LoadAndSetIcon();
 
-        ImGuiLayer::Init(m_GLFWWindow);
-        m_Initialized = true;
-    } catch (const std::exception &error) {
-        spdlog::error("Application initialization failed: {}", error.what());
-        throw;
+    ImGuiLayer::Init(m_GLFWWindow);
+    m_Initialized = true;
+}
+
+/**
+ * @brief   Runs the frame loop until the user closes the window.
+ * @return  0 when the window is closed normally.
+ * @note    Errors raised while drawing a frame are logged and the loop continues; initialization errors propagate
+ *          from Init().
+ */
+int Application::Run() {
+    spdlog::debug("Entering main loop");
+    while (!GetShouldClose()) {
+        try {
+            glfwPollEvents();
+            ImGuiLayer::NewFrame();
+            m_WindowManager.Render();
+            ImGuiLayer::Render();
+            SwapBuffers();
+        } catch (const std::exception &error) {
+            // Keep running so the user can see the error and carry on
+            ShowErrorMessage("Runtime Error", error.what());
+        }
     }
+    spdlog::info("Application closing");
+    return 0;
 }
 
 /**
- * @brief   Tells whether the main loop should stop.
- * @return  True once the user closes the window, or when there is no window.
+ * @brief   Releases every resource created by Init(), tolerating a partial Init().
+ * @note    Safe to call more than once.
  */
-bool Application::GetShouldClose() const {
-    return m_GLFWWindow ? glfwWindowShouldClose(m_GLFWWindow) : true;
-}
-
-/**
- * @brief   Presents the frame just rendered.
- */
-void Application::SwapBuffers() {
+void Application::Shutdown() {
+    if (m_Initialized) {
+        ImGuiLayer::Terminate();
+        m_Initialized = false;
+    }
     if (m_GLFWWindow) {
-        glfwSwapBuffers(m_GLFWWindow);
+        glfwDestroyWindow(m_GLFWWindow);
+        m_GLFWWindow = nullptr;
     }
-}
-
-/**
- * @brief   Reports an error raised while running a frame.
- * @param[in] title    Short context, such as "Runtime Error".
- * @param[in] message  The error text.
- */
-void Application::ShowErrorMessage(const std::string &title, const std::string &message) {
-    spdlog::error("{}: {}", title, message);
+    glfwTerminate();
+    spdlog::debug("Application resources released");
 }
 
 void Application::ValidateWindowDimensions(GLint width, GLint height) {
@@ -146,7 +138,6 @@ void Application::LoadAndSetIcon() {
 void Application::CreateWindow() {
     m_GLFWWindow = glfwCreateWindow(m_Width, m_Height, "Siggen", nullptr, nullptr);
     if (!m_GLFWWindow) {
-        glfwTerminate();
         throw std::runtime_error("Failed to create GLFW window");
     }
 
@@ -177,6 +168,25 @@ void Application::SetupOpenGL() {
         message << "OpenGL error setting viewport: " << error;
         throw std::runtime_error(message.str());
     }
+}
+
+bool Application::GetShouldClose() const {
+    return m_GLFWWindow ? glfwWindowShouldClose(m_GLFWWindow) : true;
+}
+
+void Application::SwapBuffers() {
+    if (m_GLFWWindow) {
+        glfwSwapBuffers(m_GLFWWindow);
+    }
+}
+
+/**
+ * @brief   Reports an error raised while running a frame.
+ * @param[in] title    Short context, such as "Runtime Error".
+ * @param[in] message  The error text.
+ */
+void Application::ShowErrorMessage(const std::string &title, const std::string &message) {
+    spdlog::error("{}: {}", title, message);
 }
 
 } // namespace GUI

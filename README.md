@@ -2,14 +2,15 @@
 
 [![CI](https://github.com/ronnymilleo/siggen/actions/workflows/ci.yml/badge.svg)](https://github.com/ronnymilleo/siggen/actions/workflows/ci.yml)
 
-A C++23 signal generator with a command-line interface and optional ImGui/ImPlot
-GUI. Generate reproducible complex I/Q samples for BPSK, QPSK, OQPSK, pi/4-DQPSK,
+A C++23 signal generator with a Dear ImGui/ImPlot desktop application (the
+default executable, `siggen`) and a separate command-line tool (`siggen-cli`).
+Generate reproducible complex I/Q samples for BPSK, QPSK, OQPSK, pi/4-DQPSK,
 DBPSK, DQPSK, 8-PSK, 8-DPSK, 4-ASK, OOK, 4-PAM, 16/32/64/256-QAM, 2-FSK, 4-FSK, MSK,
 and complex white Gaussian noise (WGN), with optional AWGN and simple channel
 impairments on linear signals; inspect waveforms, constellations, eye diagrams,
 a two-sided spectrum and measurements (PAPR, EVM, measured SNR); work through
 guided lesson presets; save presets; export single signals; and
-export SigMF recordings, measure recordings with `siggen analyze`, script it all from Python/NumPy, and generate swept fixed-length frame datasets (`siggen batch`) for classifier
+export SigMF recordings, measure recordings with `siggen-cli analyze`, script it all from Python/NumPy, and generate swept fixed-length frame datasets (`siggen-cli batch`) for classifier
 training. This application generates complex baseband, not an RF carrier.
 
 <div align="center">
@@ -37,109 +38,71 @@ pinned Git submodules; no dependency download occurs during CMake configuration.
 
 ```sh
 git submodule update --init --recursive
-cmake --workflow --preset dev
-./build/dev/bin/siggen --gui
+cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Debug -DSIGGEN_BUILD_TESTS=ON -DSIGGEN_BUILD_PYTHON=ON
+cmake --build build
+ctest --test-dir build --output-on-failure
+./out/debug/bin/siggen
 ```
 
-Use CMake presets for documented builds and agent validation. Each workflow runs
-configure → build → test; individual steps are also available:
+The default executable `siggen` opens the desktop application. Signal
+generation, batch, analysis and BER live in the separate command-line tool
+`siggen-cli` (for example `./out/debug/bin/siggen-cli --help`).
+
+The build is shaped by cache options:
+
+| Option | Default | Effect |
+|---|---|---|
+| `SIGGEN_BUILD_GUI` | `ON` | Build the `siggen` desktop application and its library |
+| `SIGGEN_BUILD_CLI` | `ON` | Build the `siggen-cli` command-line tool and its library |
+| `SIGGEN_BUILD_TESTS` | `OFF` | Build the GoogleTest executables |
+| `SIGGEN_BUILD_PYTHON` | `OFF` | Build the `siggen_c` shared library used by the Python package |
+| `SIGGEN_ENABLE_WARNINGS` | `ON` | Enable project compiler warnings |
+| `SIGGEN_SANITIZER` | `none` | `none`, `address-undefined`, or `thread` (Linux with GCC or Clang) |
+
+Common configurations:
 
 ```sh
-cmake --preset dev
-cmake --build --preset dev
-ctest --preset dev
+# Release build of the GUI and the CLI
+cmake -S . -B build-release -G Ninja -DCMAKE_BUILD_TYPE=Release
+
+# Headless: CLI and tests only, no graphics libraries needed
+cmake -S . -B build-headless -G Ninja -DCMAKE_BUILD_TYPE=Debug -DSIGGEN_BUILD_GUI=OFF -DSIGGEN_BUILD_TESTS=ON
+
+# Address + undefined-behavior sanitizers on the headless tests
+cmake -S . -B build-asan -G Ninja -DCMAKE_BUILD_TYPE=Debug -DSIGGEN_BUILD_GUI=OFF \
+  -DSIGGEN_BUILD_TESTS=ON -DSIGGEN_SANITIZER=address-undefined
+
+# Library only (no executables): needs just the stb and json submodules
+cmake -S . -B build-lib -G Ninja -DSIGGEN_BUILD_GUI=OFF -DSIGGEN_BUILD_CLI=OFF
 ```
 
-| Preset | Build | GUI | Compiler | Sanitizer |
-|---|---|---|---|---|
-| `dev` | Debug | Yes | System default | None |
-| `release` | Release | Yes | System default | None |
-| `headless` | Debug | No | System default | None |
-| `headless-release` | Release | No | System default | None |
-| `clang-headless` | Debug | No | Clang (Linux) | None |
-| `asan` | Debug | No | GCC (Linux) | Address + undefined behavior |
-| `tsan` | Debug | No | GCC (Linux) | Thread |
-
-All profiles enable tests and project warnings. Configure, build, test, and
-workflow names match and share `build/<preset-name>`. Tests print failures and
-fail if no tests are discovered. Discovery happens at test time, so linking a
-test executable does not execute it.
-
-The headless executable, library, and tests need no graphics libraries. GoogleTest is included
-only when `SIGGEN_BUILD_TESTS=ON`; Threads is discovered only for the executable, GUI, or tests.
+Tests print failures on run. GoogleTest is included
+only when `SIGGEN_BUILD_TESTS=ON`; Threads is discovered only for the CLI, GUI, or tests.
 The GUI requires OpenGL and the platform development libraries used by the pinned
 GLFW. On Linux its default backend is X11, which also runs through XWayland.
 GLFW examples, tests, documentation, and installation default off. GoogleMock and ImGui/ImPlot demo sources are excluded from default builds.
 
-Executables are in the build directory's `bin/`, libraries in `lib/`, and
-`compile_commands.json` of the last built preset is copied to the repository root
-for editors and `clang-tidy`. In-source builds are rejected. `SIGGEN_ENABLE_WARNINGS`
-controls compiler-appropriate warnings on project targets. If clang-format is
-available, building the `siggen` executable first formats every project source
+Executables are in `out/<build-type>/bin/` and libraries in `out/<build-type>/lib/`
+of the source tree, while the CMake cache and objects stay in the build directory
+(`build*` in `.gitignore`). `compile_commands.json` of the last build is copied to the
+repository root for editors and `clang-tidy`. In-source builds are rejected. If clang-format is
+available, building either executable first formats every project source
 (the `format` target), so commit the formatted files. Identifier naming is checked
-with `clang-tidy -p build/dev $(git ls-files '*.cpp')`; see `CLAUDE.md` for the
+with `run-clang-tidy -p build '/(app-core|app-cli|app-gui|tests)/|/main\.cpp$'`; see `CLAUDE.md` for the
 code conventions.
-
-### Local overrides and library-only builds
-
-Keep machine-specific compiler paths and parallelism in ignored
-`CMakeUserPresets.json`. Local names must differ from the checked-in presets;
-inheritance gives each new name its own build directory. For example:
-
-```json
-{
-  "version": 6,
-  "configurePresets": [
-    {
-      "name": "local-clang",
-      "inherits": "clang-headless",
-      "cacheVariables": { "CMAKE_CXX_COMPILER": "/usr/bin/clang++" }
-    },
-    {
-      "name": "library-only",
-      "inherits": "headless",
-      "cacheVariables": { "SIGGEN_BUILD_APP": "OFF", "SIGGEN_BUILD_TESTS": "OFF" }
-    }
-  ],
-  "buildPresets": [
-    { "name": "local-clang", "configurePreset": "local-clang", "jobs": 4 },
-    { "name": "library-only", "configurePreset": "library-only", "jobs": 4 }
-  ],
-  "testPresets": [
-    { "name": "local-clang", "inherits": "clang-headless", "configurePreset": "local-clang" }
-  ],
-  "workflowPresets": [
-    {
-      "name": "local-clang",
-      "steps": [
-        { "type": "configure", "name": "local-clang" },
-        { "type": "build", "name": "local-clang" },
-        { "type": "test", "name": "local-clang" }
-      ]
-    }
-  ]
-}
-```
-
-Run `cmake --workflow --preset local-clang`. To build only the signal library,
-run `cmake --preset library-only` followed by `cmake --build --preset library-only`;
-this needs only the `stb` (image export) and `json` (recording import) submodules and has no test step. `SIGGEN_BUILD_APP` controls
-the executable; `SIGGEN_BUILD_GUI` controls its optional graphical interface. For a local
-GUI or Release Clang profile, inherit `dev` or `release` and set the compiler path.
-CMake 3.28 supports these built-in [workflow presets](https://cmake.org/cmake/help/v3.28/manual/cmake-presets.7.html).
 
 ## Documentation
 
 Everything else lives in [docs/](docs/):
 
-- [Command line, logging and batch datasets](docs/command-line.md): `siggen` options, presets on the command line, log levels and `siggen batch`.
+- [Command line, logging and batch datasets](docs/command-line.md): `siggen-cli` options, presets on the command line, log levels and `siggen-cli batch`.
 - [Using the GUI](docs/using-the-gui.md): controls, measurements, the eye diagram, spectral windows, the Pipeline tab, views and spectrum calibration, and exporting plot images as PNG or SVG.
 - [Modulations, mapping and reproducibility](docs/modulations.md): every mapping (PSK, QAM, PAM, ASK, differential schemes, OQPSK, FSK/MSK), seeds and bit order.
 - [Noise, SNR and channel impairments](docs/noise-and-impairments.md): AWGN, SNR vs Es/N0 vs Eb/N0, CFO, phase noise, IQ imbalance, DC offset and quantization.
 - [Pulse gain, length and timing](docs/signal-timing.md): amplitude gain, filter length, delay and sample counts.
 - [Presets and I/Q export](docs/presets-and-export.md): guided lessons, preset format, CSV, binary and SigMF export and metadata.
-- [Bit error rate and the reference receiver](docs/ber-and-receiver.md): the ideal receiver, BER against Eb/N0 with theory, `siggen ber`, the BER tab and the Python API.
-- [Analysis, SigMF and Python](docs/analysis-and-python.md): `siggen analyze`, reading recordings, the NumPy-based Python package and the notebooks.
+- [Bit error rate and the reference receiver](docs/ber-and-receiver.md): the ideal receiver, BER against Eb/N0 with theory, `siggen-cli ber`, the BER tab and the Python API.
+- [Analysis, SigMF and Python](docs/analysis-and-python.md): `siggen-cli analyze`, reading recordings, the NumPy-based Python package and the notebooks.
 - [Architecture and validation](docs/architecture.md): source layout, tests and sanitizer workflows.
 
 ## License

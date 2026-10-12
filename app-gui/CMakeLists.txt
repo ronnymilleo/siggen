@@ -6,7 +6,6 @@ add_library(siggen-gui-lib
         STATIC
             application.cpp
             generator_session.cpp
-            gui_runner.cpp
             imgui_layer.cpp
             widgets.cpp
             window_manager.cpp

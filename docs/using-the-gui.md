@@ -4,8 +4,9 @@
 
 ## Using the generator
 
-The generator opens on startup, optionally initialized from `--preset` and
-signal options supplied with `--gui`; it does not generate automatically. It has
+The generator opens when you run the `siggen` executable (it takes no command-line
+arguments and starts from the default settings); it does not generate
+automatically. It has
 three dockable windows: **Signal Setup** on the left, **Signal Summary** above
 **Signal Views** (the plots) on the right. Drag a window's tab to rearrange them;
 the layout is saved in `imgui.ini`, and **View > Reset Layout** restores the

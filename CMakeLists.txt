@@ -9,7 +9,7 @@
 cmake_minimum_required(VERSION 3.28)
 
 if(CMAKE_SOURCE_DIR STREQUAL CMAKE_BINARY_DIR)
-    message(FATAL_ERROR "In-source builds are unsupported. Use cmake --preset dev or headless.")
+    message(FATAL_ERROR "In-source builds are unsupported. Use cmake -S . -B build -G Ninja.")
 endif()
 
 project(siggen
@@ -21,17 +21,23 @@ project(siggen
 # Overall project configs
 # =============================================================================
 
-option(SIGGEN_BUILD_APP "Build the signal generator executable" ON)
-option(SIGGEN_BUILD_GUI "Include the optional ImGui interface" ON)
+option(SIGGEN_BUILD_GUI "Build the ImGui desktop application" ON)
+option(SIGGEN_BUILD_CLI "Build the command-line tool" ON)
 option(SIGGEN_BUILD_TESTS "Build the tests" OFF)
 option(SIGGEN_ENABLE_WARNINGS "Enable project compiler warnings" ON)
 option(SIGGEN_BUILD_PYTHON "Build the shared library used by the Python package" OFF)
 
 set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
-# Presets share one source tree, so outputs stay inside each build directory
-set(CMAKE_RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/bin")
-set(CMAKE_LIBRARY_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/lib")
-set(CMAKE_ARCHIVE_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/lib")
+# Executables and libraries go to out/<build-type>/ of the source tree, like imcsim, independent of the
+# build directory that holds the CMake cache and the object files. Build trees that share a build type
+# also share the output folder.
+if(NOT CMAKE_BUILD_TYPE)
+    set(CMAKE_BUILD_TYPE Debug)
+endif()
+string(TOLOWER "${CMAKE_BUILD_TYPE}" SIGGEN_BUILD_TYPE_LOWER)
+set(CMAKE_RUNTIME_OUTPUT_DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}/out/${SIGGEN_BUILD_TYPE_LOWER}/bin")
+set(CMAKE_LIBRARY_OUTPUT_DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}/out/${SIGGEN_BUILD_TYPE_LOWER}/lib")
+set(CMAKE_ARCHIVE_OUTPUT_DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}/out/${SIGGEN_BUILD_TYPE_LOWER}/lib")
 
 # C++23, sanitizers and warnings, applied per target through siggen_target_options()
 include(cmake/ProjectOptions.cmake)
@@ -79,10 +85,10 @@ endfunction()
 
 siggen_require_submodule(stb stb_image_write.h)
 siggen_require_submodule(json include/nlohmann/json.hpp)
-if(SIGGEN_BUILD_APP OR SIGGEN_BUILD_GUI OR SIGGEN_BUILD_TESTS)
+if(SIGGEN_BUILD_GUI OR SIGGEN_BUILD_CLI OR SIGGEN_BUILD_TESTS)
     find_package(Threads REQUIRED)
 endif()
-if(SIGGEN_BUILD_APP OR SIGGEN_BUILD_GUI)
+if(SIGGEN_BUILD_GUI OR SIGGEN_BUILD_CLI)
     siggen_require_submodule(spdlog CMakeLists.txt)
     siggen_require_submodule(cli11 CMakeLists.txt)
 endif()
@@ -93,28 +99,28 @@ if(SIGGEN_BUILD_GUI)
     siggen_require_submodule(stb stb_image.h)
 endif()
 
-if(SIGGEN_BUILD_APP OR SIGGEN_BUILD_GUI)
+if(SIGGEN_BUILD_GUI OR SIGGEN_BUILD_CLI)
     add_subdirectory(vendor)
 endif()
 add_subdirectory(app-core)
-if(SIGGEN_BUILD_APP)
+if(SIGGEN_BUILD_CLI)
     add_subdirectory(app-cli)
 endif()
 if(SIGGEN_BUILD_GUI)
     add_subdirectory(app-gui)
 endif()
 
-if(SIGGEN_BUILD_APP)
+if(SIGGEN_BUILD_CLI)
+    add_executable(siggen-cli app-cli/main.cpp)
+    target_link_libraries(siggen-cli PRIVATE siggen-cli-lib spdlog::spdlog)
+    target_compile_definitions(siggen-cli PRIVATE SIGGEN_VERSION="${PROJECT_VERSION}")
+    siggen_target_options(siggen-cli)
+    add_dependencies(siggen-cli format)
+endif()
+
+if(SIGGEN_BUILD_GUI)
     add_executable(siggen main.cpp)
-    target_link_libraries(siggen PRIVATE siggen-cli-lib spdlog::spdlog)
-    target_compile_definitions(siggen
-            PRIVATE
-                SIGGEN_VERSION="${PROJECT_VERSION}"
-                SIGGEN_HAS_GUI=$<BOOL:${SIGGEN_BUILD_GUI}>
-    )
-    if(SIGGEN_BUILD_GUI)
-        target_link_libraries(siggen PRIVATE siggen-gui-lib)
-    endif()
+    target_link_libraries(siggen PRIVATE siggen-gui-lib spdlog::spdlog)
     siggen_target_options(siggen)
     add_dependencies(siggen format)
 endif()
@@ -141,7 +147,7 @@ endif()
 # Post-Build Commands
 # =============================================================================
 
-if(SIGGEN_BUILD_APP AND SIGGEN_BUILD_GUI AND EXISTS "${CMAKE_SOURCE_DIR}/assets")
+if(SIGGEN_BUILD_GUI AND EXISTS "${CMAKE_SOURCE_DIR}/assets")
     add_custom_command(TARGET siggen POST_BUILD
             COMMAND ${CMAKE_COMMAND} -E copy_directory "${CMAKE_SOURCE_DIR}/assets" "$<TARGET_FILE_DIR:siggen>/assets"
             COMMENT "Copying assets next to the executable"
@@ -157,8 +163,10 @@ add_custom_target(copy_compile_commands
         VERBATIM
 )
 
-if(SIGGEN_BUILD_APP)
+if(SIGGEN_BUILD_GUI)
     add_dependencies(siggen copy_compile_commands)
+elseif(SIGGEN_BUILD_CLI)
+    add_dependencies(siggen-cli copy_compile_commands)
 endif()
 
 # =============================================================================
@@ -171,7 +179,7 @@ message(STATUS "Project:      ${PROJECT_NAME}")
 message(STATUS "Version:      ${PROJECT_VERSION}")
 message(STATUS "Build type:   ${CMAKE_BUILD_TYPE}")
 message(STATUS "Compiler:     ${CMAKE_CXX_COMPILER_ID} ${CMAKE_CXX_COMPILER_VERSION}")
-message(STATUS "App / GUI:    ${SIGGEN_BUILD_APP} / ${SIGGEN_BUILD_GUI}")
+message(STATUS "Executables:  GUI=${SIGGEN_BUILD_GUI} CLI=${SIGGEN_BUILD_CLI}")
 message(STATUS "Tests:        ${SIGGEN_BUILD_TESTS}")
 message(STATUS "Python:       ${SIGGEN_BUILD_PYTHON}")
 message(STATUS "Sanitizer:    ${SIGGEN_SANITIZER}")

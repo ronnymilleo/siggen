@@ -4,22 +4,22 @@
 
 ## Command line and logging
 
-There is one application executable, `siggen`. With no arguments it generates
-the default BPSK signal and exports `signal.csv` plus `signal.csv.json` in the
-current directory, then exits. Use `--gui` to open the desktop interface instead:
+The desktop application and the command-line tool are separate executables.
+`siggen` opens the GUI and takes no arguments; `siggen-cli` is the tool below.
+With no arguments it generates the default BPSK signal and exports `signal.csv`
+plus `signal.csv.json` in the current directory, then exits:
 
 ```sh
-./build/dev/bin/siggen
-./build/dev/bin/siggen --output captures/example.csv
-./build/dev/bin/siggen --output signal.csv --overwrite
-./build/dev/bin/siggen --modulation 64-QAM --symbols 512 --sps 4 --format sigmf
-./build/dev/bin/siggen --modulation qpsk --snr-db 10 --noise-seed 7 -o noisy.csv
-./build/dev/bin/siggen --modulation wgn --samples 8192 --sample-rate 16000 --noise-power 2
-./build/dev/bin/siggen --preset custom.preset --gain 2 --output preset.csv
-./build/dev/bin/siggen --gui --preset custom.preset
-./build/dev/bin/siggen --gui --log-level debug
-./build/dev/bin/siggen --help
-./build/dev/bin/siggen --version
+./out/debug/bin/siggen                      # opens the desktop application
+./out/debug/bin/siggen-cli
+./out/debug/bin/siggen-cli --output captures/example.csv
+./out/debug/bin/siggen-cli --output signal.csv --overwrite
+./out/debug/bin/siggen-cli --modulation 64-QAM --symbols 512 --sps 4 --format sigmf
+./out/debug/bin/siggen-cli --modulation qpsk --snr-db 10 --noise-seed 7 -o noisy.csv
+./out/debug/bin/siggen-cli --modulation wgn --samples 8192 --sample-rate 16000 --noise-power 2
+./out/debug/bin/siggen-cli --preset custom.preset --gain 2 --output preset.csv
+./out/debug/bin/siggen-cli --help
+./out/debug/bin/siggen-cli --version
 ```
 
 Configuration resolves as **defaults → loaded preset → explicitly supplied CLI
@@ -46,9 +46,7 @@ rejected for FSK and MSK, which have no pulse filter, and `--tone-spacing-hz`
 is rejected for every other waveform (MSK fixes the spacing). Switching waveform families through `--modulation` starts
 from that family's defaults while retaining gain and seeds; incompatible preset
 fields never silently become active. `--bits` selects explicit input unless a
-conflicting `--data-source random` was explicitly supplied. Preset and signal
-options may initialize the GUI (`--gui`) without generating; export options and
-the `batch` subcommand cannot be combined with `--gui`. The destination's parent
+conflicting `--data-source random` was explicitly supplied. The destination's parent
 directory must exist, and existing sample or metadata files are protected unless
 `--overwrite` is specified. Generation or export errors return a nonzero exit
 status.
@@ -60,7 +58,7 @@ disabled.
 
 ### Analyzing a recording
 
-`siggen analyze <file>` measures a SigMF recording (`.sigmf-meta` or `.sigmf-data`, including batch frames) without opening the GUI, using the same
+`siggen-cli analyze <file>` measures a SigMF recording (`.sigmf-meta` or `.sigmf-data`, including batch frames), using the same
 estimators: sample count and rate, mean power, PAPR, the strongest spectral bin, the
 99 % occupied bandwidth and, for a recording made by siggen, the waveform, EVM,
 SNR after the matched filter, the measured Eb/N0 and the bit errors of the reference receiver. `--window hann|hamming|blackman|rectangular` and
@@ -69,14 +67,14 @@ See [Analysis, SigMF and Python](analysis-and-python.md).
 
 ### Measuring BER
 
-`siggen ber` sweeps Eb/N0 and measures the bit error rate of the ideal reference receiver, next
+`siggen-cli ber` sweeps Eb/N0 and measures the bit error rate of the ideal reference receiver, next
 to the textbook value. It takes the same signal options as single generation
 (`--modulation`, `--sps`, `--pulse`, `--cfo-hz`, ...), but `--symbols`, `--bits`, `--data-source` and
 `--snr-db` are rejected because the sweep controls them.
 
 ```sh
-siggen ber --modulation QPSK --eb-n0-db=0,2,4,6,8
-siggen ber --modulation DQPSK --eb-n0-db=4,8 --cfo-hz 20 --json
+siggen-cli ber --modulation QPSK --eb-n0-db=0,2,4,6,8
+siggen-cli ber --modulation DQPSK --eb-n0-db=4,8 --cfo-hz 20 --json
 ```
 
 ```text
@@ -92,12 +90,12 @@ waveform: QPSK, 8 samples/symbol, RRC pulse, ideal reference receiver
 
 ### Batch dataset generation
 
-`siggen batch` sweeps waveform, seed, and SNR lists and writes fixed-length
+`siggen-cli batch` sweeps waveform, seed, and SNR lists and writes fixed-length
 frames into a new output directory, sharing preset loading and applicable
 signal overrides with single generation:
 
 ```sh
-./build/dev/bin/siggen batch --modulations BPSK QPSK 8-PSK 16-QAM 64-QAM WGN \
+./out/debug/bin/siggen-cli batch --modulations BPSK QPSK 8-PSK 16-QAM 64-QAM WGN \
   --seeds 42 43 --snrs-db=-10,0,10 \
   --frame-size 2048 --frames-per-point 100 \
   --output-dir dataset --format sigmf
@@ -137,7 +135,7 @@ realizations.
 
 The output directory must not exist; existing directories are never touched.
 Files are named `frame_<point>_<frame>` with zero-padded indices preserving
-user list order, each with its metadata file: `<name>.sigmf-meta` for SigMF (any SigMF tool opens the frames; the frame description sits under `siggen:metadata`, with the generator preset and crop position beside it so `siggen analyze` can report EVM on the frame interior) or `<file>.json` for CSV. A versioned
+user list order, each with its metadata file: `<name>.sigmf-meta` for SigMF (any SigMF tool opens the frames; the frame description sits under `siggen:metadata`, with the generator preset and crop position beside it so `siggen-cli analyze` can report EVM on the frame interior) or `<file>.json` for CSV. A versioned
 `manifest.jsonl` starts with a `batch_header` record, gains one `frame`
 completion record (relative path, waveform, axis values, derived seeds, frame
 size, format, and crop/noise provenance) appended and flushed only after that
@@ -156,10 +154,10 @@ Preflight rejects zero-gain AWGN and SNR ratios that overflow or underflow.
 Sample-dependent numerical failures remain generation errors and follow the
 same incomplete-run rules as write failures.
 
-Both `dev` and `release` produce the same dual-mode executable. The `headless`
-presets build `siggen` without graphics dependencies; `--gui` then reports that
-GUI support was not compiled in. The former `imsignalgenerator` executable is now
-named `siggen`; old build artifacts are not removed automatically.
+The default build produces the GUI and the CLI. A headless build
+(`-DSIGGEN_BUILD_GUI=OFF`) builds only `siggen-cli` and the tests, without
+graphics dependencies. The former `imsignalgenerator` executable is now named
+`siggen`; old build artifacts are not removed automatically.
 
 [CLI11 v2.6.2](https://github.com/CLIUtils/CLI11/releases/tag/v2.6.2) is pinned as a
 Git submodule. It parses options before graphics initialization, so help, version,
@@ -173,7 +171,7 @@ remains a fallback, followed by the default `info`. Debug adds initialization an
 generation-start details. For example:
 
 ```sh
-./build/headless/bin/siggen --output signal.csv --log-level debug
+./out/debug/bin/siggen-cli --output signal.csv --log-level debug
 ```
 
 Use `--log-level warn` for warnings and errors or `--log-level off` for silence.
@@ -181,6 +179,6 @@ Redirect stderr to keep a log file if needed. Logs include paths for preset/expo
 operations but do not dump I/Q samples or explicit input bits. Logging is
 synchronous with a thread-safe sink; warnings and errors flush immediately.
 GUI errors remain visible, and per-frame validation does not generate logs.
-CLI11 and spdlog are used by both application modes, but library-only builds need
+CLI11 is used by the CLI and spdlog by both executables, but library-only builds need
 neither. Vendor examples, tests, documentation, benchmarks, and installation
 default off.

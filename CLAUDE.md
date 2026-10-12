@@ -1,7 +1,8 @@
 # siggen
 
-Complex baseband signal generator in C++23: a command-line tool and an optional Dear ImGui/ImPlot GUI
-(GLFW + OpenGL 3.3) that generate, analyse and export I/Q signals.
+Complex baseband signal generator in C++23: a Dear ImGui/ImPlot desktop application
+(GLFW + OpenGL 3.3, the default `siggen` executable) and a separate command-line tool
+(`siggen-cli`) that generate, analyse and export I/Q signals.
 
 - `app-core/` → static lib `siggen-core-lib`, namespace `Core` (generation, analysis, presets, I/Q and image
   export, plot data); no graphics or CLI dependency
@@ -9,14 +10,17 @@ Complex baseband signal generator in C++23: a command-line tool and an optional 
     and floating-point evaluation order are part of the contract (tests compare outputs exactly)
   - `waveform.h` holds the descriptor table; `StableId` values feed seed derivation and must never be renumbered
 - `app-cli/` → static lib `siggen-cli-lib`, namespace `Console` (CLI11 parsing; precedence is defaults → preset →
-  explicitly supplied options)
+  explicitly supplied options), behind the `siggen-cli` executable (`app-cli/main.cpp`, single generation, `batch`,
+  `analyze`, `ber`)
 - `app-gui/` → static lib `siggen-gui-lib`, namespace `GUI` (window, ImGui layer, dockable windows); built only with
   `SIGGEN_BUILD_GUI=ON`
+  - `application.h` owns the window, the ImGui layer and the frame loop (`Init`/`Run`/`Shutdown`); `main.cpp` only
+    drives it
   - `generator_session.h` is the document (settings, background generation, analysis of the last result); the
     `WindowManager` owns it and hands it to every window by reference
   - `windows/` holds the dockable windows: each derives from `AppWindow`, which wraps `Draw()` in Begin/End;
     windows keep only view state (selected view, zoom requests, dialogs) and read or change the session
-- `main.cpp` → executable `siggen` (single generation, `batch`, `analyze`, `ber`, `--gui`)
+- `main.cpp` → executable `siggen`, opening the GUI (no command-line arguments)
 - `python/` → `siggen_c` shared library (`SIGGEN_BUILD_PYTHON=ON`), a plain C interface loaded by the `siggen` Python
   package with ctypes; its `siggen_*` functions are an ABI and keep C naming
 - `tests/` → GoogleTest executables `siggen-tests` (core), `siggen-cli-tests` (+ `CLI.EndToEnd`, which runs the real
@@ -28,25 +32,31 @@ Complex baseband signal generator in C++23: a command-line tool and an optional 
 
 ## Commands
 
-Presets share `build/<preset-name>` (`dev`, `release`, `headless`, `headless-release`, `clang-headless`, `asan`,
-`tsan`):
+The build tree holds the CMake cache and objects (`build/`, or `build-windows/` on Windows); binaries and
+libraries land in `out/<build-type>/{bin,lib}` of the source tree, like imcsim:
 
 ```
-cmake --workflow --preset dev        # configure, build (also runs clang-format on all sources) and test
-./build/dev/bin/siggen --gui
+cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Debug -DSIGGEN_BUILD_TESTS=ON   # CLion uses cmake-build-debug/
+cmake --build build                                                           # also runs clang-format on all sources
+ctest --test-dir build --output-on-failure
+./out/debug/bin/siggen          # GUI; ./out/debug/bin/siggen-cli is the command-line tool
 ```
 
-Naming check (`CMAKE_CXX_SCAN_FOR_MODULES` is off, so the compile database has no GCC module flags):
+A headless build (no graphics libraries; also the sanitizer configuration) adds `-DSIGGEN_BUILD_GUI=OFF`
+(and `-DSIGGEN_SANITIZER=address-undefined` or `thread` for sanitizers). Naming check
+(`CMAKE_CXX_SCAN_FOR_MODULES` is off, so the compile database has no GCC module flags):
 
 ```
-clang-tidy -p build/dev $(git ls-files '*.cpp' ':!python/')   # python/csrc is a C ABI, exempt
+run-clang-tidy -p build -warnings-as-errors='*' '/(app-core|app-cli|app-gui|tests)/|/main\.cpp$'
+# python/csrc is a C ABI, exempt from the naming rules
 ```
 
 Verification is a clean build, all tests passing and clang-tidy without warnings. GitHub Actions
-(`.github/workflows/ci.yml`) runs a lint job in an `archlinux` container (formatting check with
-`git diff --exit-code` after the build, then clang-tidy), the headless workflows with GCC and Clang on Ubuntu, and
-macOS (headless tests plus a GUI compile). Pure logic goes in `Core` with GoogleTest coverage; code that needs a
-live ImGui context only gets smoke tests, so move testable logic out of the windows into `Core` free functions.
+(`.github/workflows/ci.yml`) runs on every push: `linux` in an `archlinux` container (formatting check with
+`git diff --exit-code` after the build, tests, then run-clang-tidy), `linux-sanitizers` (headless tests under
+AddressSanitizer and UndefinedBehaviorSanitizer), `windows` (MSVC) and `macos`, both with the full test suite.
+Pure logic goes in `Core` with GoogleTest coverage; code that needs a live ImGui context only gets smoke
+tests, so move testable logic out of the windows into `Core` free functions.
 
 ## Naming
 
