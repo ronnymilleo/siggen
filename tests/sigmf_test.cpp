@@ -13,6 +13,7 @@
 #include <fstream>
 #include <gtest/gtest.h>
 #include <nlohmann/json.hpp>
+#include <numbers>
 #include <random>
 
 namespace Core {
@@ -138,7 +139,7 @@ TEST(Analyze, SpectrumFindsToneAndBandwidth) {
     Recording recording;
     recording.SampleRateHz = 8000;
     for (int k = 0; k < 8192; ++k) {
-        const double phase = 2 * M_PI * 1000.0 * k / 8000;
+        const double phase = 2 * std::numbers::pi * 1000.0 * k / 8000;
         recording.Samples.emplace_back(static_cast<float>(std::cos(phase)), static_cast<float>(std::sin(phase)));
     }
     const auto report = AnalyzeRecording(recording);

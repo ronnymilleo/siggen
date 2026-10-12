@@ -144,7 +144,7 @@ class FileTests(unittest.TestCase):
             with self.assertRaises(ValueError):
                 siggen.load(Path(tmp) / "missing.sigmf-meta")
 
-    @unittest.skipUnless(os.environ.get("SIGGEN_CLI"), "SIGGEN_CLI points at the siggen executable")
+    @unittest.skipUnless(os.environ.get("SIGGEN_CLI"), "SIGGEN_CLI points at the siggen-cli executable")
     def test_matches_the_command_line_bit_for_bit(self):
         cases = [
             (["--modulation", "QPSK", "--snr-db", "15"], dict(modulation="QPSK", snr_db=15)),
