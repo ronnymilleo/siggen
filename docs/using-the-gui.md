@@ -6,7 +6,10 @@
 
 The generator opens when you run the `siggen` executable (it takes no command-line
 arguments and starts from the default settings); it does not generate
-automatically. It has
+automatically. The controls and plots stay inside the main application window,
+including on Wayland: the content follows window resizing and scrolls when
+needed, and detached platform windows and saved floating-panel positions are
+disabled. It has
 three dockable windows: **Signal Setup** on the left, **Signal Summary** above
 **Signal Views** (the plots) on the right. Drag a window's tab to rearrange them;
 the layout is saved in `imgui.ini`, and **View > Reset Layout** restores the

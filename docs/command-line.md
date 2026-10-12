@@ -2,12 +2,12 @@
 
 [Back to the README](../README.md)
 
-## Command line and logging
+## Command line
 
 The desktop application and the command-line tool are separate executables.
-`siggen` opens the GUI and takes no arguments; `siggen-cli` is the tool below.
-With no arguments it generates the default BPSK signal and exports `signal.csv`
-plus `signal.csv.json` in the current directory, then exits:
+`siggen` opens the GUI and takes no arguments; `siggen-cli` is the tool covered
+here. With no arguments it generates the default BPSK signal and exports
+`signal.csv` plus `signal.csv.json` in the current directory, then exits:
 
 ```sh
 ./out/debug/bin/siggen                      # opens the desktop application
@@ -24,53 +24,116 @@ plus `signal.csv.json` in the current directory, then exits:
 
 Configuration resolves as **defaults → loaded preset → explicitly supplied CLI
 options**, then validates through the shared library; options that were not
-supplied never replace preset values. Modulation names (`BPSK`, `QPSK`, `8-PSK`,
-`16-QAM`, `32-QAM`, `64-QAM`, `256-QAM`, `OOK`, `4-PAM`, `DBPSK`, `DQPSK`,
-`pi/4-DQPSK`, `8-DPSK`, `OQPSK`, `4-ASK`, `2-FSK`, `4-FSK`, `MSK`, `WGN`) are accepted case-insensitively; pulse names are
-`rrc` and `rectangular`. Signal options are `--preset`, `--modulation`,
-`--symbols`, `--symbol-rate`, `--sps`, `--pulse`, `--roll-off`, `--span`,
-`--tone-spacing-hz` (2-FSK and 4-FSK only), `--gain`, `--seed`,
-`--data-source random|explicit`, and `--bits`. Noise options
-are `--samples`, `--sample-rate`, `--noise-power`, `--noise-seed`, and
-`--snr-db <dB>|off`; `--snr-db off` disables preset-provided AWGN. Channel
-impairment options for linear waveforms are `--cfo-hz`, `--phase-noise-hz`,
-`--iq-gain-db`, `--iq-phase-deg`, `--dc-i`, `--dc-q`, `--adc-bits`, and
-`--impairment-seed` (see [Noise, SNR and channel impairments](noise-and-impairments.md)). Export
-options are `--format csv|sigmf`, `--output`/`-o`, and `--overwrite`. Without an
-output path, CSV uses `signal.csv` and SigMF uses `signal.sigmf-data` (plus `signal.sigmf-meta`).
+supplied never replace preset values.
 
-Options incompatible with the selected waveform are rejected: noise-source
-options require `--modulation WGN`, and linear options (including `--snr-db`)
-are rejected for WGN. Pulse options (`--pulse`, `--roll-off`, `--span`) are
-rejected for FSK and MSK, which have no pulse filter, and `--tone-spacing-hz`
-is rejected for every other waveform (MSK fixes the spacing). Switching waveform families through `--modulation` starts
-from that family's defaults while retaining gain and seeds; incompatible preset
-fields never silently become active. `--bits` selects explicit input unless a
-conflicting `--data-source random` was explicitly supplied. The destination's parent
-directory must exist, and existing sample or metadata files are protected unless
-`--overwrite` is specified. Generation or export errors return a nonzero exit
-status.
+### Waveforms
 
-The GUI keeps the generator controls and plots inside the main application
-window, including on Wayland. The content follows window resizing and scrolls
-when needed; detached platform windows and saved floating-panel positions are
-disabled.
+`--modulation` accepts these names, case-insensitively. Switching families
+starts from that family's defaults while retaining gain and seeds; incompatible
+preset fields never silently become active.
 
-### Analyzing a recording
+| Family | Waveforms |
+|---|---|
+| Linear | `BPSK`, `QPSK`, `8-PSK`, `16-QAM`, `32-QAM`, `64-QAM`, `256-QAM`, `OOK`, `4-PAM`, `4-ASK`, `DBPSK`, `DQPSK`, `pi/4-DQPSK`, `8-DPSK`, `OQPSK` |
+| FSK | `2-FSK`, `4-FSK`, `MSK` |
+| Noise | `WGN` |
+
+### Signal options
+
+| Option | Values | Notes |
+|---|---|---|
+| `--preset` | file path | Preset loaded before the explicit options |
+| `--modulation` | waveform name | See the table above |
+| `--symbols` | count | Symbol count (linear and FSK) |
+| `--symbol-rate` | baud | Symbol rate (linear and FSK) |
+| `--sps` | count | Samples per symbol (linear and FSK) |
+| `--pulse` | `rrc`, `rectangular` | Pulse shape (linear only) |
+| `--roll-off` | 0–1 | RRC roll-off |
+| `--span` | symbols | RRC span |
+| `--tone-spacing-hz` | Hz | FSK tone spacing, default 1000 (2-FSK/4-FSK only; MSK fixes it to symbol rate / 2) |
+| `--gain` | 0–1000000 | Amplitude gain, applied once |
+| `--seed` | uint32 | Data PRNG seed |
+| `--data-source` | `random`, `explicit` | Input bits source |
+| `--bits` | binary digits | Explicit input; selects `explicit` data |
+
+### Noise options
+
+| Option | Values | Notes |
+|---|---|---|
+| `--snr-db` | dB, or `off` | AWGN on linear waveforms; `off` disables preset-provided AWGN |
+| `--samples` | count | WGN sample count |
+| `--sample-rate` | Hz | WGN sample rate; sets the spectrum frequency axis |
+| `--noise-power` | power | WGN total complex noise power before gain |
+| `--noise-seed` | uint32 | Noise PRNG seed (WGN source and AWGN) |
+
+### Channel impairments
+
+Linear waveforms only; see
+[Noise, SNR and channel impairments](noise-and-impairments.md).
+
+| Option | Values | Notes |
+|---|---|---|
+| `--cfo-hz` | Hz | Carrier frequency offset |
+| `--phase-noise-hz` | Hz | Oscillator phase-noise 3 dB linewidth |
+| `--iq-gain-db` | dB | IQ gain imbalance: Q gain relative to I |
+| `--iq-phase-deg` | degrees | IQ quadrature skew |
+| `--dc-i` | fraction | DC offset on I, as a fraction of the RMS amplitude |
+| `--dc-q` | fraction | DC offset on Q, as a fraction of the RMS amplitude |
+| `--adc-bits` | 2–24 | Quantizer bits per component; 0 disables |
+| `--impairment-seed` | uint32 | Phase-noise PRNG seed |
+
+### Export options
+
+| Option | Values | Notes |
+|---|---|---|
+| `--format` | `csv`, `sigmf` | Single-generation output format |
+| `--output`, `-o` | file path | Default: `signal.csv`, or `signal.sigmf-data` (plus `signal.sigmf-meta`) |
+| `--overwrite` | flag | Replace existing sample and metadata files |
+
+### General options
+
+| Option | Values | Notes |
+|---|---|---|
+| `--log-level` | `trace`–`off` | Console log level; overrides `SPDLOG_LEVEL`, default `info` (see [Logging](#logging)) |
+| `--help` | flag | Print usage and exit |
+| `--version` | flag | Print the version and exit |
+
+### Compatibility rules
+
+- Noise-source options (`--samples`, `--sample-rate`, `--noise-power`) require
+  `--modulation WGN`; linear options (including `--snr-db`) are rejected for WGN.
+- Pulse options (`--pulse`, `--roll-off`, `--span`) are rejected for FSK and MSK,
+  which have no pulse filter, and `--tone-spacing-hz` is rejected for every other
+  waveform (MSK fixes the spacing).
+- `--bits` selects explicit input unless a conflicting `--data-source random`
+  was explicitly supplied.
+- The destination's parent directory must exist, and existing sample or metadata
+  files are protected unless `--overwrite` is specified.
+- Generation or export errors return a nonzero exit status.
+
+## Analyzing a recording
 
 `siggen-cli analyze <file>` measures a SigMF recording (`.sigmf-meta` or `.sigmf-data`, including batch frames), using the same
 estimators: sample count and rate, mean power, PAPR, the strongest spectral bin, the
 99 % occupied bandwidth and, for a recording made by siggen, the waveform, EVM,
-SNR after the matched filter, the measured Eb/N0 and the bit errors of the reference receiver. `--window hann|hamming|blackman|rectangular` and
-`--segment N` select the Welch estimator, and `--json` prints the report as JSON.
-See [Analysis, SigMF and Python](analysis-and-python.md).
+SNR after the matched filter, the measured Eb/N0 and the bit errors of the reference receiver. See
+[Analysis, SigMF and Python](analysis-and-python.md).
 
-### Measuring BER
+| Option | Values | Default | Notes |
+|---|---|---|---|
+| `file` | path | — | Positional, required: SigMF `.sigmf-meta` or `.sigmf-data` |
+| `--window` | `hann`, `hamming`, `blackman`, `rectangular` | `hann` | Welch window |
+| `--segment` | count | 1024 | Welch segment length in samples (minimum 4) |
+| `--json` | flag | off | Print the report as JSON |
+
+No signal or export option applies to `analyze`; passing one is an error.
+
+## Measuring BER
 
 `siggen-cli ber` sweeps Eb/N0 and measures the bit error rate of the ideal reference receiver, next
-to the textbook value. It takes the same signal options as single generation
+to the textbook value. It takes the same signal, noise and impairment options as single generation
 (`--modulation`, `--sps`, `--pulse`, `--cfo-hz`, ...), but `--symbols`, `--bits`, `--data-source` and
-`--snr-db` are rejected because the sweep controls them.
+`--snr-db` are rejected because the sweep controls them. Only linear waveforms are accepted.
 
 ```sh
 siggen-cli ber --modulation QPSK --eb-n0-db=0,2,4,6,8
@@ -83,12 +146,17 @@ waveform: QPSK, 8 samples/symbol, RRC pulse, ideal reference receiver
      0.00     -6.02       8152        637    7.814e-02    7.865e-02
 ```
 
-`--eb-n0-db` is a comma list (default 0 to 10 in steps of 2), `--min-errors N` (default 100) and
-`--max-bits N` (default 2000000) stop a point, `--block-symbols N` sets the symbols per generated block
-(default 4096) and `--json` prints the curve as JSON. Only linear waveforms are accepted. See
-[Bit error rate and the reference receiver](ber-and-receiver.md).
+| Option | Values | Default | Notes |
+|---|---|---|---|
+| `--eb-n0-db` | comma list | 0 to 10 in steps of 2 | Sweep points in dB |
+| `--min-errors` | count | 100 | Stop a point after this many bit errors |
+| `--max-bits` | count | 2000000 | Stop a point after this many bits |
+| `--block-symbols` | count | 4096 | Symbols generated per block |
+| `--json` | flag | off | Print the curve as JSON |
 
-### Batch dataset generation
+See [Bit error rate and the reference receiver](ber-and-receiver.md).
+
+## Batch dataset generation
 
 `siggen-cli batch` sweeps waveform, seed, and SNR lists and writes fixed-length
 frames into a new output directory, sharing preset loading and applicable
@@ -101,19 +169,37 @@ signal overrides with single generation:
   --output-dir dataset --format sigmf
 ```
 
-Batch defaults are the resolved waveform and seed (or the explicit lists), one
-frame per point, 2048 samples, and SigMF frames (`--format csv` writes CSV instead). Lists preserve user
-order and reject duplicates; `--snrs-db` accepts a comma-separated list (use the
-`--snrs-db=-10,0,10` form for negative values). Without an SNR list, the
-resolved single-signal noise setting is retained. WGN ignores the SNR axis: it
-is generated once per seed and frame at the configured power with a null SNR
-label. Batch linear input is always seeded random data; `--bits`,
-`--data-source`, `--symbols`, and `--samples` are rejected because the frame
-size determines generation length, and batch `--overwrite` is rejected.
-Put preset, signal, and format options after `batch`; root options before the
-subcommand are rejected except for the global `--log-level`. Mixed waveform
-lists accept options for either included family. A preset supplies its active
-family's settings; other families start from defaults before CLI overrides.
+| Option | Values | Default | Notes |
+|---|---|---|---|
+| `--modulations` | waveform list | resolved waveform | Sweep axis, space-separated |
+| `--seeds` | seed list | resolved seed | Sweep axis, space-separated |
+| `--snrs-db` | comma list | resolved SNR | Sweep axis; use the `--snrs-db=-10,0,10` form for negative values |
+| `--frame-size` | samples | 2048 | Samples per frame |
+| `--frames-per-point` | count | 1 | Frames per sweep point |
+| `--output-dir` | path | `dataset` | New output directory; must not exist |
+| `--format` | `csv`, `sigmf` | `sigmf` | Frame format |
+| `--overwrite` | flag | — | Rejected; batches never replace an existing directory |
+| `--preset` | file path | — | Preset loaded before the explicit batch overrides |
+
+Plus the shared [signal](#signal-options), [noise](#noise-options) and
+[impairment](#channel-impairments) options, placed after `batch`.
+
+Batch rules:
+
+- Lists preserve user order and reject duplicates. Without an SNR list, the
+  resolved single-signal noise setting is retained.
+- WGN ignores the SNR axis: it is generated once per seed and frame at the
+  configured power with a null SNR label.
+- Linear input is always seeded random data: `--bits`, `--data-source`,
+  `--symbols`, and `--samples` are rejected because the frame size determines
+  generation length.
+- Preset, signal, and format options go after `batch`; root options before the
+  subcommand are rejected except for the global `--log-level`.
+- Mixed waveform lists accept options for either included family. A preset
+  supplies its active family's settings; other families start from defaults
+  before CLI overrides.
+
+### Frame generation
 
 Each linear frame of length `F` is generated from `N = ceil(F / SPS)` payload
 symbols plus `G = span_symbols` RRC guard symbols on each side (rectangular
@@ -132,6 +218,8 @@ QPSK 1, 8-PSK 2, 16-QAM 3, 64-QAM 4, WGN 5. Reordering the table or enum does
 not change these IDs. SNR is deliberately excluded from seed derivation, so all SNR
 points of one (waveform, seed) sweep share the same underlying data and noise
 realizations.
+
+### Output files and manifest
 
 The output directory must not exist; existing directories are never touched.
 Files are named `frame_<point>_<frame>` with zero-padded indices preserving
@@ -154,6 +242,33 @@ Preflight rejects zero-gain AWGN and SNR ratios that overflow or underflow.
 Sample-dependent numerical failures remain generation errors and follow the
 same incomplete-run rules as write failures.
 
+## Logging
+
+spdlog writes timestamped, leveled console logs to stderr (color when supported).
+The CLI `--log-level` takes precedence over `SPDLOG_LEVEL`; the environment
+variable remains a fallback, followed by the default `info`:
+
+| Level | Effect |
+|---|---|
+| `trace` | Everything |
+| `debug` | Initialization and generation-start details |
+| `info` | Normal progress (default) |
+| `warn` | Warnings and errors only |
+| `error` | Errors only |
+| `critical` | Critical errors only |
+| `off` | Silence |
+
+```sh
+./out/debug/bin/siggen-cli --output signal.csv --log-level debug
+```
+
+Redirect stderr to keep a log file if needed. Logs include paths for preset/export
+operations but do not dump I/Q samples or explicit input bits. Logging is
+synchronous with a thread-safe sink; warnings and errors flush immediately.
+GUI errors remain visible, and per-frame validation does not generate logs.
+
+## Build and library notes
+
 The default build produces the GUI and the CLI. A headless build
 (`-DSIGGEN_BUILD_GUI=OFF`) builds only `siggen-cli` and the tests, without
 graphics dependencies. The former `imsignalgenerator` executable is now named
@@ -163,22 +278,6 @@ graphics dependencies. The former `imsignalgenerator` executable is now named
 Git submodule. It parses options before graphics initialization, so help, version,
 and argument errors work without a display and do not generate output files.
 Invalid levels, missing values, and unknown options fail with a usage error.
-
-spdlog writes timestamped, leveled console logs to stderr (color when supported).
-`--log-level` accepts `trace`, `debug`, `info`, `warn`, `error`, `critical`, or `off`.
-The CLI level takes precedence over `SPDLOG_LEVEL`; the environment variable
-remains a fallback, followed by the default `info`. Debug adds initialization and
-generation-start details. For example:
-
-```sh
-./out/debug/bin/siggen-cli --output signal.csv --log-level debug
-```
-
-Use `--log-level warn` for warnings and errors or `--log-level off` for silence.
-Redirect stderr to keep a log file if needed. Logs include paths for preset/export
-operations but do not dump I/Q samples or explicit input bits. Logging is
-synchronous with a thread-safe sink; warnings and errors flush immediately.
-GUI errors remain visible, and per-frame validation does not generate logs.
 CLI11 is used by the CLI and spdlog by both executables, but library-only builds need
 neither. Vendor examples, tests, documentation, benchmarks, and installation
 default off.
