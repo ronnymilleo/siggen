@@ -1,6 +1,8 @@
 * text=auto eol=lf
 
+# Binaries keep their bytes untouched
 *.png binary
+*.ttf binary
 
 # The executed notebooks render their plots on GitHub but embed the images as data, which would otherwise
 # count as Notebook source in the language statistics; documentation files are left out of them

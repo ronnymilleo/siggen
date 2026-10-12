@@ -6,6 +6,8 @@
 #include "window_manager.h"
 
 #include "imgui_internal.h"
+#include "theme.h"
+#include <cstddef>
 
 namespace GUI {
 
@@ -49,6 +51,17 @@ void WindowManager::DrawMainMenuBar() {
         return;
     }
     if (ImGui::BeginMenu("View")) {
+        if (ImGui::BeginMenu("Theme")) {
+            const auto themes = GetThemes();
+            for (std::size_t index = 0; index < themes.size(); ++index) {
+                if (ImGui::MenuItem(themes[index].Name, nullptr, index == GetThemeIndex())) {
+                    SetTheme(index);
+                    ImGui::MarkIniSettingsDirty();
+                }
+            }
+            ImGui::EndMenu();
+        }
+        ImGui::Separator();
         // Render() applies it right after the menu
         if (ImGui::MenuItem("Reset Layout")) {
             m_ResetLayout = true;

@@ -33,8 +33,10 @@ private:
     void InitializeSDL();
     void CreateWindow();
     void CreateGPUDevice();
+    void InitImGui();
     void LoadAndSetIcon();
     void PollEvents();
+    void NewFrame();
     void EndFrame();
     void ShowErrorMessage(const std::string &title, const std::string &message);
 
@@ -42,7 +44,6 @@ private:
     SDL_GPUDevice *m_GPUDevice = nullptr;
     float m_WindowScale = 1.0f;
     bool m_IsOpen = true;
-    bool m_Initialized = false;
 
     // Declared last so it is destroyed before the window and the ImGui context it draws with
     WindowManager m_WindowManager;

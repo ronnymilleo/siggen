@@ -5,6 +5,7 @@
 
 #include "summary_window.h"
 
+#include "theme.h"
 #include "theory.h"
 #include "widgets.h"
 #include <complex>
@@ -26,7 +27,7 @@ void SummaryWindow::Draw() {
         return;
     }
     if (result->Config != m_Session.GetConfig()) {
-        ImGui::TextColored(WarningColor, "Settings changed. Generate to update the displayed result.");
+        ImGui::TextColored(GetWarningTextColor(), "Settings changed. Generate to update the displayed result.");
     }
     if (result->Family == Core::Family::Noise) {
         DrawNoiseSummary(*result);

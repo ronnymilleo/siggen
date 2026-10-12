@@ -13,7 +13,9 @@ disabled. It has
 three dockable windows: **Signal Setup** on the left, **Signal Summary** above
 **Signal Views** (the plots) on the right. Drag a window's tab to rearrange them;
 the layout is saved in `imgui.ini`, and **View > Reset Layout** restores the
-default. Enter
+default. **View > Theme** switches between the nine color themes (seven dark and two
+light); the choice is kept in `imgui.ini` with the layout. The interface text uses the
+bundled Inter font, so it looks the same on every system. Enter
 modulation, symbol count, symbol rate in baud, samples per symbol (SPS), and
 amplitude gain in **Signal Setup**. Choose RRC or rectangular pulses in **Pulse
 Shaping**. The **AWGN** section enables additive noise with a requested SNR in

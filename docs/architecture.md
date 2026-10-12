@@ -45,8 +45,10 @@ Command line, GUI and Python:
 
 - `app-cli/command_line.*`, `app-cli/cli_config.*`: CLI parsing and
   defaults → preset → explicit-option resolution, used by `app-cli/main.cpp`.
-- `app-gui/application.*`: owns the SDL3 window, the SDL GPU device, the ImGui layer and the
+- `app-gui/application.*`: owns the SDL3 window, the SDL GPU device, the ImGui contexts and the
   frame loop (`Init`, `Run`, `Shutdown`); `main.cpp` only drives it.
+- `app-gui/theme.*`: the color themes (ImGui and ImPlot styles), the bundled Inter font and the theme
+  choice kept in imgui.ini; **View > Theme** switches themes while running.
 - `app-gui/generator_session.*`: the document shared by the windows: settings,
   the owned generation job and BER sweep, and the analysis of the last result.
   Analysis runs once on result completion; generation and BER sweeps are

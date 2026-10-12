@@ -8,6 +8,7 @@
 #include "help_topics.h"
 #include "iq_export.h"
 #include "measurements.h"
+#include "theme.h"
 #include "widgets.h"
 #include <algorithm>
 #include <cmath>
@@ -63,7 +64,7 @@ void ControlsWindow::Draw() {
     }
     const std::string validation = ValidationError(config);
     if (!validation.empty()) {
-        ImGui::TextColored(ErrorColor, "Invalid settings: %s", validation.c_str());
+        ImGui::TextColored(GetErrorTextColor(), "Invalid settings: %s", validation.c_str());
     }
     ImGui::PopItemWidth();
     DrawActions(validation.empty());
@@ -275,7 +276,7 @@ void ControlsWindow::ResetBitInput() {
 void ControlsWindow::DrawActions(bool settings_valid) {
     ImGui::Separator();
     ImGui::BeginDisabled(m_Session.IsGenerating() || !settings_valid);
-    if (ImGui::Button("Generate Signal")) {
+    if (PrimaryButton("Generate Signal")) {
         m_Session.StartGeneration();
     }
     ImGui::EndDisabled();
@@ -294,7 +295,7 @@ void ControlsWindow::DrawActions(bool settings_valid) {
         ImGui::TextUnformatted("Generating...");
     }
     if (!m_Session.GetError().empty()) {
-        ImGui::TextColored(ErrorColor, "Operation failed: %s", m_Session.GetError().c_str());
+        ImGui::TextColored(GetErrorTextColor(), "Operation failed: %s", m_Session.GetError().c_str());
     }
 }
 

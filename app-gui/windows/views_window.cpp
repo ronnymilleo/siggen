@@ -8,6 +8,7 @@
 #include "help_topics.h"
 #include "implot.h"
 #include "plot_figures.h"
+#include "theme.h"
 #include "theory.h"
 #include "widgets.h"
 #include <algorithm>
@@ -455,7 +456,7 @@ void ViewsWindow::DrawBerPlot(const Core::GeneratedSignal &result) {
         ExportImageButton("ber", [&] { return Core::BerFigure(points, swept.Modulation, current); });
     }
     if (swept != result.Config) {
-        ImGui::TextColored(WarningColor,
+        ImGui::TextColored(GetWarningTextColor(),
                            "This curve was measured for %s with other settings than the displayed signal.",
                            Core::ModulationName(swept.Modulation));
     }

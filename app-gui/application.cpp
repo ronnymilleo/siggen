@@ -7,7 +7,8 @@
 
 #include "imgui_impl_sdl3.h"
 #include "imgui_impl_sdlgpu3.h"
-#include "imgui_layer.h"
+#include "implot.h"
+#include "theme.h"
 #include <SDL3/SDL.h>
 #include <spdlog/spdlog.h>
 #include <stdexcept>
@@ -43,9 +44,7 @@ void Application::Init() {
     CreateWindow();
     CreateGPUDevice();
     LoadAndSetIcon();
-
-    ImGuiLayer::Init(m_SDLWindow, m_GPUDevice, m_WindowScale);
-    m_Initialized = true;
+    InitImGui();
 }
 
 /**
@@ -65,9 +64,9 @@ int Application::Run() {
         }
 
         try {
-            ImGuiLayer::NewFrame();
+            NewFrame();
             m_WindowManager.Render();
-            ImGuiLayer::Render();
+            ImGui::Render();
             EndFrame();
         } catch (const std::exception &error) {
             // Keep running so the user can see the error and carry on
@@ -86,9 +85,11 @@ void Application::Shutdown() {
     if (m_GPUDevice != nullptr) {
         SDL_WaitForGPUIdle(m_GPUDevice);
     }
-    if (m_Initialized) {
-        ImGuiLayer::Terminate();
-        m_Initialized = false;
+    if (ImGui::GetCurrentContext() != nullptr) {
+        ImGui_ImplSDLGPU3_Shutdown();
+        ImGui_ImplSDL3_Shutdown();
+        ImPlot::DestroyContext();
+        ImGui::DestroyContext();
     }
     if (m_GPUDevice != nullptr) {
         SDL_ReleaseWindowFromGPUDevice(m_GPUDevice, m_SDLWindow);
@@ -141,6 +142,38 @@ void Application::CreateGPUDevice() {
 }
 
 /**
+ * @brief   Creates the ImGui and ImPlot contexts, applies the theme and the bundled font, and binds the SDL3 and
+ *          SDL GPU backends.
+ * @note    The theme choice is kept in imgui.ini by its settings handler, read on the first frame.
+ */
+void Application::InitImGui() {
+    IMGUI_CHECKVERSION();
+    ImGui::CreateContext();
+    ImPlot::CreateContext();
+
+    ImGuiIO &io = ImGui::GetIO();
+    io.ConfigFlags |= ImGuiConfigFlags_NavEnableKeyboard;
+    io.ConfigFlags |= ImGuiConfigFlags_NavEnableGamepad;
+    // Windows float and dock inside the main window only
+    io.ConfigFlags |= ImGuiConfigFlags_DockingEnable;
+
+    ApplyTheme();
+    LoadThemeFonts();
+    RegisterThemeSettingsHandler();
+
+    ImGuiStyle &style = ImGui::GetStyle();
+    style.ScaleAllSizes(m_WindowScale);
+    style.FontScaleDpi = m_WindowScale;
+    io.ConfigDpiScaleFonts = true;
+
+    ImGui_ImplSDL3_InitForSDLGPU(m_SDLWindow);
+    ImGui_ImplSDLGPU3_InitInfo init_info{};
+    init_info.Device = m_GPUDevice;
+    init_info.ColorTargetFormat = SDL_GetGPUSwapchainTextureFormat(m_GPUDevice, m_SDLWindow);
+    ImGui_ImplSDLGPU3_Init(&init_info);
+}
+
+/**
  * @brief   Sets the window icon from assets/icon.png, relative to the working directory.
  * @note    A missing icon only logs a warning.
  */
@@ -176,6 +209,12 @@ void Application::PollEvents() {
     }
 }
 
+void Application::NewFrame() {
+    ImGui_ImplSDLGPU3_NewFrame();
+    ImGui_ImplSDL3_NewFrame();
+    ImGui::NewFrame();
+}
+
 void Application::EndFrame() {
     SDL_GPUCommandBuffer *command_buffer = SDL_AcquireGPUCommandBuffer(m_GPUDevice);
     if (command_buffer == nullptr) {
@@ -191,7 +230,7 @@ void Application::EndFrame() {
         // Uploads the vertex and index buffers, which cannot happen inside a render pass
         ImGui_ImplSDLGPU3_PrepareDrawData(draw_data, command_buffer);
 
-        const ImVec4 &background = ImGuiLayer::BackgroundColor();
+        const ImVec4 background = GetThemeBackground();
         SDL_GPUColorTargetInfo target_info{};
         target_info.texture = swapchain_texture;
         target_info.clear_color = SDL_FColor{background.x, background.y, background.z, background.w};
