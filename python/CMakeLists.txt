@@ -7,6 +7,14 @@ target_compile_definitions(siggen_c PRIVATE SIGGEN_VERSION="${PROJECT_VERSION}")
 siggen_target_options(siggen_c)
 set_target_properties(siggen_c PROPERTIES CXX_VISIBILITY_PRESET hidden VISIBILITY_INLINES_HIDDEN ON)
 
+# Install the library inside the `siggen` package, next to __init__.py, so the wheel built by scikit-build-core
+# finds it there (_find_library() looks in the package directory first). The DLL is a RUNTIME artifact on Windows,
+# the .so/.dylib a LIBRARY artifact on Linux/macOS.
+install(TARGETS siggen_c
+        RUNTIME DESTINATION siggen
+        LIBRARY DESTINATION siggen
+        ARCHIVE DESTINATION siggen)
+
 if(SIGGEN_BUILD_TESTS)
     find_package(Python3 COMPONENTS Interpreter)
     if(Python3_FOUND)
@@ -17,7 +25,7 @@ if(SIGGEN_BUILD_TESTS)
             add_test(NAME Python.Package COMMAND "${Python3_EXECUTABLE}" -m unittest discover -s ${CMAKE_CURRENT_SOURCE_DIR}/tests -v
                 WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR})
             set_tests_properties(Python.Package PROPERTIES ENVIRONMENT
-                "SIGGEN_LIBRARY=$<TARGET_FILE:siggen_c>;PYTHONPATH=${CMAKE_CURRENT_SOURCE_DIR};SIGGEN_CLI=$<TARGET_FILE:siggen>")
+                "SIGGEN_LIBRARY=$<TARGET_FILE:siggen_c>;PYTHONPATH=${CMAKE_CURRENT_SOURCE_DIR}")
         endif()
     endif()
 endif()

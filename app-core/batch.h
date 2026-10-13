@@ -10,6 +10,7 @@
 #include "iq_export.h"
 #include <complex>
 #include <cstdint>
+#include <expected>
 #include <filesystem>
 #include <optional>
 #include <string>
@@ -70,13 +71,28 @@ std::uint32_t DeriveImpairmentSeed(std::uint32_t base_seed, Modulation waveform,
                                    std::uint32_t configured_impairment_seed);
 
 // Frames
-void ValidateFrameRequest(const GenerationConfig &base, Modulation waveform, int frame_size);
-FrameResult GenerateFrame(const GenerationConfig &base, int frame_size, std::size_t frame_index,
-                          const std::optional<double> &snr_db);
+std::expected<void, std::string> ValidateFrameRequest(const GenerationConfig &base, Modulation waveform,
+                                                      int frame_size);
+std::expected<FrameResult, std::string> GenerateFrame(const GenerationConfig &base, int frame_size,
+                                                      std::size_t frame_index, const std::optional<double> &snr_db);
 
 // Batches
-void ValidateBatch(const BatchRequest &request);
-BatchSummary RunBatch(const BatchRequest &request);
+/**
+ * @brief   Resolves the shared base configuration of a batch and validates it.
+ * @param[in] config    Configuration after the preset and any explicit options.
+ * @param[in] waveforms Sweep waveforms; empty selects config.Modulation.
+ * @return  The base configuration with only the active family's settings retained; an error for an unsupported
+ *          waveform or an invalid configuration.
+ * @note    A batch may mix linear waveforms and WGN, but only the family of the preset supplies settings: when
+ *          the preset is a noise source, its noise-source settings are kept and the modulation becomes a linear
+ *          default (unless every swept waveform is a noise source); when the preset is linear, the dormant
+ *          noise-source settings reset to defaults. This mirrors the command-line resolution the GUI and the
+ *          Python package rely on.
+ */
+std::expected<GenerationConfig, std::string> PrepareBatchBase(GenerationConfig config,
+                                                              const std::vector<Modulation> &waveforms);
+std::expected<void, std::string> ValidateBatch(const BatchRequest &request);
+std::expected<BatchSummary, std::string> RunBatch(const BatchRequest &request);
 
 } // namespace Core
 

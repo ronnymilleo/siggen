@@ -12,18 +12,26 @@ concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
 
+# The Linux jobs run in an archlinux container, the distribution the project is developed on: the pinned
+# CMake version is newer than Ubuntu's. SDL3 comes from its vendor submodule; its build dependencies are those
+# of the Arch sdl3 package (makedepends, without the audio ones), since SDL fails to configure when an X11
+# extension it enables is missing. The tests never open a window: the UI smoke tests run on headless ImGui frames
+env:
+  PACKAGES: >-
+    git cmake ninja gcc clang python pkgconf ccache python-numpy
+    libxcursor libxi libxfixes libxinerama libxrandr libxss libxtst libxkbcommon wayland wayland-protocols libdecor mesa
+  # Compiled objects are kept between runs, so a push only recompiles what changed
+  CCACHE_MAXSIZE: 500M
+  COMPILER_LAUNCHER: -DCMAKE_C_COMPILER_LAUNCHER=ccache -DCMAKE_CXX_COMPILER_LAUNCHER=ccache
+
 jobs:
-  # Formatting and naming need the same clang-format/clang-tidy as development, so they run on Arch Linux.
-  # The GUI is configured too, so clang-tidy also sees app-gui/ in the compile database
-  lint:
+  linux:
     runs-on: ubuntu-latest
     container: archlinux:latest
     steps:
       # git must exist before checkout, or the submodules are not fetched
       - name: Install build dependencies
-        run: >-
-          pacman -Syu --noconfirm --needed git cmake ninja gcc clang
-          libx11 libxrandr libxinerama libxcursor libxi mesa libglvnd
+        run: pacman -Syu --noconfirm --needed $PACKAGES
 
       - name: Check out the repository
         uses: actions/checkout@v7
@@ -33,55 +41,178 @@ jobs:
       - name: Trust the workspace
         run: git config --global --add safe.directory "$GITHUB_WORKSPACE"
 
+      # In a container, only $GITHUB_WORKSPACE holds the path as the container sees it
+      - name: Locate the compiler cache
+        run: echo "CCACHE_DIR=$GITHUB_WORKSPACE/.ccache" >> "$GITHUB_ENV"
+
+      # Each run saves a new cache and restores the newest one of its job, whatever the branch
+      - name: Restore the compiler cache
+        uses: actions/cache@v6
+        with:
+          path: .ccache
+          key: ccache-debug-${{ github.sha }}
+          restore-keys: ccache-debug-
+
       - name: Configure
-        run: cmake --preset dev
+        run: >-
+          cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Debug -DSIGGEN_BUILD_TESTS=ON
+          -DSIGGEN_BUILD_PYTHON=ON -DSIGGEN_ENABLE_COVERAGE=ON $COMPILER_LAUNCHER
 
-      # Building siggen runs clang-format on every source, so any change means unformatted code was committed.
-      # Only C++ files are compared, so other local edits (act copies the working tree) do not count
       - name: Build
-        run: cmake --build --preset dev --target siggen
+        run: cmake --build build
 
+      # The build runs clang-format on every source, so any change means unformatted code was committed.
+      # Only C++ files are compared, so other local edits (act copies the working tree) do not count
       - name: Check formatting
         run: git diff --exit-code -- '*.cpp' '*.h'
 
-      - name: Check naming
-        # python/csrc is a C ABI loaded with ctypes, so its siggen_* names stay C-style
-        run: clang-tidy -p build/dev --warnings-as-errors='*' $(git ls-files '*.cpp' ':!python/')
+      - name: Run tests
+        run: ctest --test-dir build --output-on-failure
 
-  linux-headless:
-    runs-on: ubuntu-24.04
+      - name: Report coverage
+        run: |
+          find build -name "*.gcda" | while read -r gcda; do gcov -p -o "$gcda" "$gcda"; done > /dev/null 2>&1
+          curl -sL https://coveralls.io/coveralls-linux.tar.gz | tar -xz && ./coveralls
+        env:
+          COVERALLS_REPO_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      # One clang-tidy per core, on the sources of the project only (the vendor libraries are in the database too)
+      - name: Check naming
+        run: >-
+          run-clang-tidy -p build -quiet -j "$(nproc)" -warnings-as-errors='*'
+          '/(app-core|app-gui|tests)/|/main\.cpp$'
+
+      - name: Compiler cache statistics
+        run: ccache --show-stats
+
+  linux-sanitizers:
+    runs-on: ubuntu-latest
+    container: archlinux:latest
+    steps:
+      - name: Install build dependencies
+        run: pacman -Syu --noconfirm --needed $PACKAGES
+
+      - name: Check out the repository
+        uses: actions/checkout@v7
+        with:
+          submodules: recursive
+
+      - name: Locate the compiler cache
+        run: echo "CCACHE_DIR=$GITHUB_WORKSPACE/.ccache" >> "$GITHUB_ENV"
+
+      - name: Restore the compiler cache
+        uses: actions/cache@v6
+        with:
+          path: .ccache
+          key: ccache-sanitizers-${{ github.sha }}
+          restore-keys: ccache-sanitizers-
+
+      - name: Configure with AddressSanitizer and UndefinedBehaviorSanitizer
+        run: >-
+          cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Debug -DSIGGEN_BUILD_TESTS=ON
+          -DSIGGEN_BUILD_GUI=OFF -DSIGGEN_SANITIZER=address-undefined $COMPILER_LAUNCHER
+
+      - name: Build
+        run: cmake --build build
+
+      - name: Run tests
+        run: ctest --test-dir build --output-on-failure
+
+  windows:
+    # windows-latest is the Windows Server 2025 image with Visual Studio 2026, and comes with CMake and
+    # Ninja; SDL3 comes from its vendor submodule and needs nothing else
+    runs-on: windows-latest
     steps:
       - name: Check out the repository
         uses: actions/checkout@v7
         with:
           submodules: recursive
 
-      - name: Install build tools
-        run: sudo apt-get update && sudo apt-get install --yes cmake ninja-build g++ clang python3-numpy
+      # Ninja looks for cl in the environment, which vcvarsall sets up
+      - name: Set up the MSVC environment
+        uses: ilammy/msvc-dev-cmd@v1
 
-      - name: Validate GCC
-        run: cmake --workflow --preset headless
+      # The Python package tests need NumPy for the interpreter CMake discovers
+      - name: Install NumPy
+        run: python -m pip install --upgrade numpy
 
-      - name: Validate Clang
-        run: cmake --workflow --preset clang-headless
+      - name: Configure
+        run: >-
+          cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Debug -DSIGGEN_BUILD_TESTS=ON
+          -DSIGGEN_BUILD_PYTHON=ON
+
+      - name: Build
+        run: cmake --build build
+
+      - name: Run tests
+        run: ctest --test-dir build --output-on-failure
 
   macos:
-    runs-on: macos-latest
+    # macos-26 is an Apple silicon image with Xcode 26, whose SDK the macOS 26 deployment target of the project
+    # needs; SDL3 comes from its vendor submodule
+    runs-on: macos-26
     steps:
+      - name: Install build dependencies
+        run: brew install cmake ninja
+
       - name: Check out the repository
         uses: actions/checkout@v7
         with:
           submodules: recursive
 
-      - name: Install build tools
-        run: brew install ninja
-
-      - name: Validate headless build and tests
-        run: cmake --workflow --preset headless
-
-      # The UI smoke tests open a native window, which hosted runners cannot
-      # reliably provide, so the GUI is only configured and compiled here.
-      - name: Build GUI
+      # The Python package tests need NumPy for the interpreter CMake discovers. Each step runs in a fresh shell, so
+      # the venv is put on GITHUB_PATH for the Configure step's find_package(Python3) to find this numpy-enabled
+      # interpreter (activating it here would not carry over to the next step).
+      - name: Install NumPy
         run: |
-          cmake --preset dev
-          cmake --build --preset dev
+          python3 -m venv /tmp/buildenv
+          source /tmp/buildenv/bin/activate
+          python3 -m pip install --upgrade numpy
+          echo "/tmp/buildenv/bin" >> "$GITHUB_PATH"
+
+      - name: Configure
+        run: >-
+          cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Debug -DSIGGEN_BUILD_TESTS=ON
+          -DSIGGEN_BUILD_PYTHON=ON
+
+      - name: Build
+        run: cmake --build build
+
+      - name: Run tests
+        run: ctest --test-dir build --output-on-failure
+
+  wheel:
+    # A light Linux-only check of the distributable Python wheel: build it with scikit-build-core, install it into
+    # a clean venv and run the package tests against the installed library, so a release wheel is verified and not
+    # just the source tree through PYTHONPATH
+    runs-on: ubuntu-latest
+    container: archlinux:latest
+    steps:
+      - name: Install build dependencies
+        run: pacman -Syu --noconfirm --needed git cmake ninja gcc python python-pip
+
+      - name: Check out the repository
+        uses: actions/checkout@v7
+        with:
+          submodules: recursive
+
+      - name: Trust the workspace
+        run: git config --global --add safe.directory "$GITHUB_WORKSPACE"
+
+      # scikit-build-core (pinned in pyproject.toml) builds the wheel in an isolated environment
+      - name: Build the wheel
+        run: |
+          python -m venv /tmp/buildenv
+          /tmp/buildenv/bin/pip install --upgrade pip build
+          /tmp/buildenv/bin/python -m build --wheel --outdir /tmp/wheelhouse
+
+      # Installing the wheel into a clean venv (with NumPy) and running the tests proves the shipped package and
+      # its bundled library work; running from a directory outside the source tree makes `import siggen` resolve
+      # to the installed wheel and not python/siggen
+      - name: Install into a clean venv and test
+        run: |
+          python -m venv /tmp/testenv
+          /tmp/testenv/bin/pip install --upgrade pip numpy /tmp/wheelhouse/siggen-*.whl
+          cp python/tests/test_siggen.py /tmp/test_siggen.py
+          cd /tmp
+          /tmp/testenv/bin/python -m unittest test_siggen -v

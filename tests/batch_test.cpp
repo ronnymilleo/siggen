@@ -9,6 +9,7 @@
 #include "iq_export.h"
 #include "noise.h"
 #include "recording.h"
+#include "test_support.h"
 #include <chrono>
 #include <cmath>
 #include <filesystem>
@@ -51,6 +52,42 @@ std::vector<std::string> ReadLines(const std::filesystem::path &path) {
 
 } // namespace
 
+TEST(Batch, PrepareBatchBaseResetsTheInactiveFamily) {
+    // A linear preset keeps its own settings and drops the dormant noise-source settings.
+    GenerationConfig linear;
+    linear.NoiseSource.NoisePower = 7;
+    linear.NoiseSource.SampleCount = 999;
+    const auto from_linear = Unwrap(PrepareBatchBase(linear, {Modulation::BPSK, Modulation::WGN}));
+    EXPECT_EQ(from_linear.NoiseSource, NoiseSourceSettings{});
+    EXPECT_EQ(from_linear.Modulation, Modulation::BPSK);
+
+    // A noise preset in a mixed sweep keeps its noise-source settings and becomes a linear default.
+    GenerationConfig noise;
+    noise.Modulation = Modulation::WGN;
+    noise.NoiseSource.NoisePower = 3;
+    noise.NoiseSource.SampleCount = 512;
+    const auto mixed = Unwrap(PrepareBatchBase(noise, {Modulation::BPSK, Modulation::WGN}));
+    EXPECT_EQ(mixed.Modulation, Modulation::BPSK);
+    EXPECT_DOUBLE_EQ(mixed.NoiseSource.NoisePower, 3);
+    EXPECT_EQ(mixed.NoiseSource.SampleCount, 512);
+
+    // A noise preset with only noise waveforms stays WGN.
+    const auto only_noise = Unwrap(PrepareBatchBase(noise, {Modulation::WGN}));
+    EXPECT_EQ(only_noise.Modulation, Modulation::WGN);
+    EXPECT_DOUBLE_EQ(only_noise.NoiseSource.NoisePower, 3);
+
+    // An empty waveform list falls back to the preset's own family.
+    const auto empty_noise = Unwrap(PrepareBatchBase(noise, {}));
+    EXPECT_EQ(empty_noise.Modulation, Modulation::WGN);
+    GenerationConfig empty_linear;
+    empty_linear.Modulation = Modulation::QPSK;
+    empty_linear.NoiseSource.NoisePower = 5;
+    EXPECT_EQ(Unwrap(PrepareBatchBase(empty_linear, {})).NoiseSource, NoiseSourceSettings{});
+
+    // An unsupported waveform is rejected.
+    EXPECT_FALSE(PrepareBatchBase(linear, {static_cast<Modulation>(99)}).has_value());
+}
+
 TEST(Batch, SeedDerivationDeterministicAndSnrIndependent) {
     const auto data = DeriveDataSeed(42, Modulation::BPSK, 3);
     EXPECT_EQ(data, DeriveDataSeed(42, Modulation::BPSK, 3));
@@ -67,7 +104,7 @@ TEST(Batch, SeedDerivationDeterministicAndSnrIndependent) {
 TEST(Batch, FrameGeometryRRCAndRectangular) {
     GenerationConfig base;
     const int frame_size = 256;
-    const auto rrc = GenerateFrame(base, frame_size, 0, std::nullopt);
+    const auto rrc = Unwrap(GenerateFrame(base, frame_size, 0, std::nullopt));
     EXPECT_EQ(rrc.Samples.size(), 256u);
     EXPECT_EQ(rrc.FilterDelaySamples, 40u);
     EXPECT_EQ(rrc.CropOffset, 10u * 8u + 40u); // span*SPS + filter delay.
@@ -76,19 +113,19 @@ TEST(Batch, FrameGeometryRRCAndRectangular) {
     auto full_config = base;
     full_config.Seed = rrc.DataSeed;
     full_config.SymbolCount = 256 / 8 + 2 * 10; // N + 2G
-    const auto full = Generate(full_config);
+    const auto full = Unwrap(Generate(full_config));
     ASSERT_GE(full.Samples.size(), rrc.CropOffset + 256u);
     for (std::size_t k = 0; k < 256; ++k) {
         EXPECT_EQ(rrc.Samples[k], full.Samples[rrc.CropOffset + k]);
     }
 
     base.Pulse = Pulse::Rectangular;
-    const auto rect = GenerateFrame(base, frame_size, 0, std::nullopt);
+    const auto rect = Unwrap(GenerateFrame(base, frame_size, 0, std::nullopt));
     EXPECT_EQ(rect.Samples.size(), 256u);
     EXPECT_EQ(rect.CropOffset, 0u);
     EXPECT_EQ(rect.FilterDelaySamples, 0u);
     // Frame size not divisible by SPS still yields exact length.
-    const auto odd = GenerateFrame(base, 100, 0, std::nullopt);
+    const auto odd = Unwrap(GenerateFrame(base, 100, 0, std::nullopt));
     EXPECT_EQ(odd.Samples.size(), 100u);
 }
 
@@ -96,21 +133,21 @@ TEST(Batch, WGNFramesIgnoreSnrAxis) {
     GenerationConfig base;
     base.Modulation = Modulation::WGN;
     base.NoiseSource.SampleCount = 999; // Overridden by the frame size.
-    const auto frame = GenerateFrame(base, 128, 0, std::optional<double>(10));
+    const auto frame = Unwrap(GenerateFrame(base, 128, 0, std::optional<double>(10)));
     EXPECT_EQ(frame.Samples.size(), 128u);
     EXPECT_FALSE(frame.Noise.AwgnApplied);
     EXPECT_EQ(frame.CropOffset, 0u);
     EXPECT_DOUBLE_EQ(frame.SampleRateHz, base.NoiseSource.SampleRateHz);
     // The frame is exactly the seeded WGN stream at configured power.
-    const auto expected = GaussianNoise(128, base.NoiseSource.NoisePower, frame.NoiseSeed);
+    const auto expected = Unwrap(GaussianNoise(128, base.NoiseSource.NoisePower, frame.NoiseSeed));
     EXPECT_EQ(frame.Samples, expected);
 }
 
 TEST(Batch, FrameAwgnAppliesAfterCrop) {
     GenerationConfig base;
     base.SymbolCount = 512; // Ignored; frame size fixes length.
-    const auto clean = GenerateFrame(base, 256, 0, std::nullopt);
-    const auto noisy = GenerateFrame(base, 256, 0, std::optional<double>(10));
+    const auto clean = Unwrap(GenerateFrame(base, 256, 0, std::nullopt));
+    const auto noisy = Unwrap(GenerateFrame(base, 256, 0, std::optional<double>(10)));
     EXPECT_EQ(clean.DataSeed, noisy.DataSeed);
     EXPECT_EQ(clean.NoiseSeed, noisy.NoiseSeed);
     EXPECT_TRUE(noisy.Noise.AwgnApplied);
@@ -122,30 +159,30 @@ TEST(Batch, FrameAwgnAppliesAfterCrop) {
     }
     reference /= 256;
     EXPECT_NEAR(noisy.Noise.ReferencePower, reference, 1e-9);
-    const auto noise = GaussianNoise(256, noisy.Noise.AddedNoisePower, noisy.NoiseSeed);
+    const auto noise = Unwrap(GaussianNoise(256, noisy.Noise.AddedNoisePower, noisy.NoiseSeed));
     for (std::size_t k = 0; k < 256; ++k) {
         EXPECT_FLOAT_EQ((clean.Samples[k] + noise[k]).real(), noisy.Samples[k].real());
     }
     // SNR does not enter seed derivation: realizations stay paired.
-    const auto louder = GenerateFrame(base, 256, 0, std::optional<double>(20));
+    const auto louder = Unwrap(GenerateFrame(base, 256, 0, std::optional<double>(20)));
     EXPECT_EQ(louder.DataSeed, noisy.DataSeed);
     EXPECT_EQ(louder.NoiseSeed, noisy.NoiseSeed);
 }
 
 TEST(Batch, FrameLimitsAndInvalidRequests) {
     GenerationConfig base;
-    EXPECT_THROW(GenerateFrame(base, 0, 0, std::nullopt), std::invalid_argument);
-    EXPECT_THROW(ValidateFrameRequest(base, static_cast<Modulation>(99), 64), std::invalid_argument);
+    EXPECT_FALSE(GenerateFrame(base, 0, 0, std::nullopt).has_value());
+    EXPECT_FALSE(ValidateFrameRequest(base, static_cast<Modulation>(99), 64).has_value());
     // Rectangular SPS=1 frames are limited by the 65536-symbol payload bound.
     base.Pulse = Pulse::Rectangular;
     base.SamplesPerSymbol = 1;
-    EXPECT_THROW(ValidateFrameRequest(base, Modulation::BPSK, 65537), std::length_error);
-    EXPECT_NO_THROW(ValidateFrameRequest(base, Modulation::BPSK, 65536));
+    EXPECT_FALSE(ValidateFrameRequest(base, Modulation::BPSK, 65537).has_value());
+    EXPECT_TRUE(ValidateFrameRequest(base, Modulation::BPSK, 65536).has_value());
     // RRC guards count toward the symbol limit.
     base = {};
     base.SamplesPerSymbol = 2;
     base.SpanSymbols = 100;
-    EXPECT_THROW(ValidateFrameRequest(base, Modulation::BPSK, 200000), std::length_error);
+    EXPECT_FALSE(ValidateFrameRequest(base, Modulation::BPSK, 200000).has_value());
 }
 
 TEST(Batch, RunWritesFramesSidecarsAndManifest) {
@@ -157,7 +194,7 @@ TEST(Batch, RunWritesFramesSidecarsAndManifest) {
     request.FrameSize = 64;
     request.FramesPerPoint = 2;
     request.OutputDir = dir;
-    const auto summary = RunBatch(request);
+    const auto summary = Unwrap(RunBatch(request));
     // BPSK has two SNR points, WGN ignores the SNR axis: three points, six frames.
     EXPECT_EQ(summary.PointCount, 3u);
     EXPECT_EQ(summary.FrameCount, 6u);
@@ -223,7 +260,7 @@ TEST(Batch, CsvFramesHaveHeaderAndExactRows) {
     request.FrameSize = 32;
     request.Format = ExportFormat::CSV;
     request.OutputDir = dir;
-    RunBatch(request);
+    ASSERT_TRUE(RunBatch(request).has_value());
     const auto csv = ReadFile(dir / "frame_000000_000000.csv");
     std::istringstream input(csv);
     std::string line;
@@ -249,35 +286,35 @@ TEST(Batch, ValidationRejectsBadRequestsBeforeOutput) {
     request.OutputDir = dir;
     // Existing directory is never touched.
     std::filesystem::create_directory(dir);
-    EXPECT_THROW(RunBatch(request), std::runtime_error);
+    EXPECT_FALSE(RunBatch(request).has_value());
     EXPECT_TRUE(std::filesystem::is_empty(dir));
     std::filesystem::remove_all(dir);
     // Duplicates on any axis.
     request.Waveforms = {Modulation::BPSK, Modulation::BPSK};
-    EXPECT_THROW(ValidateBatch(request), std::invalid_argument);
+    EXPECT_FALSE((ValidateBatch(request)).has_value());
     request.Waveforms = {};
     request.Seeds = {7, 7};
-    EXPECT_THROW(ValidateBatch(request), std::invalid_argument);
+    EXPECT_FALSE((ValidateBatch(request)).has_value());
     request.Seeds = {};
     request.SnrsDb = {0, 10, 0};
-    EXPECT_THROW(ValidateBatch(request), std::invalid_argument);
+    EXPECT_FALSE((ValidateBatch(request)).has_value());
     request.SnrsDb = {NAN};
-    EXPECT_THROW(ValidateBatch(request), std::invalid_argument);
+    EXPECT_FALSE((ValidateBatch(request)).has_value());
     request.SnrsDb = {};
     // Explicit-bit input is rejected.
     request.Base.DataSource = DataSource::Explicit;
     request.Base.Bits.assign(256, '0');
-    EXPECT_THROW(ValidateBatch(request), std::invalid_argument);
+    EXPECT_FALSE((ValidateBatch(request)).has_value());
     request.Base.DataSource = DataSource::Random;
     request.Base.Bits.clear();
     // Frame accounting limits.
     request.FramesPerPoint = 0;
-    EXPECT_THROW(ValidateBatch(request), std::invalid_argument);
+    EXPECT_FALSE((ValidateBatch(request)).has_value());
     request.FramesPerPoint = 100001;
-    EXPECT_THROW(ValidateBatch(request), std::length_error);
+    EXPECT_FALSE((ValidateBatch(request)).has_value());
     request.FramesPerPoint = 1;
     request.FrameSize = 0;
-    EXPECT_THROW(ValidateBatch(request), std::invalid_argument);
+    EXPECT_FALSE((ValidateBatch(request)).has_value());
     EXPECT_FALSE(std::filesystem::exists(dir));
 }
 
@@ -287,18 +324,18 @@ TEST(Batch, InvalidAwgnSweepLeavesNoOutput) {
     request.OutputDir = dir;
     // A valid first point must not be written before rejecting a later point.
     request.SnrsDb = {10, 4000};
-    EXPECT_THROW(RunBatch(request), std::invalid_argument);
+    EXPECT_FALSE(RunBatch(request).has_value());
     EXPECT_FALSE(std::filesystem::exists(dir));
     request.SnrsDb = {10, -4000};
-    EXPECT_THROW(RunBatch(request), std::invalid_argument);
+    EXPECT_FALSE(RunBatch(request).has_value());
     EXPECT_FALSE(std::filesystem::exists(dir));
     request.SnrsDb = {10};
     request.Base.AmplitudeGain = 0;
-    EXPECT_THROW(RunBatch(request), std::invalid_argument);
+    EXPECT_FALSE(RunBatch(request).has_value());
     EXPECT_FALSE(std::filesystem::exists(dir));
     request.SnrsDb.clear();
     request.Base.Awgn.Enabled = true;
-    EXPECT_THROW(RunBatch(request), std::invalid_argument);
+    EXPECT_FALSE(RunBatch(request).has_value());
     EXPECT_FALSE(std::filesystem::exists(dir));
 }
 
@@ -309,7 +346,7 @@ TEST(Batch, PresetNoiseSettingRetainedWithoutSnrAxis) {
     request.Base.Awgn.SnrDb = 5;
     request.FrameSize = 64;
     request.OutputDir = dir;
-    RunBatch(request);
+    ASSERT_TRUE(RunBatch(request).has_value());
     const auto sidecar = ReadFile(dir / "frame_000000_000000.sigmf-meta");
     EXPECT_NE(sidecar.find("\"requested_snr_db\": 5"), std::string::npos);
     EXPECT_NE(sidecar.find("\"snr_db\": null"), std::string::npos);
@@ -337,14 +374,8 @@ TEST(Batch, WriteFailurePreservesCompletedFrames) {
             request.OutputDir = dir;
             request.FrameSize = 32;
             request.FramesPerPoint = 100;
-            try {
-                RunBatch(request);
-            } catch (const std::ios_base::failure &) {
-                std::_Exit(0);
-            } catch (...) {
-                std::_Exit(3);
-            }
-            std::_Exit(1);
+            const auto summary = RunBatch(request);
+            std::_Exit(summary.has_value() ? 1 : 0);
         },
         ::testing::ExitedWithCode(0), "");
     const auto lines = ReadLines(dir / "manifest.jsonl");
@@ -375,7 +406,7 @@ TEST(Batch, SigmfFramesCarryMetadataAndAnalyze) {
     request.FrameSize = 2048;
     request.OutputDir = dir;
     ASSERT_EQ(request.Format, ExportFormat::SigMF);
-    RunBatch(request);
+    ASSERT_TRUE(RunBatch(request).has_value());
     EXPECT_EQ(std::filesystem::file_size(dir / "frame_000000_000000.sigmf-data"), 2048u * 8);
     EXPECT_FALSE(std::filesystem::exists(dir / "frame_000000_000000.sigmf-data.json"));
     const auto meta = nlohmann::json::parse(ReadFile(dir / "frame_000000_000000.sigmf-meta"));
@@ -385,13 +416,13 @@ TEST(Batch, SigmfFramesCarryMetadataAndAnalyze) {
     const auto manifest = ReadLines(dir / "manifest.jsonl");
     EXPECT_NE(manifest[0].find("\"format\":\"sigmf\""), std::string::npos);
     EXPECT_NE(manifest[1].find("\"sidecar\":\"frame_000000_000000.sigmf-meta\""), std::string::npos);
-    const auto recording = ReadRecording(dir / "frame_000000_000000.sigmf-meta");
+    const auto recording = Unwrap(ReadRecording(dir / "frame_000000_000000.sigmf-meta"));
     EXPECT_EQ(recording.Samples.size(), 2048u);
     ASSERT_TRUE(recording.Config.has_value());
     ASSERT_TRUE(recording.Frame.has_value());
     EXPECT_EQ(recording.Frame->Size, 2048u);
     // EVM is scored on the frame interior only, so it tracks the requested 10 dB per-sample SNR
-    const auto report = AnalyzeRecording(recording);
+    const auto report = Unwrap(AnalyzeRecording(recording));
     ASSERT_TRUE(report.Accuracy.has_value());
     EXPECT_GT(report.Accuracy->SymbolCount, 100u);
     EXPECT_LT(report.Accuracy->SymbolCount, 256u);
@@ -405,8 +436,8 @@ TEST(Batch, CleanSigmfFrameScoresAlmostZeroEvm) {
     request.FrameSize = 1024;
     request.Base.Awgn.Enabled = false;
     request.OutputDir = dir;
-    RunBatch(request);
-    const auto report = AnalyzeRecording(ReadRecording(dir / "frame_000000_000000.sigmf-meta"));
+    ASSERT_TRUE(RunBatch(request).has_value());
+    const auto report = Unwrap(AnalyzeRecording(Unwrap(ReadRecording(dir / "frame_000000_000000.sigmf-meta"))));
     ASSERT_TRUE(report.Accuracy.has_value());
     EXPECT_LT(report.Accuracy->EvmRms, 0.01);
 }
@@ -417,8 +448,8 @@ TEST(Batch, WgnSigmfFrameHasNoEvm) {
     request.Waveforms = {Modulation::WGN};
     request.FrameSize = 256;
     request.OutputDir = dir;
-    RunBatch(request);
-    const auto report = AnalyzeRecording(ReadRecording(dir / "frame_000000_000000.sigmf-meta"));
+    ASSERT_TRUE(RunBatch(request).has_value());
+    const auto report = Unwrap(AnalyzeRecording(Unwrap(ReadRecording(dir / "frame_000000_000000.sigmf-meta"))));
     EXPECT_FALSE(report.Accuracy.has_value());
 }
 

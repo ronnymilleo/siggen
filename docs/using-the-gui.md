@@ -4,12 +4,20 @@
 
 ## Using the generator
 
-The generator opens on startup, optionally initialized from `--preset` and
-signal options supplied with `--gui`; it does not generate automatically. It has
+The generator opens when you run the `siggen` executable (it takes no command-line
+arguments and starts from the default settings); it does not generate
+automatically. The controls and plots stay inside the main application window,
+including on Wayland: the content follows window resizing and scrolls when
+needed, and detached platform windows and saved floating-panel positions are
+disabled. It has
 three dockable windows: **Signal Setup** on the left, **Signal Summary** above
 **Signal Views** (the plots) on the right. Drag a window's tab to rearrange them;
-the layout is saved in `imgui.ini`, and **View > Reset Layout** restores the
-default. Enter
+the layout is saved in `imgui.ini` in your data folder (`~/.local/share/siggen` on
+Linux, `~/Library/Application Support/siggen` on macOS, `%APPDATA%\siggen` on
+Windows), and **View > Reset Layout** restores the
+default. **View > Theme** switches between the nine color themes (seven dark and two
+light); the choice is kept in the same `imgui.ini` with the layout. The interface text uses the
+bundled Inter font, so it looks the same on every system. Enter
 modulation, symbol count, symbol rate in baud, samples per symbol (SPS), and
 amplitude gain in **Signal Setup**. Choose RRC or rectangular pulses in **Pulse
 Shaping**. The **AWGN** section enables additive noise with a requested SNR in
@@ -65,11 +73,15 @@ same steady-state symbols as the constellation.
 The **Spectrum** tab selects the Welch window: periodic Hann (default),
 Hamming, Blackman or Rectangular. Hann output is unchanged from earlier releases.
 
-`presets/` contains numbered guided lessons. Lines beginning with `#` after the
-preset header are notes: parsers ignore them and the GUI shows them after
-**Load Preset**, so a lesson can say what to look at (for example
-`presets/02-qpsk-snr-8db.preset`). Lessons 11–16 cover 2-FSK, MSK, DQPSK under a
-carrier offset, 4-PAM, 256-QAM and OOK; lessons 17–21 cover OQPSK, pi/4-DQPSK, 32-QAM, 8-DPSK and 4-ASK. Controls also have hover tooltips, and the symbol rate, SPS, pulse, roll-off, span and SNR controls have a **?** button that opens a longer "what is this?" panel (the SNR panel also shows your current SNR as Es/N0 and Eb/N0).
+The guided lessons are compiled into the executable: **File > Examples** lists them,
+each with its notes in a tooltip, and loading one replaces the settings and shows the
+notes in Signal Setup. Lines beginning with `#` after the preset header are notes:
+parsers ignore them (for example the second lesson, `02-qpsk-snr-8db.preset`). Lessons
+11–16 cover 2-FSK, MSK, DQPSK under a carrier offset, 4-PAM, 256-QAM and OOK; lessons
+17–21 cover OQPSK, pi/4-DQPSK, 32-QAM, 8-DPSK and 4-ASK. Your own presets open and save
+from the **File** menu (Ctrl+O, Ctrl+S, Ctrl+Shift+S); the window title names the
+document and marks unsaved changes with an asterisk, and quitting with unsaved changes
+asks first. Controls also have hover tooltips, and the symbol rate, SPS, pulse, roll-off, span and SNR controls have a **?** button that opens a longer "what is this?" panel (the SNR panel also shows your current SNR as Es/N0 and Eb/N0).
 
 ## Views and spectrum calibration
 

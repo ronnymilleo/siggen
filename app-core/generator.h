@@ -10,13 +10,15 @@
 #include "waveform.h"
 #include <complex>
 #include <cstdint>
+#include <expected>
 #include <string>
 #include <vector>
 
 namespace Core {
 
-// Explicit-count limit: eight bits per symbol (256-QAM) at up to 65536 symbols
-inline constexpr std::size_t MaxExplicitBits = 65536 * 8;
+// Explicit-count limit: eight bits per symbol (256-QAM) at up to MaxSymbolCount symbols
+inline constexpr int MaxSymbolCount = 65536;
+inline constexpr std::size_t MaxExplicitBits = static_cast<std::size_t>(MaxSymbolCount) * 8;
 
 /**
  * @struct  NoiseSourceSettings
@@ -111,11 +113,11 @@ double FskModulationIndex(const GenerationConfig &config);
 
 // Settings
 void SelectWaveform(GenerationConfig &config, Modulation modulation);
-void Validate(const GenerationConfig &config);
+std::expected<void, std::string> Validate(const GenerationConfig &config);
 
 // Generation
-std::vector<std::complex<float>> MapSymbols(Modulation modulation, const std::string &bits);
-GeneratedSignal Generate(const GenerationConfig &config);
+std::expected<std::vector<std::complex<float>>, std::string> MapSymbols(Modulation modulation, const std::string &bits);
+std::expected<GeneratedSignal, std::string> Generate(const GenerationConfig &config);
 
 } // namespace Core
 

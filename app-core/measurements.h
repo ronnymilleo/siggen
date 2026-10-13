@@ -9,7 +9,9 @@
 #include "generator.h"
 #include <complex>
 #include <cstddef>
+#include <expected>
 #include <optional>
+#include <string>
 #include <vector>
 
 namespace Core {
@@ -60,12 +62,12 @@ struct EnergyRatios {
     double EbN0Db = 0;
 };
 
-PowerStatistics MeasurePowerStatistics(const std::vector<std::complex<float>> &samples);
-std::optional<SymbolAccuracy> MeasureSymbolAccuracy(const GeneratedSignal &signal);
-std::optional<SymbolAccuracy> MeasureSymbolAccuracy(const GeneratedSignal &signal, std::size_t first_symbol,
-                                                    std::size_t end_symbol);
-EyeDiagram BuildEyeDiagram(const GeneratedSignal &signal, std::size_t max_traces = 200);
-EnergyRatios SnrToEnergyRatios(double snr_db, int samples_per_symbol, int bits_per_symbol);
+std::expected<PowerStatistics, std::string> MeasurePowerStatistics(const std::vector<std::complex<float>> &samples);
+std::expected<std::optional<SymbolAccuracy>, std::string> MeasureSymbolAccuracy(const GeneratedSignal &signal);
+std::expected<std::optional<SymbolAccuracy>, std::string>
+MeasureSymbolAccuracy(const GeneratedSignal &signal, std::size_t first_symbol, std::size_t end_symbol);
+std::expected<EyeDiagram, std::string> BuildEyeDiagram(const GeneratedSignal &signal, std::size_t max_traces = 200);
+std::expected<EnergyRatios, std::string> SnrToEnergyRatios(double snr_db, int samples_per_symbol, int bits_per_symbol);
 
 } // namespace Core
 

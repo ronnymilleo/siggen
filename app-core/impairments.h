@@ -8,6 +8,7 @@
 
 #include <complex>
 #include <cstdint>
+#include <expected>
 #include <span>
 #include <string>
 #include <vector>
@@ -33,9 +34,9 @@ struct ImpairmentSettings {
     bool Active() const;
 };
 
-void Validate(const ImpairmentSettings &settings);
-void ApplyImpairments(std::span<std::complex<float>> samples, double sample_rate_hz, const ImpairmentSettings &settings,
-                      std::uint32_t seed);
+std::expected<void, std::string> Validate(const ImpairmentSettings &settings);
+std::expected<void, std::string> ApplyImpairments(std::span<std::complex<float>> samples, double sample_rate_hz,
+                                                  const ImpairmentSettings &settings, std::uint32_t seed);
 std::string ImpairmentsJson(const ImpairmentSettings &settings, std::uint32_t seed, const std::string &indent);
 
 } // namespace Core

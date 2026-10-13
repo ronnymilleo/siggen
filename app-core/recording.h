@@ -8,6 +8,7 @@
 
 #include "generator.h"
 #include <complex>
+#include <expected>
 #include <filesystem>
 #include <optional>
 #include <string>
@@ -54,7 +55,7 @@ struct FrameScoring {
     std::size_t EndSymbol = 0;
 };
 
-Recording ReadRecording(const std::filesystem::path &path);
+std::expected<Recording, std::string> ReadRecording(const std::filesystem::path &path);
 std::optional<GeneratedSignal> SignalFromRecording(const Recording &recording);
 std::optional<FrameScoring> ScoreFrame(const Recording &recording);
 

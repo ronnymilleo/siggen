@@ -13,8 +13,10 @@
 
 #include "generator.h"
 #include <cstddef>
+#include <expected>
 #include <limits>
 #include <optional>
+#include <string>
 
 namespace Core {
 
@@ -36,8 +38,9 @@ struct BitErrors {
 
 bool IsDifferential(Modulation modulation);
 bool HasReferenceDemodulator(Modulation modulation);
-std::optional<BitErrors> CountBitErrors(const GeneratedSignal &signal, std::size_t first_symbol = 0,
-                                        std::size_t end_symbol = std::numeric_limits<std::size_t>::max());
+std::expected<std::optional<BitErrors>, std::string>
+CountBitErrors(const GeneratedSignal &signal, std::size_t first_symbol = 0,
+               std::size_t end_symbol = std::numeric_limits<std::size_t>::max());
 
 } // namespace Core
 

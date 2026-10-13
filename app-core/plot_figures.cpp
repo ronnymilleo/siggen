@@ -18,6 +18,19 @@ namespace Core {
 
 namespace {
 
+// Builds a line series from copies of the given coordinates; an empty label leaves the legend entry out
+Core::Series MakeLineSeries(std::string label, const std::vector<double> &x, const std::vector<double> &y,
+                            const Core::Rgb colour, const double width = 2.0, const double alpha = 1.0) {
+    Core::Series series;
+    series.Label = std::move(label);
+    series.X = x;
+    series.Y = y;
+    series.Color = colour;
+    series.Width = width;
+    series.Alpha = alpha;
+    return series;
+}
+
 /**
  * @struct  PipelineView
  * @brief   The symbol range a pipeline figure shows and the axis settings its panels share.
@@ -175,28 +188,6 @@ Core::Panel ReceivedPanel(const Core::PipelineStages &stages, const PipelineView
 } // namespace
 
 /**
- * @brief   Builds a line series from copies of the given coordinates.
- * @param[in] label     Legend label; empty for no legend entry.
- * @param[in] x         X coordinates.
- * @param[in] y         Y coordinates, same length as @p x.
- * @param[in] colour    Line colour.
- * @param[in] width     Line width in pixels at 1600x900.
- * @param[in] alpha     Opacity, 0 to 1.
- * @return  The series, of kind Line.
- */
-Core::Series MakeLineSeries(std::string label, const std::vector<double> &x, const std::vector<double> &y,
-                            const Core::Rgb colour, const double width, const double alpha) {
-    Core::Series series;
-    series.Label = std::move(label);
-    series.X = x;
-    series.Y = y;
-    series.Color = colour;
-    series.Width = width;
-    series.Alpha = alpha;
-    return series;
-}
-
-/**
  * @brief   Builds the complex baseband figure: I and Q against time.
  * @param[in] plot  Plot data of the signal.
  * @return  A one-panel figure.
@@ -221,8 +212,9 @@ Core::Figure FrequencyFigure(const PlotData &plot) {
     Core::Panel panel;
     panel.XLabel = "Time (s)";
     panel.YLabel = "Frequency (Hz)";
-    panel.Series.push_back(MakeLineSeries("Estimate", plot.FreqTime, plot.FreqEstimate, InPhaseColor));
-    panel.Series.push_back(MakeLineSeries("Nominal tone", plot.FreqTime, plot.FreqNominal, QuadratureColor, 2.5));
+    panel.Series.push_back(MakeLineSeries("Estimate", plot.FrequencyTime, plot.FrequencyEstimate, InPhaseColor));
+    panel.Series.push_back(
+        MakeLineSeries("Nominal tone", plot.FrequencyTime, plot.FrequencyNominal, QuadratureColor, 2.5));
     return {"Instantaneous frequency", {panel}};
 }
 
@@ -232,7 +224,7 @@ Core::Figure FrequencyFigure(const PlotData &plot) {
  * @param[in] title Figure title.
  * @return  A one-panel figure.
  */
-Core::Figure ConstellationFigure(const XYData &data, std::string title) {
+Core::Figure ConstellationFigure(const XYSeries &data, std::string title) {
     Core::Panel panel;
     panel.XLabel = "In-phase (I)";
     panel.YLabel = "Quadrature (Q)";

@@ -9,6 +9,7 @@
 #include "ber.h"
 #include "generator.h"
 #include <atomic>
+#include <expected>
 #include <future>
 #include <string>
 #include <vector>
@@ -44,7 +45,7 @@ public:
     void Clear();
 
 private:
-    std::future<std::vector<BerPoint>> m_Pending;
+    std::future<std::expected<std::vector<BerPoint>, std::string>> m_Pending;
     std::atomic<bool> m_Cancel{false};
     std::atomic<int> m_Done{0};
     int m_Total = 0;

@@ -10,6 +10,7 @@
 #include "generator.h"
 #include <atomic>
 #include <cstddef>
+#include <expected>
 #include <optional>
 #include <string>
 #include <vector>
@@ -41,8 +42,10 @@ struct BerPoint {
 };
 
 double SnrForEbN0(const GenerationConfig &config, double eb_n0_db);
-std::vector<BerPoint> BerSweep(const GenerationConfig &config, const BerSweepSettings &settings,
-                               const std::atomic<bool> *cancel = nullptr, std::atomic<int> *progress = nullptr);
+std::expected<std::vector<BerPoint>, std::string> BerSweep(const GenerationConfig &config,
+                                                           const BerSweepSettings &settings,
+                                                           const std::atomic<bool> *cancel = nullptr,
+                                                           std::atomic<int> *progress = nullptr);
 
 std::string BerText(const GenerationConfig &config, const std::vector<BerPoint> &points);
 std::string BerJson(const GenerationConfig &config, const std::vector<BerPoint> &points);

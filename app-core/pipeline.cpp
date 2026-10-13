@@ -5,20 +5,20 @@
 
 #include "pipeline.h"
 
-#include <stdexcept>
+#include <string>
 
 namespace Core {
 
 /**
  * @brief   Rebuilds the intermediate stages of a generated linear signal.
  * @param[in] signal  A generated linear signal.
- * @return  The bits, scaled symbols, upsampled impulses, shaped and received samples.
- * @note    When AWGN or impairments were applied, the shaped stage is generated again without them. Throws
- *          std::invalid_argument for noise and FSK signals, which have no symbol/filter pipeline.
+ * @return  The bits, scaled symbols, upsampled impulses, shaped and received samples; an error for noise and FSK
+ *          signals, which have no symbol/filter pipeline.
+ * @note    When AWGN or impairments were applied, the shaped stage is generated again without them.
  */
-PipelineStages BuildPipelineStages(const GeneratedSignal &signal) {
+std::expected<PipelineStages, std::string> BuildPipelineStages(const GeneratedSignal &signal) {
     if (signal.Family != Family::Linear) {
-        throw std::invalid_argument("Only linear waveforms have a pipeline view");
+        return std::unexpected(std::string("Only linear waveforms have a pipeline view"));
     }
     PipelineStages stages;
     const auto &config = signal.Config;
@@ -46,7 +46,11 @@ PipelineStages BuildPipelineStages(const GeneratedSignal &signal) {
         auto clean = config;
         clean.Awgn.Enabled = false;
         clean.Impairments = {};
-        stages.Shaped = Generate(clean).Samples;
+        const auto regenerated = Generate(clean);
+        if (!regenerated.has_value()) {
+            return std::unexpected(regenerated.error());
+        }
+        stages.Shaped = regenerated->Samples;
     } else {
         stages.Shaped = signal.Samples;
     }

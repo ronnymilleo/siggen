@@ -13,7 +13,7 @@
 #include <limits>
 #include <random>
 #include <sstream>
-#include <stdexcept>
+#include <string>
 
 namespace Core {
 
@@ -44,8 +44,10 @@ GenerationConfig BlockConfig(const GenerationConfig &config, const BerSweepSetti
 }
 
 // Accumulates blocks until the point has enough errors or bits; empty when cancelled midway
-std::optional<BerPoint> MeasurePoint(const GenerationConfig &config, const BerSweepSettings &settings,
-                                     std::size_t point_index, const std::atomic<bool> *cancel) {
+std::expected<std::optional<BerPoint>, std::string> MeasurePoint(const GenerationConfig &config,
+                                                                 const BerSweepSettings &settings,
+                                                                 std::size_t point_index,
+                                                                 const std::atomic<bool> *cancel) {
     BerPoint point;
     point.EbN0Db = settings.EbN0Db[point_index];
     point.SnrDb = SnrForEbN0(config, point.EbN0Db);
@@ -54,18 +56,26 @@ std::optional<BerPoint> MeasurePoint(const GenerationConfig &config, const BerSw
     for (std::size_t block_index = 0;
          point.Errors.BitCount < settings.MaxBits && point.Errors.BitErrorCount < settings.MinErrors; ++block_index) {
         if (Cancelled(cancel)) {
-            return std::nullopt;
+            return std::optional<BerPoint>{};
         }
         block.Seed = BlockSeed(config.Seed, 1, point_index, block_index);
         block.NoiseSeed = BlockSeed(config.NoiseSeed, 2, point_index, block_index);
         block.ImpairmentSeed = BlockSeed(config.ImpairmentSeed, 3, point_index, block_index);
-        if (const auto errors = CountBitErrors(Generate(block))) {
-            point.Errors += *errors;
+        const auto generated = Generate(block);
+        if (!generated.has_value()) {
+            return std::unexpected(generated.error());
+        }
+        const auto errors = CountBitErrors(*generated);
+        if (!errors.has_value()) {
+            return std::unexpected(errors.error());
+        }
+        if (*errors) {
+            point.Errors += **errors;
         } else {
             break;
         }
     }
-    return point;
+    return std::optional<BerPoint>{point};
 }
 
 } // namespace
@@ -96,21 +106,22 @@ double SnrForEbN0(const GenerationConfig &config, double eb_n0_db) {
  * @param[in]  settings  Eb/N0 points and stopping rules.
  * @param[in]  cancel    When set, aborts early; the points finished so far are returned.
  * @param[out] progress  When given, receives the number of points done.
- * @return  One point per Eb/N0 value, in order.
- * @note    Data and noise seeds are derived per block, so a sweep is reproducible. Throws std::invalid_argument for
- *          waveforms without a reference demodulator, a block size outside 64 to 65536 symbols, or zero maximum
- *          bits.
+ * @return  One point per Eb/N0 value, in order; an error for waveforms without a reference demodulator, a block
+ *          size outside 64 to 65536 symbols, or zero maximum bits.
+ * @note    Data and noise seeds are derived per block, so a sweep is reproducible.
  */
-std::vector<BerPoint> BerSweep(const GenerationConfig &config, const BerSweepSettings &settings,
-                               const std::atomic<bool> *cancel, std::atomic<int> *progress) {
+std::expected<std::vector<BerPoint>, std::string> BerSweep(const GenerationConfig &config,
+                                                           const BerSweepSettings &settings,
+                                                           const std::atomic<bool> *cancel,
+                                                           std::atomic<int> *progress) {
     if (!HasReferenceDemodulator(config.Modulation)) {
-        throw std::invalid_argument("This waveform has no reference demodulator");
+        return std::unexpected(std::string("This waveform has no reference demodulator"));
     }
     if (settings.BlockSymbols < 64 || settings.BlockSymbols > 65536) {
-        throw std::invalid_argument("Block size must be 64 to 65536 symbols");
+        return std::unexpected(std::string("Block size must be 64 to 65536 symbols"));
     }
     if (settings.MaxBits == 0) {
-        throw std::invalid_argument("Maximum bits must be positive");
+        return std::unexpected(std::string("Maximum bits must be positive"));
     }
     std::vector<BerPoint> points;
     for (std::size_t point_index = 0; point_index < settings.EbN0Db.size(); ++point_index) {
@@ -118,10 +129,13 @@ std::vector<BerPoint> BerSweep(const GenerationConfig &config, const BerSweepSet
             break;
         }
         const auto point = MeasurePoint(config, settings, point_index, cancel);
-        if (!point) {
+        if (!point.has_value()) {
+            return std::unexpected(point.error());
+        }
+        if (!*point) {
             break;
         }
-        points.push_back(*point);
+        points.push_back(**point);
         if (progress) {
             progress->store(static_cast<int>(points.size()));
         }

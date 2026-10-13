@@ -1,15 +1,17 @@
 """Python access to the siggen signal generator.
 
 The package is a thin ``ctypes`` layer over the C++ library, so signals,
-measurements and files are exactly what the CLI and GUI produce::
+measurements and files are exactly what the desktop application produces::
 
     import siggen
     tx = siggen.generate(modulation="16-QAM", sps=8, snr_db=20)
     tx.samples                # complex64 NumPy array
     tx.symbol_accuracy().evm_percent
 
-Build the shared library first (``cmake --preset dev`` or ``headless``) and, if
-it is not found automatically, point ``SIGGEN_LIBRARY`` at ``libsiggen_c``.
+Install a prebuilt wheel from a release (``pip install siggen-*.whl``), or build the
+shared library from source (``cmake -S . -B build -G Ninja -DSIGGEN_BUILD_PYTHON=ON``,
+then ``cmake --build build``). If the library is not found automatically, point
+``SIGGEN_LIBRARY`` at ``libsiggen_c``.
 """
 from __future__ import annotations
 
@@ -23,7 +25,7 @@ from typing import Optional
 
 import numpy as np
 
-__all__ = ["Signal", "SymbolAccuracy", "generate", "load", "psd", "default_config", "WINDOWS", "version"]
+__all__ = ["Signal", "SymbolAccuracy", "BatchResult", "generate", "load", "psd", "batch", "default_config", "WINDOWS", "version"]
 
 WINDOWS = {"hann": 0, "hamming": 1, "blackman": 2, "rectangular": 3}
 _FORMATS = {"csv": 0, "sigmf": 1}
@@ -38,15 +40,15 @@ def _find_library() -> str:
     here = Path(__file__).resolve().parent
     root = here.parent.parent
     candidates = [here / n for n in names]
-    for pattern in ("build/*/lib", "build/lib"):
+    for pattern in ("out/*/lib", "build/*/lib", "build/lib"):
         for folder in sorted(glob.glob(str(root / pattern)), key=os.path.getmtime, reverse=True):
             candidates += [Path(folder) / n for n in names]
     for candidate in candidates:
         if candidate.is_file():
             return str(candidate)
     raise ImportError(
-        "libsiggen_c not found. Build it with `cmake --preset headless -DSIGGEN_BUILD_PYTHON=ON` "
-        "(then `cmake --build --preset headless`) or set SIGGEN_LIBRARY to its path."
+        "libsiggen_c not found. Build it with `cmake -S . -B build -G Ninja -DSIGGEN_BUILD_PYTHON=ON` "
+        "(then `cmake --build build`) or set SIGGEN_LIBRARY to its path."
     )
 
 
@@ -91,6 +93,10 @@ _matched = _sig("siggen_matched_symbols", ctypes.c_long, _handle, ctypes.c_void_
 _psd = _sig("siggen_psd", ctypes.c_long, _f32, _c_size_t, _c_double, _c_size_t, ctypes.c_int, ctypes.c_void_p, ctypes.c_void_p,
             _c_size_t, ctypes.c_char_p, _c_size_t)
 _export = _sig("siggen_export", ctypes.c_int, _handle, _c_char_p, ctypes.c_int, ctypes.c_int, ctypes.c_char_p, _c_size_t)
+_u32 = np.ctypeslib.ndpointer(np.uint32, flags="C_CONTIGUOUS")
+_batch = _sig("siggen_batch", ctypes.c_int, _c_char_p, ctypes.POINTER(ctypes.c_char_p), _c_size_t, _u32, _c_size_t,
+              _f64, _c_size_t, ctypes.c_int, ctypes.c_int, ctypes.c_int, ctypes.c_char_p,
+              ctypes.POINTER(_c_size_t), ctypes.POINTER(_c_size_t), ctypes.c_char_p, _c_size_t)
 
 
 def version() -> str:
@@ -367,7 +373,7 @@ def generate(preset: Optional[str] = None, **options) -> Signal:
 
 
 def load(path) -> Signal:
-    """Read a SigMF recording (``.sigmf-meta`` or ``.sigmf-data``) including the frames written by ``siggen batch``."""
+    """Read a SigMF recording (``.sigmf-meta`` or ``.sigmf-data``) including the frames written by :func:`batch`."""
     err = ctypes.create_string_buffer(_ERROR)
     handle = _load(os.fspath(path).encode(), err, _ERROR)
     if not handle:
@@ -388,6 +394,39 @@ def psd(samples, sample_rate: float, window: str = "hann", segment: int = 1024):
     freq, density = np.empty(bins), np.empty(bins)
     _psd(raw, data.size, sample_rate, segment, WINDOWS[window], freq.ctypes.data, density.ctypes.data, bins, err, _ERROR)
     return freq, density
+
+
+@dataclasses.dataclass(frozen=True)
+class BatchResult:
+    """Counts of a completed :func:`batch` sweep."""
+    point_count: int
+    frame_count: int
+
+
+def batch(output_dir, modulations=None, seeds=None, snrs_db=None, frame_size: int = 2048,
+          frames_per_point: int = 1, format: str = "sigmf", preset: Optional[str] = None, **options) -> BatchResult:
+    """Generate a dataset sweep into a new ``output_dir``, the same frames ``siggen batch`` writes.
+
+    Every waveform times every seed times every SNR, ``frames_per_point`` frames each; each frame is a
+    SigMF (or ``csv``) recording plus a sidecar, with a ``manifest.jsonl`` index. ``modulations``, ``seeds``
+    and ``snrs_db`` accept a list or array (None keeps the preset's own value); ``preset`` and the keyword
+    overrides configure the shared base exactly as in :func:`generate`. The output directory must not exist.
+
+    Returns a :class:`BatchResult` with the point and frame counts."""
+    if format not in _FORMATS:
+        raise ValueError(f"format must be one of {sorted(_FORMATS)}")
+    names = [str(m).encode() for m in (modulations or [])]
+    name_array = (ctypes.c_char_p * len(names))(*names) if names else None
+    seed_values = np.ascontiguousarray(np.asarray(seeds, dtype=np.uint32).ravel()) if seeds is not None else np.zeros(0, np.uint32)
+    snr_values = np.ascontiguousarray(np.asarray(snrs_db, dtype=np.float64).ravel()) if snrs_db is not None else np.zeros(0, np.float64)
+    points, frames = _c_size_t(0), _c_size_t(0)
+    err = ctypes.create_string_buffer(_ERROR)
+    status = _batch(_build_preset(preset, options).encode(), name_array, len(names), seed_values, seed_values.size,
+                    snr_values, snr_values.size, frame_size, frames_per_point, _FORMATS[format],
+                    os.fspath(output_dir).encode(), ctypes.byref(points), ctypes.byref(frames), err, _ERROR)
+    if status < 0:
+        _fail(err, "batch")
+    return BatchResult(points.value, frames.value)
 
 
 def theoretical_ber(waveform: str, eb_n0_db):
@@ -423,7 +462,7 @@ class BerCurve:
 
 def ber_curve(eb_n0_db, preset: Optional[str] = None, min_errors: int = 100, max_bits: int = 2_000_000,
               block_symbols: int = 4096, **options) -> BerCurve:
-    """Measure BER against Eb/N0 with the reference receiver, the same sweep as ``siggen ber``.
+    """Measure BER against Eb/N0 with the reference receiver, the same sweep as the GUI's BER tab.
 
     The waveform, pulse, rate and impairments come from ``preset``/keywords (see :func:`generate`); the
     sweep sets the noise itself, so ``snr_db``, ``bits`` and ``symbols`` are ignored."""

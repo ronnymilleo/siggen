@@ -14,7 +14,7 @@
 #include <iterator>
 #include <nlohmann/json.hpp>
 #include <sstream>
-#include <stdexcept>
+#include <string>
 
 namespace Core {
 
@@ -22,20 +22,20 @@ namespace {
 
 using Json = nlohmann::json;
 
-std::string ReadText(const std::filesystem::path &path) {
+std::expected<std::string, std::string> ReadText(const std::filesystem::path &path) {
     std::ifstream input(path, std::ios::binary);
     if (!input) {
-        throw std::runtime_error("Cannot open " + path.string());
+        return std::unexpected("Cannot open " + path.string());
     }
     std::ostringstream text;
     text << input.rdbuf();
     return text.str();
 }
 
-std::vector<char> ReadBytes(const std::filesystem::path &path) {
+std::expected<std::vector<char>, std::string> ReadBytes(const std::filesystem::path &path) {
     std::ifstream input(path, std::ios::binary);
     if (!input) {
-        throw std::runtime_error("Cannot open " + path.string());
+        return std::unexpected("Cannot open " + path.string());
     }
     return std::vector<char>(std::istreambuf_iterator<char>(input), std::istreambuf_iterator<char>());
 }
@@ -54,9 +54,9 @@ std::int16_t Word16(const char *bytes) {
         static_cast<std::uint16_t>(static_cast<unsigned char>(bytes[0]) | (static_cast<unsigned char>(bytes[1]) << 8)));
 }
 
-std::vector<std::complex<float>> DecodeCf32(const std::vector<char> &bytes) {
+std::expected<std::vector<std::complex<float>>, std::string> DecodeCf32(const std::vector<char> &bytes) {
     if (bytes.size() % 8) {
-        throw std::runtime_error("Data size is not a whole number of cf32_le samples");
+        return std::unexpected(std::string("Data size is not a whole number of cf32_le samples"));
     }
     std::vector<std::complex<float>> samples;
     samples.reserve(bytes.size() / 8);
@@ -67,9 +67,9 @@ std::vector<std::complex<float>> DecodeCf32(const std::vector<char> &bytes) {
 }
 
 // Full scale is 32768, so the samples land in [-1, 1)
-std::vector<std::complex<float>> DecodeCi16(const std::vector<char> &bytes) {
+std::expected<std::vector<std::complex<float>>, std::string> DecodeCi16(const std::vector<char> &bytes) {
     if (bytes.size() % 4) {
-        throw std::runtime_error("Data size is not a whole number of ci16_le samples");
+        return std::unexpected(std::string("Data size is not a whole number of ci16_le samples"));
     }
     std::vector<std::complex<float>> samples;
     samples.reserve(bytes.size() / 4);
@@ -79,45 +79,45 @@ std::vector<std::complex<float>> DecodeCi16(const std::vector<char> &bytes) {
     return samples;
 }
 
-std::vector<std::complex<float>> Decode(const std::vector<char> &bytes, const std::string &datatype) {
+std::expected<std::vector<std::complex<float>>, std::string> Decode(const std::vector<char> &bytes,
+                                                                    const std::string &datatype) {
     std::vector<std::complex<float>> samples;
     if (datatype == "cf32_le") {
-        samples = DecodeCf32(bytes);
+        const auto decoded = DecodeCf32(bytes);
+        if (!decoded.has_value()) {
+            return std::unexpected(decoded.error());
+        }
+        samples = std::move(*decoded);
     } else if (datatype == "ci16_le") {
-        samples = DecodeCi16(bytes);
+        const auto decoded = DecodeCi16(bytes);
+        if (!decoded.has_value()) {
+            return std::unexpected(decoded.error());
+        }
+        samples = std::move(*decoded);
     } else {
-        throw std::runtime_error("Unsupported datatype '" + datatype + "' (supported: cf32_le, ci16_le)");
+        return std::unexpected("Unsupported datatype '" + datatype + "' (supported: cf32_le, ci16_le)");
     }
     for (auto sample : samples) {
         if (!std::isfinite(sample.real()) || !std::isfinite(sample.imag())) {
-            throw std::runtime_error("Recording contains non-finite samples");
+            return std::unexpected(std::string("Recording contains non-finite samples"));
         }
     }
     return samples;
 }
 
-Json ParseJson(const std::string &text) {
-    try {
-        return Json::parse(text);
-    } catch (const Json::parse_error &error) {
-        throw std::invalid_argument(std::string("Invalid JSON: ") + error.what());
-    }
-}
-
 // The member `key` of `object`; `where` names the object in the error message
-const Json &Require(const Json &object, const char *key, const char *where) {
+std::expected<const Json *, std::string> Require(const Json &object, const char *key, const char *where) {
     if (!object.is_object() || !object.contains(key)) {
-        throw std::runtime_error(std::string(where) + " is missing '" + key + "'");
+        return std::unexpected(std::string(where) + " is missing '" + key + "'");
     }
-    return object.at(key);
+    return &object.at(key);
 }
 
 // siggen's own fields are optional: a malformed preset or frame span is ignored, not an error
 void ReadSiggenFields(const Json &global, Recording &recording) {
     if (global.contains("siggen:preset") && global.at("siggen:preset").is_string()) {
-        try {
-            recording.Config = ParsePreset(global.at("siggen:preset").get<std::string>());
-        } catch (const std::exception &) {
+        if (const auto config = ParsePreset(global.at("siggen:preset").get<std::string>()); config.has_value()) {
+            recording.Config = std::move(*config);
         }
     }
     if (global.contains("siggen:frame") && global.at("siggen:frame").is_object()) {
@@ -130,27 +130,53 @@ void ReadSiggenFields(const Json &global, Recording &recording) {
     }
 }
 
-Recording ReadSigmf(std::filesystem::path meta_path) {
+std::expected<Recording, std::string> ReadSigmf(std::filesystem::path meta_path) {
     if (meta_path.extension() == ".sigmf-data") {
         meta_path.replace_extension(".sigmf-meta");
     }
-    const auto root = ParseJson(ReadText(meta_path));
-    const auto &global = Require(root, "global", "SigMF metadata");
-    Recording recording;
-    const auto &datatype = Require(global, "core:datatype", "SigMF global object");
-    const auto &sample_rate = Require(global, "core:sample_rate", "SigMF global object");
-    if (!datatype.is_string() || !sample_rate.is_number() || !(sample_rate.get<double>() > 0)) {
-        throw std::runtime_error("SigMF core:datatype must be a string and core:sample_rate a positive number");
+    const auto text = ReadText(meta_path);
+    if (!text.has_value()) {
+        return std::unexpected(text.error());
     }
-    recording.Datatype = datatype.get<std::string>();
-    recording.SampleRateHz = sample_rate.get<double>();
-    if (global.contains("core:description") && global.at("core:description").is_string()) {
-        recording.Description = global.at("core:description").get<std::string>();
+    // Non-throwing parse: a discarded value means the document is not JSON
+    const auto root = Json::parse(*text, nullptr, false);
+    if (root.is_discarded()) {
+        return std::unexpected("Invalid JSON: " + meta_path.string());
+    }
+    const auto global = Require(root, "global", "SigMF metadata");
+    if (!global.has_value()) {
+        return std::unexpected(global.error());
+    }
+    Recording recording;
+    const auto datatype = Require(**global, "core:datatype", "SigMF global object");
+    if (!datatype.has_value()) {
+        return std::unexpected(datatype.error());
+    }
+    const auto sample_rate = Require(**global, "core:sample_rate", "SigMF global object");
+    if (!sample_rate.has_value()) {
+        return std::unexpected(sample_rate.error());
+    }
+    if (!(*datatype)->is_string() || !(*sample_rate)->is_number() || !((*sample_rate)->get<double>() > 0)) {
+        return std::unexpected(
+            std::string("SigMF core:datatype must be a string and core:sample_rate a positive number"));
+    }
+    recording.Datatype = (*datatype)->get<std::string>();
+    recording.SampleRateHz = (*sample_rate)->get<double>();
+    if ((*global)->contains("core:description") && (*global)->at("core:description").is_string()) {
+        recording.Description = (*global)->at("core:description").get<std::string>();
     }
     auto data_path = meta_path;
     data_path.replace_extension(".sigmf-data");
-    recording.Samples = Decode(ReadBytes(data_path), recording.Datatype);
-    ReadSiggenFields(global, recording);
+    const auto bytes = ReadBytes(data_path);
+    if (!bytes.has_value()) {
+        return std::unexpected(bytes.error());
+    }
+    const auto samples = Decode(*bytes, recording.Datatype);
+    if (!samples.has_value()) {
+        return std::unexpected(samples.error());
+    }
+    recording.Samples = std::move(*samples);
+    ReadSiggenFields(**global, recording);
     return recording;
 }
 
@@ -160,15 +186,14 @@ Recording ReadSigmf(std::filesystem::path meta_path) {
  * @brief   Reads a SigMF recording given its `.sigmf-meta` or `.sigmf-data` path.
  * @param[in] path  Path of either file of the recording.
  * @return  The samples with the sample rate, datatype, description and, when present, siggen's configuration
- *          and batch frame span.
- * @note    Supports cf32_le and ci16_le (scaled by 1/32768). Throws std::runtime_error or std::invalid_argument
- *          with a descriptive message otherwise (unsupported file or datatype, missing fields, invalid JSON,
- *          truncated data, non-finite samples).
+ *          and batch frame span; a descriptive error otherwise (unsupported file or datatype, missing fields,
+ *          invalid JSON, truncated data, non-finite samples).
+ * @note    Supports cf32_le and ci16_le (scaled by 1/32768).
  */
-Recording ReadRecording(const std::filesystem::path &path) {
+std::expected<Recording, std::string> ReadRecording(const std::filesystem::path &path) {
     if (path.extension() != ".sigmf-meta" && path.extension() != ".sigmf-data") {
-        throw std::runtime_error("Unsupported file '" + path.string() +
-                                 "': expected a .sigmf-meta or .sigmf-data recording");
+        return std::unexpected("Unsupported file '" + path.string() +
+                               "': expected a .sigmf-meta or .sigmf-data recording");
     }
     return ReadSigmf(path);
 }
@@ -177,16 +202,17 @@ Recording ReadRecording(const std::filesystem::path &path) {
  * @brief   Rebuilds a GeneratedSignal around the recording's samples using its embedded configuration.
  * @param[in] recording  Recording read by ReadRecording().
  * @return  The regenerated signal (symbols and bits) carrying the file's samples. Empty when the file has no
- *          configuration, is a batch frame, or its length does not match.
+ *          configuration, is a batch frame, its length does not match, or the configuration fails to generate.
  */
 std::optional<GeneratedSignal> SignalFromRecording(const Recording &recording) {
     if (!recording.Config || recording.Frame) {
         return std::nullopt;
     }
-    auto signal = Generate(*recording.Config);
-    if (signal.Samples.size() != recording.Samples.size()) {
+    auto generated = Generate(*recording.Config);
+    if (!generated.has_value() || generated->Samples.size() != recording.Samples.size()) {
         return std::nullopt;
     }
+    auto signal = std::move(*generated);
     signal.Samples = recording.Samples;
     return signal;
 }
@@ -206,7 +232,11 @@ std::optional<FrameScoring> ScoreFrame(const Recording &recording) {
     if (size != recording.Samples.size()) {
         return std::nullopt;
     }
-    FrameScoring scoring{Generate(*recording.Config), 0, 0};
+    const auto generated = Generate(*recording.Config);
+    if (!generated.has_value()) {
+        return std::nullopt;
+    }
+    FrameScoring scoring{std::move(*generated), 0, 0};
     auto &signal = scoring.Signal;
     if (offset + size > signal.Samples.size()) {
         return std::nullopt;

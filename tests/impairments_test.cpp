@@ -8,6 +8,7 @@
 #include "batch.h"
 #include "generator.h"
 #include "preset.h"
+#include "test_support.h"
 #include <cmath>
 #include <gtest/gtest.h>
 #include <numbers>
@@ -33,11 +34,11 @@ std::vector<std::complex<float>> Constant(std::size_t count) {
 } // namespace
 
 TEST(Impairments, DefaultsAreInactiveAndLeaveOutputBitIdentical) {
-    const auto clean = Generate(Qpsk());
+    const auto clean = Unwrap(Generate(Qpsk()));
     auto config = Qpsk();
     config.Impairments = {};
     config.ImpairmentSeed = 1;
-    const auto again = Generate(config);
+    const auto again = Unwrap(Generate(config));
     EXPECT_FALSE(clean.ImpairmentsApplied);
     EXPECT_EQ(clean.Samples, again.Samples);
 }
@@ -46,7 +47,7 @@ TEST(Impairments, CfoRotatesAtTheRequestedRate) {
     auto samples = Constant(1000);
     ImpairmentSettings settings;
     settings.CfoHz = 100;
-    ApplyImpairments(samples, 1000, settings, 1);
+    ASSERT_TRUE(ApplyImpairments(samples, 1000, settings, 1).has_value());
     for (std::size_t n = 0; n < samples.size(); n += 37) {
         const auto angle = 2 * std::numbers::pi * 100 * static_cast<double>(n) / 1000;
         EXPECT_NEAR(samples[n].real(), std::cos(angle), 2e-5);
@@ -59,7 +60,7 @@ TEST(Impairments, PhaseNoiseKeepsMagnitudeAndRandomWalksWithExpectedVariance) {
     auto samples = Constant(sample_count);
     ImpairmentSettings settings;
     settings.PhaseNoiseLinewidthHz = 10;
-    ApplyImpairments(samples, 1000, settings, 7);
+    ASSERT_TRUE(ApplyImpairments(samples, 1000, settings, 7).has_value());
     double step_variance = 0;
     for (std::size_t k = 1; k < sample_count; ++k) {
         EXPECT_NEAR(std::abs(samples[k]), 1., 1e-5);
@@ -69,10 +70,10 @@ TEST(Impairments, PhaseNoiseKeepsMagnitudeAndRandomWalksWithExpectedVariance) {
     step_variance /= static_cast<double>(sample_count - 1);
     EXPECT_NEAR(step_variance, 2 * std::numbers::pi * 10 / 1000, 0.1 * 2 * std::numbers::pi * 10 / 1000);
     auto again = Constant(sample_count);
-    ApplyImpairments(again, 1000, settings, 7);
+    ASSERT_TRUE(ApplyImpairments(again, 1000, settings, 7).has_value());
     EXPECT_EQ(samples, again);
     auto other = Constant(sample_count);
-    ApplyImpairments(other, 1000, settings, 8);
+    ASSERT_TRUE(ApplyImpairments(other, 1000, settings, 8).has_value());
     EXPECT_NE(samples, other);
 }
 
@@ -80,13 +81,13 @@ TEST(Impairments, IqImbalanceScalesAndSkewsQ) {
     std::vector<std::complex<float>> samples{{1.f, 1.f}, {-1.f, 2.f}};
     ImpairmentSettings settings;
     settings.IqGainDb = 6.0205999;
-    ApplyImpairments(samples, 1, settings, 0);
+    ASSERT_TRUE(ApplyImpairments(samples, 1, settings, 0).has_value());
     EXPECT_NEAR(samples[0].imag(), 2.f, 1e-4);
     EXPECT_NEAR(samples[0].real(), 1.f, 1e-6);
     std::vector<std::complex<float>> skewed{{1.f, 0.f}};
     ImpairmentSettings skew;
     skew.IqPhaseDeg = 30;
-    ApplyImpairments(skewed, 1, skew, 0);
+    ASSERT_TRUE(ApplyImpairments(skewed, 1, skew, 0).has_value());
     EXPECT_NEAR(skewed[0].imag(), 0.5f, 1e-6);
 }
 
@@ -95,7 +96,7 @@ TEST(Impairments, DcOffsetIsRelativeToRms) {
     ImpairmentSettings settings;
     settings.DcOffsetI = 0.2;
     settings.DcOffsetQ = -0.1;
-    ApplyImpairments(samples, 1, settings, 0);
+    ASSERT_TRUE(ApplyImpairments(samples, 1, settings, 0).has_value());
     EXPECT_NEAR(samples[0].real(), 4.f, 1e-6);
     EXPECT_NEAR(samples[0].imag(), 3.5f, 1e-6);
 }
@@ -105,7 +106,7 @@ TEST(Impairments, QuantizerUsesAtMostTwoToTheBitsLevels) {
     config.Pulse = Pulse::RRC;
     config.SymbolCount = 256;
     config.Impairments.AdcBits = 3;
-    const auto result = Generate(config);
+    const auto result = Unwrap(Generate(config));
     ASSERT_TRUE(result.ImpairmentsApplied);
     std::set<float> levels;
     for (const auto &x : result.Samples) {
@@ -117,7 +118,7 @@ TEST(Impairments, QuantizerUsesAtMostTwoToTheBitsLevels) {
     auto clean = Qpsk();
     clean.Pulse = Pulse::RRC;
     clean.SymbolCount = 256;
-    const auto reference = Generate(clean);
+    const auto reference = Unwrap(Generate(clean));
     double peak = 0;
     for (const auto &x : reference.Samples) {
         peak = std::max({peak, static_cast<double>(std::abs(x.real())), static_cast<double>(std::abs(x.imag()))});
@@ -131,22 +132,22 @@ TEST(Impairments, QuantizerUsesAtMostTwoToTheBitsLevels) {
 TEST(Impairments, ValidationRejectsBadSettingsAndNoiseSources) {
     ImpairmentSettings settings;
     settings.AdcBits = 1;
-    EXPECT_THROW(Validate(settings), std::invalid_argument);
+    EXPECT_FALSE(Validate(settings).has_value());
     settings = {};
     settings.PhaseNoiseLinewidthHz = -1;
-    EXPECT_THROW(Validate(settings), std::invalid_argument);
+    EXPECT_FALSE(Validate(settings).has_value());
     settings = {};
     settings.CfoHz = std::nan("");
-    EXPECT_THROW(Validate(settings), std::invalid_argument);
+    EXPECT_FALSE(Validate(settings).has_value());
     GenerationConfig wgn;
     wgn.Modulation = Modulation::WGN;
     wgn.Impairments.CfoHz = 5;
-    EXPECT_THROW(Validate(wgn), std::invalid_argument);
+    EXPECT_FALSE(Validate(wgn).has_value());
 }
 
 TEST(Impairments, PresetRoundTripAndVersioning) {
     auto config = Qpsk();
-    EXPECT_NE(SerializePreset(config).find("Version=2"), std::string::npos);
+    EXPECT_NE(Unwrap(SerializePreset(config)).find("Version=2"), std::string::npos);
     config.Impairments.CfoHz = -12.5;
     config.Impairments.PhaseNoiseLinewidthHz = 3;
     config.Impairments.IqGainDb = 1.25;
@@ -155,27 +156,27 @@ TEST(Impairments, PresetRoundTripAndVersioning) {
     config.Impairments.DcOffsetQ = -.2;
     config.Impairments.AdcBits = 6;
     config.ImpairmentSeed = 99;
-    const auto text = SerializePreset(config);
+    const auto text = Unwrap(SerializePreset(config));
     EXPECT_NE(text.find("Version=3"), std::string::npos);
     EXPECT_EQ(ParsePreset(text), config);
-    EXPECT_THROW(ParsePreset(text.substr(0, text.find("CfoHz"))), std::invalid_argument);
-    auto v2 = SerializePreset(Qpsk());
-    EXPECT_THROW(ParsePreset(v2 + "CfoHz=1\n"), std::invalid_argument);
+    EXPECT_FALSE(ParsePreset(text.substr(0, text.find("CfoHz"))).has_value());
+    const auto v2 = Unwrap(SerializePreset(Qpsk()));
+    EXPECT_FALSE(ParsePreset(v2 + "CfoHz=1\n").has_value());
 }
 
 TEST(Impairments, BatchFramesApplyImpairmentsAfterCropWithDerivedSeed) {
     auto base = Qpsk();
     base.Impairments.PhaseNoiseLinewidthHz = 20;
     base.Impairments.CfoHz = 15;
-    const auto frame = GenerateFrame(base, 256, 3, std::nullopt);
+    const auto frame = Unwrap(GenerateFrame(base, 256, 3, std::nullopt));
     ASSERT_TRUE(frame.ImpairmentsApplied);
     EXPECT_EQ(frame.ImpairmentSeed, DeriveImpairmentSeed(base.Seed, base.Modulation, 3, base.ImpairmentSeed));
     auto clean_base = base;
     clean_base.Impairments = {};
-    const auto clean = GenerateFrame(clean_base, 256, 3, std::nullopt);
+    const auto clean = Unwrap(GenerateFrame(clean_base, 256, 3, std::nullopt));
     EXPECT_FALSE(clean.ImpairmentsApplied);
     auto expected = clean.Samples;
-    ApplyImpairments(expected, clean.SampleRateHz, base.Impairments, frame.ImpairmentSeed);
+    ASSERT_TRUE(ApplyImpairments(expected, clean.SampleRateHz, base.Impairments, frame.ImpairmentSeed).has_value());
     EXPECT_EQ(frame.Samples, expected);
     EXPECT_NE(frame.ImpairmentSeed, DeriveImpairmentSeed(base.Seed, base.Modulation, 4, base.ImpairmentSeed));
 }

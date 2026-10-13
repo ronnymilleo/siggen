@@ -9,6 +9,7 @@
 #include "measurements.h"
 #include "pipeline.h"
 #include "plot_figures.h"
+#include "test_support.h"
 #include <array>
 #include <filesystem>
 #include <fstream>
@@ -118,7 +119,7 @@ TEST(PlotExport, TickLabels) {
 
 TEST(PlotExport, SvgIsWellFormedAndEscapesText) {
     auto figure = LineFigure({255, 0, 0}, "A & B <tau>");
-    const auto svg = RenderSvg(figure, {800, 450, false});
+    const auto svg = Unwrap(RenderSvg(figure, {800, 450, false}));
     EXPECT_EQ(svg.rfind("<?xml", 0), 0u);
     EXPECT_NE(svg.find("width=\"800\" height=\"450\""), std::string::npos);
     EXPECT_NE(svg.find("A &amp; B &lt;tau&gt;"), std::string::npos);
@@ -136,12 +137,12 @@ TEST(PlotExport, SvgIsWellFormedAndEscapesText) {
         ++close;
     }
     EXPECT_EQ(open, close);
-    const auto dark = RenderSvg(figure, {800, 450, true});
+    const auto dark = Unwrap(RenderSvg(figure, {800, 450, true}));
     EXPECT_NE(dark.find("fill=\"#1b1f27\""), std::string::npos);
 }
 
 TEST(PlotExport, PngHasRequestedSizeBackgroundAndSeriesColour) {
-    const auto png = RenderPng(LineFigure({255, 0, 0}), {640, 360, false});
+    const auto png = Unwrap(RenderPng(LineFigure({255, 0, 0}), {640, 360, false}));
     ASSERT_GT(png.size(), 8u);
     EXPECT_EQ(png[0], 0x89);
     EXPECT_EQ(png[1], 'P');
@@ -152,7 +153,7 @@ TEST(PlotExport, PngHasRequestedSizeBackgroundAndSeriesColour) {
     EXPECT_EQ(image.At(2, 2)[2], 255);
     EXPECT_GT(CountNear(image, {255, 0, 0}), 200u); // the curve
     EXPECT_GT(CountInk(image), 40u);                // axes, ticks and text
-    const auto dark = Decode(RenderPng(LineFigure({255, 0, 0}), {640, 360, true}));
+    const auto dark = Decode(Unwrap(RenderPng(LineFigure({255, 0, 0}), {640, 360, true})));
     EXPECT_LT(dark.At(2, 2)[0], 60);
 }
 
@@ -161,7 +162,7 @@ TEST(PlotExport, SeriesOutsideAxisLimitsAreClipped) {
     figure.Panels[0].XLimits = std::array<double, 2>{10, 11}; // data live in [0, 1]
     figure.Panels[0].YLimits = std::array<double, 2>{-1, 1};
     figure.Panels[0].Series[0].Label.clear();
-    const auto image = Decode(RenderPng(figure, {640, 360}));
+    const auto image = Decode(Unwrap(RenderPng(figure, {640, 360})));
     EXPECT_EQ(CountNear(image, {255, 0, 0}, 10), 0u);
 }
 
@@ -175,7 +176,7 @@ TEST(PlotExport, EqualAspectKeepsASquareConstellationSquare) {
     series.X = {-1, 1, 1, -1};
     series.Y = {-1, -1, 1, 1};
     panel.Series.push_back(series);
-    const auto image = Decode(RenderPng({"", {panel}}, {900, 450}));
+    const auto image = Decode(Unwrap(RenderPng({"", {panel}}, {900, 450})));
     int x0 = image.Width, x1 = 0, y0 = image.Height, y1 = 0;
     for (int y = 0; y < image.Height; ++y) {
         for (int x = 0; x < image.Width; ++x) {
@@ -192,11 +193,11 @@ TEST(PlotExport, EqualAspectKeepsASquareConstellationSquare) {
 }
 
 TEST(PlotExport, RejectsBadSizesAndEmptyFigures) {
-    EXPECT_THROW(RenderSvg(LineFigure({0, 0, 0}), {100, 450}), std::invalid_argument);
-    EXPECT_THROW(RenderPng(LineFigure({0, 0, 0}), {640, 100000}), std::invalid_argument);
-    EXPECT_THROW(RenderSvg({"empty", {}}, {}), std::invalid_argument);
+    EXPECT_FALSE(RenderSvg(LineFigure({0, 0, 0}), {100, 450}).has_value());
+    EXPECT_FALSE(RenderPng(LineFigure({0, 0, 0}), {640, 100000}).has_value());
+    EXPECT_FALSE(RenderSvg({"empty", {}}).has_value());
     Panel empty; // no series: still draws the frame
-    EXPECT_NO_THROW(RenderPng({"", {empty}}, {400, 300}));
+    EXPECT_TRUE(RenderPng({"", {empty}}, {400, 300}).has_value());
 }
 
 TEST(PlotExport, HandlesNonFiniteAndDegenerateData) {
@@ -209,8 +210,8 @@ TEST(PlotExport, HandlesNonFiniteAndDegenerateData) {
     flat.X = {0, 1};
     flat.Y = {5, 5};
     panel.Series.push_back(flat);
-    EXPECT_NO_THROW(RenderPng({"", {panel}}, {400, 300}));
-    EXPECT_NO_THROW(RenderSvg({"", {panel}}, {400, 300}));
+    EXPECT_TRUE(RenderPng({"", {panel}}, {400, 300}).has_value());
+    EXPECT_TRUE(RenderSvg({"", {panel}}, {400, 300}).has_value());
 }
 
 TEST(PlotExport, ExportWritesFilesAndProtectsExistingOnes) {
@@ -218,17 +219,20 @@ TEST(PlotExport, ExportWritesFilesAndProtectsExistingOnes) {
     std::filesystem::remove(png);
     std::filesystem::remove(svg);
     const auto figure = LineFigure({0, 128, 0});
-    ExportFigure(png, figure, ImageFormat::PNG, {400, 300});
-    ExportFigure(svg, figure, ImageFormat::SVG, {400, 300});
+    ASSERT_TRUE(ExportFigure(png, figure, ImageFormat::PNG, {400, 300}).has_value());
+    ASSERT_TRUE(ExportFigure(svg, figure, ImageFormat::SVG, {400, 300}).has_value());
     EXPECT_GT(std::filesystem::file_size(png), 500u);
-    std::ifstream in(svg);
-    std::stringstream text;
-    text << in.rdbuf();
-    EXPECT_NE(text.str().find("<svg"), std::string::npos);
-    EXPECT_THROW(ExportFigure(png, figure, ImageFormat::PNG, {400, 300}), std::runtime_error);
-    EXPECT_NO_THROW(ExportFigure(png, figure, ImageFormat::PNG, {400, 300}, true));
-    EXPECT_THROW(ExportFigure("", figure, ImageFormat::SVG), std::invalid_argument);
-    EXPECT_THROW(ExportFigure(TempPath("no-such-dir/x.png"), figure, ImageFormat::PNG, {400, 300}), std::exception);
+    {
+        // Scoped so the file is closed before the removes below: Windows cannot delete an open file
+        std::ifstream in(svg);
+        std::stringstream text;
+        text << in.rdbuf();
+        EXPECT_NE(text.str().find("<svg"), std::string::npos);
+    }
+    EXPECT_FALSE(ExportFigure(png, figure, ImageFormat::PNG, {400, 300}).has_value());
+    EXPECT_TRUE(ExportFigure(png, figure, ImageFormat::PNG, {400, 300}, true).has_value());
+    EXPECT_FALSE(ExportFigure("", figure, ImageFormat::SVG).has_value());
+    EXPECT_FALSE(ExportFigure(TempPath("no-such-dir/x.png"), figure, ImageFormat::PNG, {400, 300}).has_value());
     std::filesystem::remove(png);
     std::filesystem::remove(svg);
 }
@@ -239,20 +243,20 @@ TEST(PlotFigures, BuiltFromARealSignal) {
     config.SymbolCount = 64;
     config.Awgn.Enabled = true;
     config.Awgn.SnrDb = 20;
-    const auto signal = Generate(config);
-    const auto plots = MakePlotData(signal);
+    const auto signal = Unwrap(Generate(config));
+    const auto plots = Unwrap(MakePlotData(signal));
     const auto waveform = WaveformFigure(plots);
     ASSERT_EQ(waveform.Panels.size(), 1u);
     EXPECT_EQ(waveform.Panels[0].Series.size(), 2u);
     const auto constellation = ConstellationFigure(plots.Matched, "I/Q constellation");
     EXPECT_TRUE(constellation.Panels[0].EqualAspect);
     EXPECT_FALSE(constellation.Panels[0].Series[0].X.empty());
-    const auto eye = EyeFigure(BuildEyeDiagram(signal), false);
+    const auto eye = EyeFigure(Unwrap(BuildEyeDiagram(signal)), false);
     EXPECT_GT(eye.Panels[0].Series.size(), 10u);
-    const auto spectrum = WelchPsd(signal.Samples, signal.SampleRateHz);
+    const auto spectrum = Unwrap(WelchPsd(signal.Samples, signal.SampleRateHz));
     EXPECT_EQ(SpectrumFigure(spectrum, std::vector<double>(spectrum.FrequencyHz.size(), -40)).Panels[0].Series.size(),
               1u);
-    const auto stages = BuildPipelineStages(signal);
+    const auto stages = Unwrap(BuildPipelineStages(signal));
     const auto pipeline = PipelineFigure(stages, 4, 8, true);
     ASSERT_EQ(pipeline.Panels.size(), 5u);
     EXPECT_EQ(pipeline.Panels[4].XLabel, "Time (symbol periods)");
@@ -262,12 +266,12 @@ TEST(PlotFigures, BuiltFromARealSignal) {
     EXPECT_DOUBLE_EQ((*pipeline.Panels[3].XLimits)[1], 12);
     // Every figure renders to both formats.
     for (const auto *figure : {&waveform, &constellation, &eye, &pipeline}) {
-        EXPECT_NO_THROW(RenderSvg(*figure, {800, 600}));
-        const auto image = Decode(RenderPng(*figure, {800, 600, false}));
+        EXPECT_TRUE(RenderSvg(*figure, {800, 600}).has_value());
+        const auto image = Decode(Unwrap(RenderPng(*figure, {800, 600, false})));
         EXPECT_GT(CountNear(image, {51, 153, 255}, 50), 8u);
     }
     // A request beyond the signal is clamped, not an error.
-    EXPECT_NO_THROW(PipelineFigure(stages, 1000, 1000, false));
+    EXPECT_EQ(PipelineFigure(stages, 1000, 1000, false).Panels.size(), 5u);
 }
 
 TEST(PlotExport, LogarithmicAxisDrawsDecadeTicksAndSkipsNonPositiveValues) {
@@ -280,12 +284,12 @@ TEST(PlotExport, LogarithmicAxisDrawsDecadeTicksAndSkipsNonPositiveValues) {
     series.Y = {0.1, 0.01, 0.0, 1e-4}; // The zero cannot be shown on a log axis
     panel.Series.push_back(series);
     const Figure figure{"BER", {panel}};
-    const auto svg = RenderSvg(figure);
+    const auto svg = Unwrap(RenderSvg(figure));
     EXPECT_NE(svg.find("1e-1"), std::string::npos);
     EXPECT_NE(svg.find("1e-4"), std::string::npos);
     EXPECT_EQ(svg.find("nan"), std::string::npos);
     panel.YLimits = std::array<double, 2>{1e-5, 1};
-    EXPECT_NO_THROW(RenderPng(Figure{"BER", {panel}}));
+    EXPECT_TRUE(RenderPng(Figure{"BER", {panel}}).has_value());
 }
 
 } // namespace Core

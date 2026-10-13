@@ -12,8 +12,6 @@
 
 namespace GUI {
 
-constexpr ImVec4 ErrorColor(.96f, .45f, .40f, 1.f);
-constexpr ImVec4 WarningColor(.95f, .75f, .30f, 1.f);
 // Plot colours of the I and Q components; Core::InPhaseColor and Core::QuadratureColor match them in exported images
 constexpr ImVec4 InPhaseColor(.2f, .6f, 1.f, 1.f);
 constexpr ImVec4 QuadratureColor(1.f, .55f, .15f, 1.f);

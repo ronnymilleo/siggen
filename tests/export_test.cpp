@@ -5,6 +5,7 @@
 
 #include "iq_export.h"
 
+#include "test_support.h"
 #include <algorithm>
 #include <chrono>
 #include <filesystem>
@@ -25,7 +26,7 @@ GeneratedSignal Fixture() {
     config.Pulse = Pulse::Rectangular;
     config.DataSource = DataSource::Explicit;
     config.Bits = "01";
-    return Generate(config);
+    return Unwrap(Generate(config));
 }
 
 } // namespace
@@ -33,9 +34,9 @@ GeneratedSignal Fixture() {
 TEST(Export, CSVPrecisionCountAndMetadata) {
     GenerationConfig config;
     config.Modulation = Modulation::QPSK;
-    const auto result = Generate(config);
+    const auto result = Unwrap(Generate(config));
     std::ostringstream out;
-    WriteSamples(out, result, ExportFormat::CSV);
+    ASSERT_TRUE(WriteSamples(out, result, ExportFormat::CSV).has_value());
     std::istringstream input(out.str());
     std::string line;
     std::getline(input, line);
@@ -52,7 +53,7 @@ TEST(Export, CSVPrecisionCountAndMetadata) {
         EXPECT_EQ(std::complex<float>(i, q), result.Samples[k++]);
     }
     EXPECT_EQ(k, result.Samples.size());
-    auto metadata = ExportMetadata(result, ExportFormat::CSV);
+    const auto metadata = Unwrap(ExportMetadata(result, ExportFormat::CSV));
     EXPECT_NE(metadata.find("\"sample_count\": " + std::to_string(k)), std::string::npos);
     EXPECT_NE(metadata.find("\"sample_rate_hz\": 8000"), std::string::npos);
     EXPECT_NE(metadata.find("\"filter_delay_samples\": 40"), std::string::npos);
@@ -62,14 +63,14 @@ TEST(Export, CSVPrecisionCountAndMetadata) {
 TEST(Export, BinaryByteOrderAndWriteFailure) {
     auto result = Fixture();
     std::ostringstream out;
-    WriteSamples(out, result, ExportFormat::SigMF);
+    ASSERT_TRUE(WriteSamples(out, result, ExportFormat::SigMF).has_value());
     const unsigned char bytes[] = {0, 0, 128, 63, 0, 0, 0, 0, 0, 0, 128, 191, 0, 0, 0, 0};
     EXPECT_EQ(out.str(), std::string(reinterpret_cast<const char *>(bytes), sizeof bytes));
     std::ostringstream bad;
     bad.setstate(std::ios::badbit);
-    EXPECT_THROW(WriteSamples(bad, result, ExportFormat::CSV), std::runtime_error);
+    EXPECT_FALSE(WriteSamples(bad, result, ExportFormat::CSV).has_value());
     result.SampleRateHz = 1;
-    EXPECT_THROW(ExportMetadata(result, ExportFormat::CSV), std::invalid_argument);
+    EXPECT_FALSE(ExportMetadata(result, ExportFormat::CSV).has_value());
 }
 
 TEST(Export, FilePairAndOverwriteProtection) {
@@ -78,13 +79,13 @@ TEST(Export, FilePairAndOverwriteProtection) {
     std::filesystem::create_directory(dir);
     const auto path = dir / "test.sigmf-data";
     const auto result = Fixture();
-    ExportSignal(path, result, ExportFormat::SigMF);
+    ASSERT_TRUE(ExportSignal(path, result, ExportFormat::SigMF).has_value());
     EXPECT_EQ(std::filesystem::file_size(path), 16u);
     EXPECT_TRUE(std::filesystem::exists(MetadataPath(path)));
-    EXPECT_THROW(ExportSignal(path, result, ExportFormat::CSV), std::runtime_error);
+    EXPECT_FALSE(ExportSignal(path, result, ExportFormat::CSV).has_value());
     EXPECT_EQ(std::filesystem::file_size(path), 16u);
-    EXPECT_NO_THROW(ExportSignal(path, result, ExportFormat::CSV, true));
-    EXPECT_THROW(ExportSignal(dir / "missing" / "x", result, ExportFormat::CSV), std::ios_base::failure);
+    EXPECT_TRUE(ExportSignal(path, result, ExportFormat::CSV, true).has_value());
+    EXPECT_FALSE(ExportSignal(dir / "missing" / "x", result, ExportFormat::CSV).has_value());
     std::filesystem::remove_all(dir);
 }
 
@@ -93,7 +94,7 @@ TEST(Export, FlushFailureAndSidecarProtection) {
         int sync() override { return -1; }
     } buffer;
     std::ostream failing(&buffer);
-    EXPECT_THROW(WriteSamples(failing, Fixture(), ExportFormat::CSV), std::runtime_error);
+    EXPECT_FALSE(WriteSamples(failing, Fixture(), ExportFormat::CSV).has_value());
     const auto dir = std::filesystem::temp_directory_path() /
                      ("iq-sidecar-test-" + std::to_string(std::chrono::steady_clock::now().time_since_epoch().count()));
     std::filesystem::create_directory(dir);
@@ -102,7 +103,7 @@ TEST(Export, FlushFailureAndSidecarProtection) {
         std::ofstream existing(MetadataPath(path));
         existing << "keep";
     }
-    EXPECT_THROW(ExportSignal(path, Fixture(), ExportFormat::CSV), std::runtime_error);
+    EXPECT_FALSE(ExportSignal(path, Fixture(), ExportFormat::CSV).has_value());
     EXPECT_FALSE(std::filesystem::exists(path));
     EXPECT_EQ(std::filesystem::file_size(MetadataPath(path)), 4u);
     std::filesystem::remove_all(dir);
@@ -111,8 +112,8 @@ TEST(Export, FlushFailureAndSidecarProtection) {
 TEST(Export, Version2LinearAndAwgnMetadata) {
     GenerationConfig config;
     config.SymbolCount = 64;
-    const auto clean = Generate(config);
-    const auto clean_metadata = ExportMetadata(clean, ExportFormat::CSV);
+    const auto clean = Unwrap(Generate(config));
+    const auto clean_metadata = Unwrap(ExportMetadata(clean, ExportFormat::CSV));
     EXPECT_NE(clean_metadata.find("\"version\": 2"), std::string::npos);
     EXPECT_NE(clean_metadata.find("\"family\": \"linear\""), std::string::npos);
     EXPECT_NE(clean_metadata.find("\"waveform\": \"BPSK\""), std::string::npos);
@@ -120,8 +121,8 @@ TEST(Export, Version2LinearAndAwgnMetadata) {
     EXPECT_EQ(clean_metadata.find("\"awgn\""), std::string::npos);
     config.Awgn.Enabled = true;
     config.Awgn.SnrDb = 10;
-    const auto noisy = Generate(config);
-    const auto metadata = ExportMetadata(noisy, ExportFormat::SigMF);
+    const auto noisy = Unwrap(Generate(config));
+    const auto metadata = Unwrap(ExportMetadata(noisy, ExportFormat::SigMF));
     EXPECT_NE(metadata.find("\"awgn\""), std::string::npos);
     EXPECT_NE(metadata.find("\"requested_snr_db\": 10"), std::string::npos);
     EXPECT_NE(metadata.find("\"reference_interval\": {\"begin\": 80, \"end\": 512}"), std::string::npos);
@@ -129,7 +130,7 @@ TEST(Export, Version2LinearAndAwgnMetadata) {
     EXPECT_NE(metadata.find("\"noise_seed\": 5490"), std::string::npos);
     // Byte layout is unchanged: little-endian float32 I/Q pairs.
     std::ostringstream out;
-    WriteSamples(out, noisy, ExportFormat::SigMF);
+    ASSERT_TRUE(WriteSamples(out, noisy, ExportFormat::SigMF).has_value());
     EXPECT_EQ(out.str().size(), noisy.Samples.size() * 8);
 }
 
@@ -137,12 +138,12 @@ TEST(Export, NoiseFamilyMetadataOmitsSymbolClaims) {
     GenerationConfig config;
     config.Modulation = Modulation::WGN;
     config.NoiseSource.SampleCount = 16;
-    auto result = Generate(config);
+    auto result = Unwrap(Generate(config));
     std::ostringstream out;
-    WriteSamples(out, result, ExportFormat::CSV);
+    ASSERT_TRUE(WriteSamples(out, result, ExportFormat::CSV).has_value());
     const auto text = out.str();
     EXPECT_EQ(std::count(text.begin(), text.end(), '\n'), 17u); // header + 16 rows
-    const auto metadata = ExportMetadata(result, ExportFormat::CSV);
+    const auto metadata = Unwrap(ExportMetadata(result, ExportFormat::CSV));
     EXPECT_NE(metadata.find("\"version\": 2"), std::string::npos);
     EXPECT_NE(metadata.find("\"family\": \"noise\""), std::string::npos);
     EXPECT_NE(metadata.find("\"waveform\": \"WGN\""), std::string::npos);
@@ -153,21 +154,22 @@ TEST(Export, NoiseFamilyMetadataOmitsSymbolClaims) {
     EXPECT_EQ(metadata.find("random_bit_rule"), std::string::npos);
     // Length validation distinguishes noise results from linear trains.
     result.Samples.pop_back();
-    EXPECT_THROW(ExportMetadata(result, ExportFormat::CSV), std::invalid_argument);
+    EXPECT_FALSE(ExportMetadata(result, ExportFormat::CSV).has_value());
     result.Config.NoiseSource.SampleCount = 15;
-    EXPECT_NO_THROW(ExportMetadata(result, ExportFormat::CSV));
+    EXPECT_TRUE(ExportMetadata(result, ExportFormat::CSV).has_value());
 }
 
 TEST(Export, RawSpanWriterMatchesSignalWriter) {
     const auto result = Fixture();
     std::ostringstream direct, via_signal;
-    WriteSamples(direct, std::span<const std::complex<float>>(result.Samples), result.SampleRateHz,
-                 ExportFormat::SigMF);
-    WriteSamples(via_signal, result, ExportFormat::SigMF);
+    ASSERT_TRUE(WriteSamples(direct, std::span<const std::complex<float>>(result.Samples), result.SampleRateHz,
+                             ExportFormat::SigMF)
+                    .has_value());
+    ASSERT_TRUE(WriteSamples(via_signal, result, ExportFormat::SigMF).has_value());
     EXPECT_EQ(direct.str(), via_signal.str());
     std::ostringstream bad;
-    EXPECT_THROW(WriteSamples(bad, std::span<const std::complex<float>>(result.Samples), 0, ExportFormat::CSV),
-                 std::invalid_argument);
+    EXPECT_FALSE(
+        WriteSamples(bad, std::span<const std::complex<float>>(result.Samples), 0, ExportFormat::CSV).has_value());
 }
 
 } // namespace Core

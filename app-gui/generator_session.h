@@ -42,7 +42,12 @@ public:
     const Core::GenerationConfig &GetConfig() const;
     bool SavePreset(const std::string &path);
     bool LoadPreset(const std::string &path);
+    bool LoadPresetText(const std::string &text, const std::string &name);
     const std::string &GetPresetNotes() const;
+    bool IsModified() const;
+    const std::string &GetDocumentName() const;
+    const std::string &GetDocumentPath() const;
+    std::size_t GetSettingsVersion() const;
 
     // Generation
     void StartGeneration();
@@ -80,10 +85,16 @@ public:
 private:
     void RefreshAnalysis(const Core::GeneratedSignal &result);
     void UpdateSpectrum();
+    void MarkClean();
 
     // Settings
     Core::GenerationConfig m_Config;
     std::string m_PresetNotes;
+    std::string m_DocumentPath;  // Where Save writes; empty while the document has never been saved
+    std::string m_DocumentName;  // What the window title shows; empty means untitled
+    std::string m_CleanSettings; // Serialization at the last load or save; edits make the settings differ from it
+    bool m_Modified = false;
+    std::size_t m_SettingsVersion = 0; // Bumped when the settings are replaced wholesale, so edit buffers reload
 
     // Generation
     Core::GenerationJob m_Job;

@@ -7,6 +7,7 @@
 
 #include "preset.h"
 #include "signal_analysis.h"
+#include "test_support.h"
 #include <cmath>
 #include <filesystem>
 #include <gtest/gtest.h>
@@ -15,26 +16,26 @@
 namespace Core {
 
 TEST(Measurements, PowerStatisticsAndPapr) {
-    EXPECT_EQ(MeasurePowerStatistics({}).MeanPower, 0);
-    const auto zero = MeasurePowerStatistics(std::vector<std::complex<float>>(4));
+    EXPECT_EQ(Unwrap(MeasurePowerStatistics({})).MeanPower, 0);
+    const auto zero = Unwrap(MeasurePowerStatistics(std::vector<std::complex<float>>(4)));
     EXPECT_EQ(zero.PaprDb, 0);
-    const auto stats = MeasurePowerStatistics({{1, 0}, {0, 1}, {-1, 0}, {0, 2}});
+    const auto stats = Unwrap(MeasurePowerStatistics({{1, 0}, {0, 1}, {-1, 0}, {0, 2}}));
     EXPECT_DOUBLE_EQ(stats.MeanPower, 7. / 4);
     EXPECT_DOUBLE_EQ(stats.PeakPower, 4);
     EXPECT_NEAR(stats.PaprDb, 10 * std::log10(4 / (7. / 4)), 1e-12);
-    EXPECT_THROW(MeasurePowerStatistics({{std::nanf(""), 0}}), std::invalid_argument);
+    EXPECT_FALSE(MeasurePowerStatistics({{std::nanf(""), 0}}).has_value());
     // Rectangular BPSK has a constant envelope.
     GenerationConfig config;
     config.Pulse = Pulse::Rectangular;
-    EXPECT_NEAR(MeasurePowerStatistics(Generate(config).Samples).PaprDb, 0, 1e-6);
+    EXPECT_NEAR(Unwrap(MeasurePowerStatistics(Unwrap(Generate(config)).Samples)).PaprDb, 0, 1e-6);
     // Shaped higher-order QAM has a clearly higher PAPR than shaped BPSK.
     GenerationConfig qam;
     qam.Modulation = Modulation::QAM64;
     qam.SymbolCount = 1024;
     GenerationConfig bpsk;
     bpsk.SymbolCount = 1024;
-    EXPECT_GT(MeasurePowerStatistics(Generate(qam).Samples).PaprDb,
-              MeasurePowerStatistics(Generate(bpsk).Samples).PaprDb);
+    EXPECT_GT(Unwrap(MeasurePowerStatistics(Unwrap(Generate(qam)).Samples)).PaprDb,
+              Unwrap(MeasurePowerStatistics(Unwrap(Generate(bpsk)).Samples)).PaprDb);
 }
 
 TEST(Measurements, CleanSignalHasNearZeroEvm) {
@@ -43,7 +44,7 @@ TEST(Measurements, CleanSignalHasNearZeroEvm) {
         config.Modulation = Modulation::QAM16;
         config.Pulse = pulse;
         config.AmplitudeGain = 3;
-        const auto accuracy = MeasureSymbolAccuracy(Generate(config));
+        const auto accuracy = Unwrap(MeasureSymbolAccuracy(Unwrap(Generate(config))));
         ASSERT_TRUE(accuracy);
         // RRC truncated to 10 symbols at roll-off 0.2 leaves a small residual ISI floor (~-43 dB).
         EXPECT_LT(accuracy->EvmRms, pulse == Pulse::RRC ? 1.5e-2 : 1e-3);
@@ -62,7 +63,7 @@ TEST(Measurements, MeasuredSnrTracksRequestedSnr) {
             config.SymbolCount = 8192;
             config.Awgn.Enabled = true;
             config.Awgn.SnrDb = snr;
-            const auto accuracy = MeasureSymbolAccuracy(Generate(config));
+            const auto accuracy = Unwrap(MeasureSymbolAccuracy(Unwrap(Generate(config))));
             ASSERT_TRUE(accuracy);
             EXPECT_NEAR(accuracy->SnrAfterMatchedDb, snr + accuracy->ExpectedOffsetDb, 0.6) << "snr " << snr;
             EXPECT_NEAR(accuracy->EvmDb, -accuracy->SnrAfterMatchedDb, 1e-12);
@@ -73,13 +74,13 @@ TEST(Measurements, MeasuredSnrTracksRequestedSnr) {
 TEST(Measurements, UnavailableWithoutSymbols) {
     GenerationConfig wgn;
     wgn.Modulation = Modulation::WGN;
-    EXPECT_FALSE(MeasureSymbolAccuracy(Generate(wgn)));
-    EXPECT_THROW(BuildEyeDiagram(Generate(wgn)), std::invalid_argument);
+    EXPECT_FALSE(Unwrap(MeasureSymbolAccuracy(Unwrap(Generate(wgn)))));
+    EXPECT_FALSE(BuildEyeDiagram(Unwrap(Generate(wgn))).has_value());
     GenerationConfig tiny;
     tiny.SymbolCount = 1;
-    EXPECT_FALSE(MeasureSymbolAccuracy(Generate(tiny)));
-    EXPECT_TRUE(BuildEyeDiagram(Generate(tiny)).InPhase.empty());
-    EXPECT_THROW(BuildEyeDiagram(Generate({}), 0), std::invalid_argument);
+    EXPECT_FALSE(Unwrap(MeasureSymbolAccuracy(Unwrap(Generate(tiny)))));
+    EXPECT_TRUE(Unwrap(BuildEyeDiagram(Unwrap(Generate(tiny)))).InPhase.empty());
+    EXPECT_FALSE(BuildEyeDiagram(Unwrap(Generate({})), 0).has_value());
 }
 
 TEST(Eye, TracesCrossTheDecisionInstantAtTheSymbolValue) {
@@ -88,8 +89,8 @@ TEST(Eye, TracesCrossTheDecisionInstantAtTheSymbolValue) {
         config.Modulation = Modulation::BPSK;
         config.Pulse = pulse;
         config.SymbolCount = 128;
-        const auto result = Generate(config);
-        const auto eye = BuildEyeDiagram(result, 50);
+        const auto result = Unwrap(Generate(config));
+        const auto eye = Unwrap(BuildEyeDiagram(result, 50));
         ASSERT_EQ(eye.TimeSymbols.size(), 17u);
         EXPECT_DOUBLE_EQ(eye.TimeSymbols.front(), -1);
         EXPECT_DOUBLE_EQ(eye.TimeSymbols[8], 0);
@@ -106,9 +107,9 @@ TEST(Eye, TracesCrossTheDecisionInstantAtTheSymbolValue) {
     }
     GenerationConfig config;
     config.SymbolCount = 20;
-    EXPECT_EQ(BuildEyeDiagram(Generate(config), 1000).InPhase.size(), 0u); // 20 symbols < 2 * span.
+    EXPECT_EQ(Unwrap(BuildEyeDiagram(Unwrap(Generate(config)), 1000)).InPhase.size(), 0u); // 20 symbols < 2 * span.
     config.SymbolCount = 64;
-    EXPECT_EQ(BuildEyeDiagram(Generate(config), 1000).InPhase.size(), 44u);
+    EXPECT_EQ(Unwrap(BuildEyeDiagram(Unwrap(Generate(config)), 1000)).InPhase.size(), 44u);
 }
 
 TEST(Windows, ValuesAndPsdDefaults) {
@@ -121,12 +122,12 @@ TEST(Windows, ValuesAndPsdDefaults) {
     EXPECT_EQ(WindowValue(Window::Rectangular, 3, window_length), 1);
     // The default window remains periodic Hann.
     GenerationConfig config;
-    const auto result = Generate(config);
-    const auto implicit = WelchPsd(result.Samples, result.SampleRateHz);
-    const auto hann = WelchPsd(result.Samples, result.SampleRateHz, 1024, Window::Hann);
+    const auto result = Unwrap(Generate(config));
+    const auto implicit = Unwrap(WelchPsd(result.Samples, result.SampleRateHz));
+    const auto hann = Unwrap(WelchPsd(result.Samples, result.SampleRateHz, 1024, Window::Hann));
     EXPECT_EQ(implicit.PowerDensity, hann.PowerDensity);
     EXPECT_EQ(hann.Window, Window::Hann);
-    const auto rect = WelchPsd(result.Samples, result.SampleRateHz, 1024, Window::Rectangular);
+    const auto rect = Unwrap(WelchPsd(result.Samples, result.SampleRateHz, 1024, Window::Rectangular));
     EXPECT_NE(rect.PowerDensity, hann.PowerDensity);
     EXPECT_EQ(rect.Window, Window::Rectangular);
     // Power is preserved across windows: integrated PSD is within a few percent.
@@ -138,7 +139,7 @@ TEST(Windows, ValuesAndPsdDefaults) {
         return sum;
     };
     for (auto window : {Window::Hamming, Window::Blackman}) {
-        EXPECT_NEAR(total(WelchPsd(result.Samples, result.SampleRateHz, 1024, window)) / total(hann), 1, .15);
+        EXPECT_NEAR(total(Unwrap(WelchPsd(result.Samples, result.SampleRateHz, 1024, window))) / total(hann), 1, .15);
     }
 }
 
@@ -149,7 +150,7 @@ TEST(Windows, BlackmanHasLowerSidelobesThanRectangular) {
         tone[k] = std::polar(1.f, static_cast<float>(2 * std::numbers::pi * 100.37 * k / 1024));
     }
     const auto far_leakage = [&](Window window) {
-        const auto spectrum = WelchPsd(tone, 1024, 1024, window);
+        const auto spectrum = Unwrap(WelchPsd(tone, 1024, 1024, window));
         double near = 0, far = 0;
         for (std::size_t k = 0; k < spectrum.PowerDensity.size(); ++k) {
             (std::abs(static_cast<int>(k) - (512 + 100)) <= 4 ? near : far) += spectrum.PowerDensity[k];
@@ -168,21 +169,24 @@ TEST(GuidedPresets, AllParseAndCarryNotes) {
             continue;
         }
         ++count;
-        EXPECT_NO_THROW(LoadPreset(entry.path())) << entry.path();
-        EXPECT_FALSE(LoadPresetNotes(entry.path()).empty()) << entry.path();
-        EXPECT_NO_THROW(Generate(LoadPreset(entry.path()))) << entry.path();
+        const auto loaded = LoadPreset(entry.path());
+        ASSERT_TRUE(loaded.has_value()) << entry.path();
+        const auto notes = LoadPresetNotes(entry.path());
+        ASSERT_TRUE(notes.has_value()) << entry.path();
+        EXPECT_FALSE(notes->empty()) << entry.path();
+        EXPECT_TRUE(Generate(*loaded).has_value()) << entry.path();
     }
     EXPECT_GE(count, 10);
 }
 
 TEST(GuidedPresets, NotesAreIgnoredByTheParser) {
-    const auto text = SerializePreset({});
+    const auto text = Unwrap(SerializePreset({}));
     const auto header_end = text.find('\n') + 1;
     const auto with_notes = text.substr(0, header_end) + "# First line\n#\n#   indented\r\n" + text.substr(header_end);
     EXPECT_EQ(ParsePreset(with_notes), GenerationConfig{});
     EXPECT_EQ(PresetNotes(with_notes), "First line\n\n  indented");
     EXPECT_EQ(PresetNotes(text), "");
-    EXPECT_THROW(LoadPresetNotes("/nonexistent-iq-preset/file"), std::runtime_error);
+    EXPECT_FALSE(LoadPresetNotes("/nonexistent-iq-preset/file").has_value());
 }
 
 } // namespace Core

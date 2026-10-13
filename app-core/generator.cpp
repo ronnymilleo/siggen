@@ -12,7 +12,6 @@
 #include <cstddef>
 #include <numbers>
 #include <random>
-#include <stdexcept>
 #include <string>
 #include <utility>
 #include <vector>
@@ -60,108 +59,116 @@ int BitsValue(const std::string &bits, std::size_t offset, int count) {
 
 // region Validation
 
-void ValidateCommonSettings(const GenerationConfig &config) {
+std::expected<void, std::string> ValidateCommonSettings(const GenerationConfig &config) {
     if (!std::isfinite(config.AmplitudeGain) || config.AmplitudeGain < 0 || config.AmplitudeGain > 1000000) {
-        throw std::invalid_argument("Amplitude gain must be finite and in [0,1000000]");
+        return std::unexpected(std::string("Amplitude gain must be finite and in [0,1000000]"));
     }
     if (config.DataSource != DataSource::Random && config.DataSource != DataSource::Explicit) {
-        throw std::invalid_argument("Unsupported data source");
+        return std::unexpected(std::string("Unsupported data source"));
     }
     if (config.Bits.size() > MaxExplicitBits) {
-        throw std::invalid_argument("Bit input exceeds limit");
+        return std::unexpected(std::string("Bit input exceeds limit"));
     }
+    return {};
 }
 
-void ValidateTimingAndPulse(const GenerationConfig &config, const WaveformDescriptor &descriptor) {
-    if (config.SymbolCount < 1 || config.SymbolCount > 65536) {
-        throw std::invalid_argument("Symbol count must be 1–65536");
+std::expected<void, std::string> ValidateTimingAndPulse(const GenerationConfig &config,
+                                                        const WaveformDescriptor &descriptor) {
+    if (config.SymbolCount < 1 || config.SymbolCount > MaxSymbolCount) {
+        return std::unexpected(std::string("Symbol count must be 1–65536"));
     }
     if (config.SamplesPerSymbol < 1 || config.SamplesPerSymbol > 32) {
-        throw std::invalid_argument("Samples per symbol must be 1–32");
+        return std::unexpected(std::string("Samples per symbol must be 1–32"));
     }
     if (!std::isfinite(config.SymbolRateBaud) || config.SymbolRateBaud <= 0 ||
         !std::isfinite(config.SymbolRateBaud * config.SamplesPerSymbol) ||
         !std::isfinite(MaxSignalSamples / (config.SymbolRateBaud * config.SamplesPerSymbol))) {
-        throw std::invalid_argument("Symbol rate must be positive with finite sample rate and duration");
+        return std::unexpected(std::string("Symbol rate must be positive with finite sample rate and duration"));
     }
     if (config.Pulse != Pulse::RRC && config.Pulse != Pulse::Rectangular) {
-        throw std::invalid_argument("Unsupported pulse");
+        return std::unexpected(std::string("Unsupported pulse"));
     }
     if (!std::isfinite(config.RollOff) || config.RollOff < 0 || config.RollOff > 1 || config.SpanSymbols < 1 ||
         config.SpanSymbols > 100) {
-        throw std::invalid_argument("Roll-off must be [0,1] and span must be 1–100 symbols");
+        return std::unexpected(std::string("Roll-off must be [0,1] and span must be 1–100 symbols"));
     }
     if (descriptor.Family != Family::Fsk && config.Pulse == Pulse::RRC &&
         (config.SamplesPerSymbol < 2 || (config.SpanSymbols * config.SamplesPerSymbol) % 2)) {
-        throw std::invalid_argument("RRC needs SPS >= 2 and even span * SPS");
+        return std::unexpected(std::string("RRC needs SPS >= 2 and even span * SPS"));
     }
     const auto sps = static_cast<std::size_t>(config.SamplesPerSymbol);
     if (config.Modulation == Modulation::OQPSK && (config.SamplesPerSymbol < 2 || config.SamplesPerSymbol % 2)) {
-        throw std::invalid_argument(
-            "OQPSK needs an even samples per symbol (the quadrature stream lags by half a symbol)");
+        return std::unexpected(
+            std::string("OQPSK needs an even samples per symbol (the quadrature stream lags by half a symbol)"));
     }
     const auto tail = (UsesRrc(config) ? static_cast<std::size_t>(config.SpanSymbols) * sps + 1 : sps) +
                       QuadratureDelaySamples(config);
     if (static_cast<std::size_t>(config.SymbolCount - 1) > (MaxSignalSamples - tail) / sps) {
-        throw std::length_error("Generation exceeds sample limit");
+        return std::unexpected(std::string("Generation exceeds sample limit"));
     }
+    return {};
 }
 
-void ValidateNoiseSource(const NoiseSourceSettings &noise_source) {
+std::expected<void, std::string> ValidateNoiseSource(const NoiseSourceSettings &noise_source) {
     if (noise_source.SampleCount < 1 || static_cast<std::size_t>(noise_source.SampleCount) > MaxSignalSamples) {
-        throw std::invalid_argument("Noise sample count must be 1–4194304");
+        return std::unexpected(std::string("Noise sample count must be 1–4194304"));
     }
     if (!std::isfinite(noise_source.SampleRateHz) || noise_source.SampleRateHz <= 0 ||
         !std::isfinite(MaxSignalSamples / noise_source.SampleRateHz)) {
-        throw std::invalid_argument("Noise sample rate must be positive with finite duration");
+        return std::unexpected(std::string("Noise sample rate must be positive with finite duration"));
     }
     if (!std::isfinite(noise_source.NoisePower) || noise_source.NoisePower < 0) {
-        throw std::invalid_argument("Noise power must be finite and non-negative");
+        return std::unexpected(std::string("Noise power must be finite and non-negative"));
     }
+    return {};
 }
 
-void ValidateAwgnAndImpairments(const GenerationConfig &config) {
+std::expected<void, std::string> ValidateAwgnAndImpairments(const GenerationConfig &config) {
     if (!std::isfinite(config.Awgn.SnrDb)) {
-        throw std::invalid_argument("AWGN SNR must be finite");
+        return std::unexpected(std::string("AWGN SNR must be finite"));
     }
-    Validate(config.Impairments);
+    return Validate(config.Impairments);
 }
 
-void ValidateFsk(const GenerationConfig &config, const WaveformDescriptor &descriptor) {
+std::expected<void, std::string> ValidateFsk(const GenerationConfig &config, const WaveformDescriptor &descriptor) {
     if (!std::isfinite(config.ToneSpacingHz) || config.ToneSpacingHz <= 0) {
-        throw std::invalid_argument("Tone spacing must be positive and finite");
+        return std::unexpected(std::string("Tone spacing must be positive and finite"));
     }
     if (descriptor.Family == Family::Fsk) {
         // Every tone centre must lie strictly inside Nyquist; the spectral skirts of rectangular frequency
         // transitions may still alias at low SPS
         const auto outer = (static_cast<double>(1 << descriptor.BitsPerSymbol) - 1) / 2 * FskToneSpacingHz(config);
         if (!(outer < config.SymbolRateBaud * config.SamplesPerSymbol / 2)) {
-            throw std::invalid_argument("FSK tone centres must lie strictly below half the sample rate");
+            return std::unexpected(std::string("FSK tone centres must lie strictly below half the sample rate"));
         }
     }
+    return {};
 }
 
 // Settings that only make sense for the active family: noise sources reject AWGN, impairments and explicit bits;
 // the other families check the explicit bits against the symbol count
-void ValidateFamilySpecific(const GenerationConfig &config, const WaveformDescriptor &descriptor) {
+std::expected<void, std::string> ValidateFamilySpecific(const GenerationConfig &config,
+                                                        const WaveformDescriptor &descriptor) {
     if (descriptor.Family == Family::Noise) {
         if (config.Impairments.Active()) {
-            throw std::invalid_argument("Impairments do not apply to noise sources");
+            return std::unexpected(std::string("Impairments do not apply to noise sources"));
         }
         if (!descriptor.AwgnSupported && config.Awgn.Enabled) {
-            throw std::invalid_argument("AWGN does not apply to noise sources");
+            return std::unexpected(std::string("AWGN does not apply to noise sources"));
         }
         if (!descriptor.ExplicitInput && config.DataSource == DataSource::Explicit) {
-            throw std::invalid_argument("Noise sources use seeded random generation");
+            return std::unexpected(std::string("Noise sources use seeded random generation"));
         }
-        return;
+        return {};
     }
     const auto bits_per_symbol = static_cast<std::size_t>(descriptor.BitsPerSymbol);
     if (config.DataSource == DataSource::Explicit &&
         (config.Bits.size() != static_cast<std::size_t>(config.SymbolCount) * bits_per_symbol ||
          config.Bits.find_first_not_of("01") != std::string::npos)) {
-        throw std::invalid_argument("Explicit input must contain exactly symbol count * bits per symbol binary digits");
+        return std::unexpected(
+            std::string("Explicit input must contain exactly symbol count * bits per symbol binary digits"));
     }
+    return {};
 }
 
 // endregion
@@ -261,7 +268,8 @@ std::complex<float> MapDpsk8(const std::string &bits, std::size_t offset, int &p
     return {static_cast<float>(std::cos(angle)), static_cast<float>(std::sin(angle))};
 }
 
-std::complex<float> MapSymbol(Modulation modulation, const std::string &bits, std::size_t offset, int &phase_steps) {
+std::expected<std::complex<float>, std::string> MapSymbol(Modulation modulation, const std::string &bits,
+                                                          std::size_t offset, int &phase_steps) {
     switch (modulation) {
     case Modulation::BPSK:
         return MapBpsk(bits, offset);
@@ -298,7 +306,7 @@ std::complex<float> MapSymbol(Modulation modulation, const std::string &bits, st
     case Modulation::MSK:
         break;
     }
-    throw std::invalid_argument("Waveform has no implemented symbol mapper");
+    return std::unexpected(std::string("Waveform has no implemented symbol mapper"));
 }
 
 // endregion
@@ -306,50 +314,72 @@ std::complex<float> MapSymbol(Modulation modulation, const std::string &bits, st
 // region Generation
 
 // Clean steady-state reference interval for AWGN, excluding RRC transients
-std::pair<std::size_t, std::size_t> AwgnReferenceInterval(const GenerationConfig &config, std::size_t sample_count) {
+std::expected<std::pair<std::size_t, std::size_t>, std::string> AwgnReferenceInterval(const GenerationConfig &config,
+                                                                                      std::size_t sample_count) {
     const auto sps = static_cast<std::size_t>(config.SamplesPerSymbol);
     if (UsesRrc(config)) {
         const auto begin = static_cast<std::size_t>(config.SpanSymbols) * sps;
         const auto end = static_cast<std::size_t>(config.SymbolCount) * sps;
         if (begin >= end || end > sample_count) {
-            throw std::invalid_argument("AWGN reference interval is empty");
+            return std::unexpected(std::string("AWGN reference interval is empty"));
         }
-        return {begin, end};
+        return std::pair<std::size_t, std::size_t>{begin, end};
     }
     if (sample_count == 0) {
-        throw std::invalid_argument("AWGN reference interval is empty");
+        return std::unexpected(std::string("AWGN reference interval is empty"));
     }
-    return {0, sample_count};
+    return std::pair<std::size_t, std::size_t>{0, sample_count};
 }
 
-void ApplyAwgn(GeneratedSignal &result) {
-    const auto [begin, end] = AwgnReferenceInterval(result.Config, result.Samples.size());
-    result.Noise = AddAwgn(result.Samples, begin, end, result.Config.Awgn.SnrDb, result.Config.NoiseSeed);
+std::expected<void, std::string> ApplyAwgn(GeneratedSignal &result) {
+    const auto interval = AwgnReferenceInterval(result.Config, result.Samples.size());
+    if (!interval.has_value()) {
+        return std::unexpected(interval.error());
+    }
+    const auto noise =
+        AddAwgn(result.Samples, interval->first, interval->second, result.Config.Awgn.SnrDb, result.Config.NoiseSeed);
+    if (!noise.has_value()) {
+        return std::unexpected(noise.error());
+    }
+    result.Noise = *noise;
+    return {};
 }
 
 // AWGN, then channel impairments, for every non-noise family
-void Finish(GeneratedSignal &result) {
+std::expected<void, std::string> Finish(GeneratedSignal &result) {
     const auto &config = result.Config;
     if (config.Awgn.Enabled) {
-        ApplyAwgn(result);
+        if (const auto applied = ApplyAwgn(result); !applied.has_value()) {
+            return applied;
+        }
     }
     if (config.Impairments.Active()) {
-        ApplyImpairments(result.Samples, result.SampleRateHz, config.Impairments, config.ImpairmentSeed);
+        if (const auto applied =
+                ApplyImpairments(result.Samples, result.SampleRateHz, config.Impairments, config.ImpairmentSeed);
+            !applied.has_value()) {
+            return std::unexpected(applied.error());
+        }
         result.ImpairmentsApplied = true;
     }
+    return {};
 }
 
-void GenerateNoise(GeneratedSignal &result) {
+std::expected<void, std::string> GenerateNoise(GeneratedSignal &result) {
     const auto &config = result.Config;
     result.SampleRateHz = config.NoiseSource.SampleRateHz;
-    result.Samples = GaussianNoise(static_cast<std::size_t>(config.NoiseSource.SampleCount),
-                                   config.NoiseSource.NoisePower, config.NoiseSeed);
+    const auto samples = GaussianNoise(static_cast<std::size_t>(config.NoiseSource.SampleCount),
+                                       config.NoiseSource.NoisePower, config.NoiseSeed);
+    if (!samples.has_value()) {
+        return std::unexpected(samples.error());
+    }
+    result.Samples = std::move(*samples);
     if (config.AmplitudeGain != 1) {
         for (auto &sample : result.Samples) {
             sample *= static_cast<float>(config.AmplitudeGain);
         }
     }
     result.Noise = NoiseRecord{false, 0, 0, 0, 0, config.NoiseSource.NoisePower, config.NoiseSeed};
+    return {};
 }
 
 std::string RandomBits(const GenerationConfig &config) {
@@ -391,12 +421,16 @@ void GenerateFsk(GeneratedSignal &result, const std::string &bits) {
 }
 
 // Sparse zero-insertion convolution of the mapped symbols with the pulse, retaining the complete FIR response
-void ShapeSymbols(GeneratedSignal &result) {
+std::expected<void, std::string> ShapeSymbols(GeneratedSignal &result) {
     const auto &config = result.Config;
     const auto sps = static_cast<std::size_t>(config.SamplesPerSymbol);
     std::vector<double> taps;
     if (config.Pulse == Pulse::RRC) {
-        taps = RRCFilter(config.RollOff, config.SpanSymbols, config.SamplesPerSymbol);
+        const auto designed = RRCFilter(config.RollOff, config.SpanSymbols, config.SamplesPerSymbol);
+        if (!designed.has_value()) {
+            return std::unexpected(designed.error());
+        }
+        taps = std::move(*designed);
         result.FilterDelaySamples = (taps.size() - 1) / 2;
     } else {
         taps.assign(sps, 1.);
@@ -416,6 +450,7 @@ void ShapeSymbols(GeneratedSignal &result) {
             }
         }
     }
+    return {};
 }
 
 // endregion
@@ -483,45 +518,60 @@ void SelectWaveform(GenerationConfig &config, Modulation modulation) {
 /**
  * @brief   Checks every generation setting.
  * @param[in] config  Settings to check.
- * @note    Throws std::invalid_argument for the first invalid setting, or std::length_error when the signal
- *          would exceed MaxSignalSamples. Persisted fields are always validated, even when the active waveform
- *          family ignores them, so presets fail transactionally.
+ * @return  Nothing on success, or the first invalid setting; a signal beyond MaxSignalSamples is also an error.
+ * @note    Persisted fields are always validated, even when the active waveform family ignores them, so presets
+ *          fail transactionally.
  */
-void Validate(const GenerationConfig &config) {
-    if (!IsValid(config.Modulation)) {
-        throw std::invalid_argument("Unsupported modulation");
+std::expected<void, std::string> Validate(const GenerationConfig &config) {
+    const auto *descriptor = FindWaveform(config.Modulation);
+    if (descriptor == nullptr) {
+        return std::unexpected(std::string("Unsupported modulation"));
     }
-    const auto &descriptor = GetWaveformDescriptor(config.Modulation);
-    ValidateCommonSettings(config);
-    ValidateTimingAndPulse(config, descriptor);
-    ValidateNoiseSource(config.NoiseSource);
-    ValidateAwgnAndImpairments(config);
-    ValidateFsk(config, descriptor);
-    ValidateFamilySpecific(config, descriptor);
+    if (const auto checked = ValidateCommonSettings(config); !checked.has_value()) {
+        return checked;
+    }
+    if (const auto checked = ValidateTimingAndPulse(config, *descriptor); !checked.has_value()) {
+        return checked;
+    }
+    if (const auto checked = ValidateNoiseSource(config.NoiseSource); !checked.has_value()) {
+        return checked;
+    }
+    if (const auto checked = ValidateAwgnAndImpairments(config); !checked.has_value()) {
+        return checked;
+    }
+    if (const auto checked = ValidateFsk(config, *descriptor); !checked.has_value()) {
+        return checked;
+    }
+    return ValidateFamilySpecific(config, *descriptor);
 }
 
 /**
  * @brief   Maps bits to the unit-energy constellation points of a linear waveform.
  * @param[in] modulation  A linear waveform.
  * @param[in] bits        '0'/'1' characters, a whole number of symbols and at most 65536 of them.
- * @return  One point per symbol, before amplitude gain. Differential schemes start from phase zero.
- * @note    Throws std::invalid_argument for a non-linear waveform or invalid bits.
+ * @return  One point per symbol, before amplitude gain; differential schemes start from phase zero. An error for
+ *          a non-linear waveform or invalid bits.
  */
-std::vector<std::complex<float>> MapSymbols(Modulation modulation, const std::string &bits) {
-    const auto &descriptor = GetWaveformDescriptor(modulation);
-    if (descriptor.Family != Family::Linear) {
-        throw std::invalid_argument("Only linear waveforms have a symbol mapping");
+std::expected<std::vector<std::complex<float>>, std::string> MapSymbols(Modulation modulation,
+                                                                        const std::string &bits) {
+    const auto *descriptor = FindWaveform(modulation);
+    if (descriptor == nullptr || descriptor->Family != Family::Linear) {
+        return std::unexpected(std::string("Only linear waveforms have a symbol mapping"));
     }
-    const auto bits_per_symbol = static_cast<std::size_t>(descriptor.BitsPerSymbol);
-    if (bits.size() > 65536 * bits_per_symbol || bits.size() % bits_per_symbol ||
+    const auto bits_per_symbol = static_cast<std::size_t>(descriptor->BitsPerSymbol);
+    if (bits.size() > static_cast<std::size_t>(MaxSymbolCount) * bits_per_symbol || bits.size() % bits_per_symbol ||
         bits.find_first_not_of("01") != std::string::npos) {
-        throw std::invalid_argument("Invalid mapper bit input");
+        return std::unexpected(std::string("Invalid mapper bit input"));
     }
     std::vector<std::complex<float>> symbols;
     symbols.reserve(bits.size() / bits_per_symbol);
     int phase_steps = 0;
     for (std::size_t offset = 0; offset < bits.size(); offset += bits_per_symbol) {
-        symbols.push_back(MapSymbol(modulation, bits, offset, phase_steps));
+        const auto symbol = MapSymbol(modulation, bits, offset, phase_steps);
+        if (!symbol.has_value()) {
+            return std::unexpected(symbol.error());
+        }
+        symbols.push_back(*symbol);
     }
     return symbols;
 }
@@ -529,17 +579,22 @@ std::vector<std::complex<float>> MapSymbols(Modulation modulation, const std::st
 /**
  * @brief   Generates the samples of a signal.
  * @param[in] config  Generation settings; validated first.
- * @return  The samples with the bits, symbols and noise provenance behind them.
+ * @return  The samples with the bits, symbols and noise provenance behind them, or the validation or generation
+ *          error.
  * @note    Deterministic: the same settings always give the same samples. Random bits take the least
  *          significant bit of one mt19937 output per bit, seeded with config.Seed.
  */
-GeneratedSignal Generate(const GenerationConfig &config) {
-    Validate(config);
+std::expected<GeneratedSignal, std::string> Generate(const GenerationConfig &config) {
+    if (const auto validated = Validate(config); !validated.has_value()) {
+        return std::unexpected(validated.error());
+    }
     GeneratedSignal result;
     result.Config = config;
     result.Family = WaveformFamily(config.Modulation);
     if (result.Family == Family::Noise) {
-        GenerateNoise(result);
+        if (const auto generated = GenerateNoise(result); !generated.has_value()) {
+            return std::unexpected(generated.error());
+        }
         return result;
     }
     const std::string bits = config.DataSource == DataSource::Random ? RandomBits(config) : config.Bits;
@@ -547,12 +602,22 @@ GeneratedSignal Generate(const GenerationConfig &config) {
     result.SampleRateHz = config.SymbolRateBaud * config.SamplesPerSymbol;
     if (result.Family == Family::Fsk) {
         GenerateFsk(result, bits);
-        Finish(result);
+        if (const auto finished = Finish(result); !finished.has_value()) {
+            return std::unexpected(finished.error());
+        }
         return result;
     }
-    result.Symbols = MapSymbols(config.Modulation, bits);
-    ShapeSymbols(result);
-    Finish(result);
+    const auto symbols = MapSymbols(config.Modulation, bits);
+    if (!symbols.has_value()) {
+        return std::unexpected(symbols.error());
+    }
+    result.Symbols = std::move(*symbols);
+    if (const auto shaped = ShapeSymbols(result); !shaped.has_value()) {
+        return std::unexpected(shaped.error());
+    }
+    if (const auto finished = Finish(result); !finished.has_value()) {
+        return std::unexpected(finished.error());
+    }
     return result;
 }
 
