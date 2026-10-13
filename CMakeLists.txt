@@ -123,6 +123,25 @@ if(SIGGEN_BUILD_GUI)
     target_link_libraries(siggen PRIVATE siggen-gui-lib spdlog::spdlog)
     siggen_target_options(siggen)
     add_dependencies(siggen format)
+    if(WIN32)
+        # The icon and the file properties Explorer shows; packaging/windows/make_icon.py packs the icon from
+        # the PNGs in assets/
+        enable_language(RC)
+        target_sources(siggen PRIVATE
+                packaging/windows/siggen.rc
+                packaging/windows/siggen.manifest)
+        # The version of the file properties, which siggen.rc cannot split out of project() itself
+        target_compile_definitions(siggen PRIVATE
+                $<$<COMPILE_LANGUAGE:RC>:SIGGEN_VERSION="${PROJECT_VERSION}">
+                $<$<COMPILE_LANGUAGE:RC>:SIGGEN_VERSION_MAJOR=${PROJECT_VERSION_MAJOR}>
+                $<$<COMPILE_LANGUAGE:RC>:SIGGEN_VERSION_MINOR=${PROJECT_VERSION_MINOR}>
+                $<$<COMPILE_LANGUAGE:RC>:SIGGEN_VERSION_PATCH=${PROJECT_VERSION_PATCH}>)
+        # Release builds open no console window behind the program, and keep main() as the entry point; Debug
+        # builds keep the console for the logs of SDL and the GPU validation layers
+        if(MSVC)
+            target_link_options(siggen PRIVATE $<$<NOT:$<CONFIG:Debug>>:/SUBSYSTEM:WINDOWS /ENTRY:mainCRTStartup>)
+        endif()
+    endif()
 endif()
 
 # =============================================================================
