@@ -29,6 +29,7 @@ option(SIGGEN_BUILD_GUI "Build the ImGui desktop application" ON)
 option(SIGGEN_BUILD_CLI "Build the command-line tool" ON)
 option(SIGGEN_BUILD_TESTS "Build the tests" OFF)
 option(SIGGEN_ENABLE_WARNINGS "Enable project compiler warnings" ON)
+option(SIGGEN_ENABLE_COVERAGE "Enable compiler coverage instrumentation" OFF)
 option(SIGGEN_BUILD_PYTHON "Build the shared library used by the Python package" OFF)
 
 set(CMAKE_EXPORT_COMPILE_COMMANDS ON)

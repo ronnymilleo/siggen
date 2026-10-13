@@ -2,7 +2,7 @@
 
 [![Release](https://img.shields.io/github/v/release/ronnymilleo/siggen)](https://github.com/ronnymilleo/siggen/releases)
 [![Release Date](https://img.shields.io/github/release-date/ronnymilleo/siggen)](https://github.com/ronnymilleo/siggen/releases)
-[![Coverage](https://codecov.io/gh/ronnymilleo/siggen/branch/main/graph/badge.svg)](https://codecov.io/gh/ronnymilleo/siggen)
+[![Coverage Status](https://coveralls.io/repos/github/ronnymilleo/siggen/badge.svg?branch=main)](https://coveralls.io/github/ronnymilleo/siggen?branch=main)
 [![CodeFactor](https://www.codefactor.io/repository/github/ronnymilleo/siggen/badge)](https://www.codefactor.io/repository/github/ronnymilleo/siggen)
 [![CI](https://github.com/ronnymilleo/siggen/actions/workflows/ci.yml/badge.svg)](https://github.com/ronnymilleo/siggen/actions/workflows/ci.yml)
 
@@ -140,6 +140,7 @@ The build is shaped by cache options:
 | `SIGGEN_BUILD_TESTS` | `OFF` | Build the GoogleTest executables |
 | `SIGGEN_BUILD_PYTHON` | `OFF` | Build the `siggen_c` shared library used by the Python package |
 | `SIGGEN_ENABLE_WARNINGS` | `ON` | Enable project compiler warnings |
+| `SIGGEN_ENABLE_COVERAGE` | `OFF` | Enable compiler coverage instrumentation |
 | `SIGGEN_SANITIZER` | `none` | `none`, `address-undefined`, or `thread` (Linux with GCC or Clang) |
 
 Common configurations:
