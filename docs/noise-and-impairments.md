@@ -54,7 +54,7 @@ Impairments reject noise sources (WGN). Presets with any active impairment are
 saved as version 3, which appends `CfoHz`, `PhaseNoiseLinewidthHz`, `IqGainDb`,
 `IqPhaseDeg`, `DcOffsetI`, `DcOffsetQ`, `AdcBits` and `ImpairmentSeed`; presets
 without impairments remain version 2. Export and batch sidecars gain an
-`impairments` block when anything was applied. In `siggen batch`, impairments run
+`impairments` block when anything was applied. In `siggen-cli batch`, impairments run
 on each cropped frame after AWGN, with a per-frame seed derived from the base seed,
 waveform, frame index and the configured impairment seed (stream tag 3); the
 manifest records the settings and derived seed for impaired frames. Guided

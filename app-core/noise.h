@@ -10,8 +10,10 @@
 #include <complex>
 #include <cstddef>
 #include <cstdint>
+#include <expected>
 #include <random>
 #include <span>
+#include <string>
 #include <vector>
 
 namespace Core {
@@ -37,11 +39,12 @@ private:
     double m_Spare = 0;
 };
 
-std::vector<std::complex<float>> GaussianNoise(std::size_t count, double total_power, std::uint32_t seed);
+std::expected<std::vector<std::complex<float>>, std::string> GaussianNoise(std::size_t count, double total_power,
+                                                                           std::uint32_t seed);
 
-double SnrPowerRatio(double snr_db);
-NoiseRecord AddAwgn(std::span<std::complex<float>> samples, std::size_t begin, std::size_t end, double snr_db,
-                    std::uint32_t seed);
+std::expected<double, std::string> SnrPowerRatio(double snr_db);
+std::expected<NoiseRecord, std::string> AddAwgn(std::span<std::complex<float>> samples, std::size_t begin,
+                                                std::size_t end, double snr_db, std::uint32_t seed);
 
 } // namespace Core
 

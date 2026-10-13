@@ -11,7 +11,7 @@
 #include <complex>
 #include <cstddef>
 #include <numbers>
-#include <stdexcept>
+#include <string>
 #include <utility>
 #include <vector>
 
@@ -66,19 +66,23 @@ void Fft(std::vector<std::complex<double>> &data) {
     }
 }
 
-void ValidateWelchInput(const std::vector<std::complex<float>> &samples, double sample_rate_hz,
-                        std::size_t segment_length) {
+std::expected<void, std::string> ValidateWelchInput(const std::vector<std::complex<float>> &samples,
+                                                    double sample_rate_hz, std::size_t segment_length, Window window) {
     if (!std::isfinite(sample_rate_hz) || sample_rate_hz <= 0 || !std::isfinite(1 / sample_rate_hz) ||
         segment_length < 4 || segment_length > 65536 || (segment_length & (segment_length - 1)) ||
         samples.size() > MaxSignalSamples) {
-        throw std::invalid_argument(
-            "PSD needs finite positive sample rate, bounded input and power-of-two segment length 4–65536");
+        return std::unexpected(std::string(
+            "PSD needs finite positive sample rate, bounded input and power-of-two segment length 4–65536"));
+    }
+    if (!IsValidWindow(window)) {
+        return std::unexpected(std::string("Unknown window"));
     }
     for (auto sample : samples) {
         if (!std::isfinite(sample.real()) || !std::isfinite(sample.imag())) {
-            throw std::invalid_argument("PSD input must be finite");
+            return std::unexpected(std::string("PSD input must be finite"));
         }
     }
+    return {};
 }
 
 } // namespace
@@ -86,31 +90,41 @@ void ValidateWelchInput(const std::vector<std::complex<float>> &samples, double 
 /**
  * @brief   Observes the steady-state symbols of a linear signal through its matched filter.
  * @param[in] signal  A generated linear signal; its configuration is validated first.
- * @return  One observation per symbol, excluding one complete RRC span on each edge.
- * @note    Throws std::invalid_argument for non-linear signals, for a signal whose dimensions or delay do not
- *          match its configuration and for non-finite samples.
+ * @return  One observation per symbol, excluding one complete RRC span on each edge; an error for non-linear
+ *          signals, for a signal whose dimensions or delay do not match its configuration and for non-finite
+ *          samples.
  */
-SymbolObservations MatchedSymbols(const GeneratedSignal &signal) {
+std::expected<SymbolObservations, std::string> MatchedSymbols(const GeneratedSignal &signal) {
     const auto &config = signal.Config;
-    Validate(config);
+    if (const auto validated = Validate(config); !validated.has_value()) {
+        return std::unexpected(validated.error());
+    }
     if (signal.Family != Family::Linear || WaveformFamily(config.Modulation) != Family::Linear) {
-        throw std::invalid_argument("Only linear waveforms have matched-symbol observations");
+        return std::unexpected(std::string("Only linear waveforms have matched-symbol observations"));
     }
     SymbolObservations result;
     const auto sps = static_cast<std::size_t>(config.SamplesPerSymbol);
     const auto count = static_cast<std::size_t>(config.SymbolCount);
     const bool rrc = UsesRrc(config);
-    auto taps = rrc ? RRCFilter(config.RollOff, config.SpanSymbols, config.SamplesPerSymbol)
-                    : std::vector<double>(sps, 1. / sps);
+    std::vector<double> taps;
+    if (rrc) {
+        const auto designed = RRCFilter(config.RollOff, config.SpanSymbols, config.SamplesPerSymbol);
+        if (!designed.has_value()) {
+            return std::unexpected(designed.error());
+        }
+        taps = std::move(*designed);
+    } else {
+        taps.assign(sps, 1. / sps);
+    }
     const auto quadrature_delay = QuadratureDelaySamples(config);
-    const auto expected = (count - 1) * sps + taps.size() + quadrature_delay;
-    if (signal.Samples.size() != expected || signal.Symbols.size() != count ||
+    const auto expected_samples = (count - 1) * sps + taps.size() + quadrature_delay;
+    if (signal.Samples.size() != expected_samples || signal.Symbols.size() != count ||
         signal.FilterDelaySamples != (rrc ? (taps.size() - 1) / 2 : 0)) {
-        throw std::invalid_argument("Signal dimensions or delay do not match configuration");
+        return std::unexpected(std::string("Signal dimensions or delay do not match configuration"));
     }
     for (auto sample : signal.Samples) {
         if (!std::isfinite(sample.real()) || !std::isfinite(sample.imag())) {
-            throw std::invalid_argument("Matched-filter input must be finite");
+            return std::unexpected(std::string("Matched-filter input must be finite"));
         }
     }
     // Exclude one complete RRC span on each edge for steady-state comparisons
@@ -130,11 +144,12 @@ SymbolObservations MatchedSymbols(const GeneratedSignal &signal) {
  * @return  arg(x[n+1] * conj(x[n])) * Fs / (2 pi) in Hz, one value fewer than the input (empty below two
  *          samples).
  * @note    The principal phase difference is taken, so the estimate is valid for |f| < Fs/2 and unaffected by
- *          phase wrapping. Throws std::invalid_argument for an invalid sample rate.
+ *          phase wrapping. An error for an invalid sample rate.
  */
-std::vector<double> InstantaneousFrequency(const std::vector<std::complex<float>> &samples, double sample_rate_hz) {
+std::expected<std::vector<double>, std::string> InstantaneousFrequency(const std::vector<std::complex<float>> &samples,
+                                                                       double sample_rate_hz) {
     if (!std::isfinite(sample_rate_hz) || sample_rate_hz <= 0) {
-        throw std::invalid_argument("Sample rate must be positive and finite");
+        return std::unexpected(std::string("Sample rate must be positive and finite"));
     }
     std::vector<double> frequency;
     if (samples.size() < 2) {
@@ -169,12 +184,27 @@ const char *WindowName(Window window) {
 }
 
 /**
+ * @brief   Checks whether a value names a supported Welch window.
+ * @param[in] window  Value to check, possibly read from untrusted input.
+ * @return  True for one of the four window shapes.
+ */
+bool IsValidWindow(Window window) {
+    switch (window) {
+    case Window::Hann:
+    case Window::Hamming:
+    case Window::Blackman:
+    case Window::Rectangular:
+        return true;
+    }
+    return false;
+}
+
+/**
  * @brief   Returns one window coefficient, using the periodic (DFT-even) definition.
- * @param[in] window  Window shape.
+ * @param[in] window  Window shape; must be valid (see IsValidWindow).
  * @param[in] k       Coefficient index in [0, length).
  * @param[in] length  Window length.
- * @return  w[k].
- * @note    Throws std::invalid_argument for an unknown window.
+ * @return  w[k]; zero for an unsupported value, which validated paths never produce.
  */
 double WindowValue(Window window, std::size_t k, std::size_t length) {
     const auto phase = 2 * std::numbers::pi * static_cast<double>(k) / static_cast<double>(length);
@@ -188,7 +218,7 @@ double WindowValue(Window window, std::size_t k, std::size_t length) {
     case Window::Rectangular:
         return 1;
     }
-    throw std::invalid_argument("Unknown window");
+    return 0;
 }
 
 /**
@@ -198,12 +228,14 @@ double WindowValue(Window window, std::size_t k, std::size_t length) {
  * @param[in] segment_length  Power of two in [4, 65536]; halved until it fits the input.
  * @param[in] window          Window applied to every segment.
  * @return  The two-sided density over segments with 50 % overlap, ordered from -Fs/2; empty for fewer than four
- *          samples.
- * @note    Throws std::invalid_argument for invalid input and std::overflow_error when a density overflows.
+ *          samples. An error for invalid input or when a density overflows.
  */
-Spectrum WelchPsd(const std::vector<std::complex<float>> &samples, double sample_rate_hz, std::size_t segment_length,
-                  Window window) {
-    ValidateWelchInput(samples, sample_rate_hz, segment_length);
+std::expected<Spectrum, std::string> WelchPsd(const std::vector<std::complex<float>> &samples, double sample_rate_hz,
+                                              std::size_t segment_length, Window window) {
+    if (const auto validated = ValidateWelchInput(samples, sample_rate_hz, segment_length, window);
+        !validated.has_value()) {
+        return std::unexpected(validated.error());
+    }
     Spectrum result;
     if (samples.size() < 4) {
         return result;
@@ -238,7 +270,7 @@ Spectrum WelchPsd(const std::vector<std::complex<float>> &samples, double sample
         result.PowerDensity[k] /= result.SegmentCount;
         result.PowerDensity[k] /= sample_rate_hz;
         if (!std::isfinite(result.PowerDensity[k])) {
-            throw std::overflow_error("PSD density overflow");
+            return std::unexpected(std::string("PSD density overflow"));
         }
     }
     return result;

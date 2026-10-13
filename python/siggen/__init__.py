@@ -8,8 +8,9 @@ measurements and files are exactly what the CLI and GUI produce::
     tx.samples                # complex64 NumPy array
     tx.symbol_accuracy().evm_percent
 
-Build the shared library first (``cmake --preset dev`` or ``headless``) and, if
-it is not found automatically, point ``SIGGEN_LIBRARY`` at ``libsiggen_c``.
+Build the shared library first (``cmake -S . -B build -G Ninja -DSIGGEN_BUILD_PYTHON=ON``,
+then ``cmake --build build``) and, if it is not found automatically, point
+``SIGGEN_LIBRARY`` at ``libsiggen_c``.
 """
 from __future__ import annotations
 
@@ -38,15 +39,15 @@ def _find_library() -> str:
     here = Path(__file__).resolve().parent
     root = here.parent.parent
     candidates = [here / n for n in names]
-    for pattern in ("build/*/lib", "build/lib"):
+    for pattern in ("out/*/lib", "build/*/lib", "build/lib"):
         for folder in sorted(glob.glob(str(root / pattern)), key=os.path.getmtime, reverse=True):
             candidates += [Path(folder) / n for n in names]
     for candidate in candidates:
         if candidate.is_file():
             return str(candidate)
     raise ImportError(
-        "libsiggen_c not found. Build it with `cmake --preset headless -DSIGGEN_BUILD_PYTHON=ON` "
-        "(then `cmake --build --preset headless`) or set SIGGEN_LIBRARY to its path."
+        "libsiggen_c not found. Build it with `cmake -S . -B build -G Ninja -DSIGGEN_BUILD_PYTHON=ON` "
+        "(then `cmake --build build`) or set SIGGEN_LIBRARY to its path."
     )
 
 
@@ -367,7 +368,7 @@ def generate(preset: Optional[str] = None, **options) -> Signal:
 
 
 def load(path) -> Signal:
-    """Read a SigMF recording (``.sigmf-meta`` or ``.sigmf-data``) including the frames written by ``siggen batch``."""
+    """Read a SigMF recording (``.sigmf-meta`` or ``.sigmf-data``) including the frames written by ``siggen-cli batch``."""
     err = ctypes.create_string_buffer(_ERROR)
     handle = _load(os.fspath(path).encode(), err, _ERROR)
     if not handle:
@@ -423,7 +424,7 @@ class BerCurve:
 
 def ber_curve(eb_n0_db, preset: Optional[str] = None, min_errors: int = 100, max_bits: int = 2_000_000,
               block_symbols: int = 4096, **options) -> BerCurve:
-    """Measure BER against Eb/N0 with the reference receiver, the same sweep as ``siggen ber``.
+    """Measure BER against Eb/N0 with the reference receiver, the same sweep as ``siggen-cli ber``.
 
     The waveform, pulse, rate and impairments come from ``preset``/keywords (see :func:`generate`); the
     sweep sets the noise itself, so ``snr_db``, ``bits`` and ``symbols`` are ignored."""

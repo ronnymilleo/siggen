@@ -12,6 +12,7 @@
 #include "generator.h"
 #include "iq_export.h"
 #include "signal_analysis.h"
+#include <expected>
 #include <string>
 
 namespace Console {
@@ -25,12 +26,12 @@ struct BerRequest {
     Core::BerSweepSettings Settings;
 };
 
-Core::GenerationConfig ResolveConfig(const CommandLine &cli);
-Core::ExportFormat ResolveFormat(const std::string &format);
-std::string ResolveOutput(const CommandLine &cli);
-Core::BatchRequest ResolveBatch(const CommandLine &cli);
-BerRequest ResolveBer(const CommandLine &cli);
-Core::Window ResolveWindow(const std::string &name);
+std::expected<Core::GenerationConfig, std::string> ResolveConfig(const CommandLine &cli);
+std::expected<Core::ExportFormat, std::string> ResolveFormat(const std::string &format);
+std::expected<std::string, std::string> ResolveOutput(const CommandLine &cli);
+std::expected<Core::BatchRequest, std::string> ResolveBatch(const CommandLine &cli);
+std::expected<BerRequest, std::string> ResolveBer(const CommandLine &cli);
+std::expected<Core::Window, std::string> ResolveWindow(const std::string &name);
 
 } // namespace Console
 

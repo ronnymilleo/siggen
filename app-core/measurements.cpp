@@ -9,16 +9,17 @@
 #include "signal_processing.h"
 #include <cmath>
 #include <limits>
-#include <stdexcept>
+#include <string>
 
 namespace Core {
 
 namespace {
 
-std::vector<double> MatchedTaps(const GenerationConfig &config) {
+std::expected<std::vector<double>, std::string> MatchedTaps(const GenerationConfig &config) {
     const auto sps = static_cast<std::size_t>(config.SamplesPerSymbol);
     return UsesRrc(config) ? RRCFilter(config.RollOff, config.SpanSymbols, config.SamplesPerSymbol)
-                           : std::vector<double>(sps, 1. / static_cast<double>(sps));
+                           : std::expected<std::vector<double>, std::string>(
+                                 std::vector<double>(sps, 1. / static_cast<double>(sps)));
 }
 
 // Sample n of the full convolution of the samples with the taps, zero outside the buffer
@@ -37,10 +38,9 @@ std::complex<double> MatchedFilterOutput(const std::vector<std::complex<float>> 
 /**
  * @brief   Measures mean and peak power over a sample buffer.
  * @param[in] samples  Samples to measure, transients included.
- * @return  Mean power, peak power and PAPR; all zero for an empty buffer.
- * @note    Throws std::invalid_argument for a non-finite sample.
+ * @return  Mean power, peak power and PAPR; all zero for an empty buffer. An error for a non-finite sample.
  */
-PowerStatistics MeasurePowerStatistics(const std::vector<std::complex<float>> &samples) {
+std::expected<PowerStatistics, std::string> MeasurePowerStatistics(const std::vector<std::complex<float>> &samples) {
     PowerStatistics stats;
     if (samples.empty()) {
         return stats;
@@ -48,7 +48,7 @@ PowerStatistics MeasurePowerStatistics(const std::vector<std::complex<float>> &s
     double total = 0;
     for (auto sample : samples) {
         if (!std::isfinite(sample.real()) || !std::isfinite(sample.imag())) {
-            throw std::invalid_argument("Power statistics need finite samples");
+            return std::unexpected(std::string("Power statistics need finite samples"));
         }
         const double power = std::norm(std::complex<double>(sample));
         total += power;
@@ -65,9 +65,9 @@ PowerStatistics MeasurePowerStatistics(const std::vector<std::complex<float>> &s
  * @brief   Measures the EVM of a linear signal against its mapped constellation.
  * @param[in] signal  A generated signal.
  * @return  The accuracy over the steady-state symbols, or empty for noise and FSK sources, for signals without
- *          steady-state symbols and when the ideal symbols have no energy.
+ *          steady-state symbols and when the ideal symbols have no energy; an error for an invalid signal.
  */
-std::optional<SymbolAccuracy> MeasureSymbolAccuracy(const GeneratedSignal &signal) {
+std::expected<std::optional<SymbolAccuracy>, std::string> MeasureSymbolAccuracy(const GeneratedSignal &signal) {
     return MeasureSymbolAccuracy(signal, 0, std::numeric_limits<std::size_t>::max());
 }
 
@@ -77,15 +77,19 @@ std::optional<SymbolAccuracy> MeasureSymbolAccuracy(const GeneratedSignal &signa
  * @param[in] first_symbol  First symbol index scored.
  * @param[in] end_symbol    One past the last symbol index scored.
  * @return  The accuracy of those symbols, or nothing for noise and FSK signals and when none of them is a
- *          steady-state symbol.
+ *          steady-state symbol; an error for an invalid signal.
  * @note    Scores the part of a buffer that carries real data, for example the interior of a batch frame.
  */
-std::optional<SymbolAccuracy> MeasureSymbolAccuracy(const GeneratedSignal &signal, const std::size_t first_symbol,
-                                                    const std::size_t end_symbol) {
+std::expected<std::optional<SymbolAccuracy>, std::string>
+MeasureSymbolAccuracy(const GeneratedSignal &signal, const std::size_t first_symbol, const std::size_t end_symbol) {
     if (signal.Family != Family::Linear) {
-        return std::nullopt;
+        return std::optional<SymbolAccuracy>{};
     }
-    const auto observations = MatchedSymbols(signal);
+    const auto matched = MatchedSymbols(signal);
+    if (!matched.has_value()) {
+        return std::unexpected(matched.error());
+    }
+    const auto &observations = *matched;
     double error = 0;
     double reference = 0;
     std::size_t used = 0;
@@ -100,7 +104,7 @@ std::optional<SymbolAccuracy> MeasureSymbolAccuracy(const GeneratedSignal &signa
         reference += std::norm(ideal);
     }
     if (used == 0 || reference <= 0) {
-        return std::nullopt;
+        return std::optional<SymbolAccuracy>{};
     }
     SymbolAccuracy accuracy;
     accuracy.SymbolCount = used;
@@ -109,7 +113,7 @@ std::optional<SymbolAccuracy> MeasureSymbolAccuracy(const GeneratedSignal &signa
     accuracy.EvmDb = 20 * std::log10(std::max(accuracy.EvmRms, 1e-12));
     accuracy.SnrAfterMatchedDb = -accuracy.EvmDb;
     accuracy.ExpectedOffsetDb = 10 * std::log10(static_cast<double>(signal.Config.SamplesPerSymbol));
-    return accuracy;
+    return std::optional<SymbolAccuracy>{accuracy};
 }
 
 /**
@@ -117,27 +121,32 @@ std::optional<SymbolAccuracy> MeasureSymbolAccuracy(const GeneratedSignal &signa
  * @param[in] signal      A generated linear signal.
  * @param[in] max_traces  Upper bound on the traces, which bounds the cost; traces are taken uniformly across the
  *                        steady-state symbols.
- * @return  The traces, empty when there are no steady-state symbols.
- * @note    Uses the same steady-state symbols and decision instants as MatchedSymbols(). Throws
- *          std::invalid_argument for noise and FSK sources, for zero max_traces and when the signal does not
- *          match its configuration.
+ * @return  The traces, empty when there are no steady-state symbols; an error for noise and FSK sources, for
+ *          zero max_traces and when the signal does not match its configuration.
+ * @note    Uses the same steady-state symbols and decision instants as MatchedSymbols().
  */
-EyeDiagram BuildEyeDiagram(const GeneratedSignal &signal, std::size_t max_traces) {
+std::expected<EyeDiagram, std::string> BuildEyeDiagram(const GeneratedSignal &signal, std::size_t max_traces) {
     if (signal.Family != Family::Linear) {
-        throw std::invalid_argument("Only linear waveforms have a matched-filter eye diagram");
+        return std::unexpected(std::string("Only linear waveforms have a matched-filter eye diagram"));
     }
     if (max_traces == 0) {
-        throw std::invalid_argument("Eye diagram needs at least one trace");
+        return std::unexpected(std::string("Eye diagram needs at least one trace"));
     }
     const auto &config = signal.Config;
-    Validate(config);
+    if (const auto validated = Validate(config); !validated.has_value()) {
+        return std::unexpected(validated.error());
+    }
     const auto sps = static_cast<std::size_t>(config.SamplesPerSymbol);
     const auto count = static_cast<std::size_t>(config.SymbolCount);
-    const auto taps = MatchedTaps(config);
+    const auto designed = MatchedTaps(config);
+    if (!designed.has_value()) {
+        return std::unexpected(designed.error());
+    }
+    const auto &taps = *designed;
     const bool rrc = UsesRrc(config);
     const auto quadrature_delay = QuadratureDelaySamples(config);
     if (signal.Samples.size() != (count - 1) * sps + taps.size() + quadrature_delay) {
-        throw std::invalid_argument("Signal dimensions do not match configuration");
+        return std::unexpected(std::string("Signal dimensions do not match configuration"));
     }
     EyeDiagram eye;
     for (std::size_t k = 0; k <= 2 * sps; ++k) {
@@ -174,15 +183,15 @@ EyeDiagram BuildEyeDiagram(const GeneratedSignal &signal, std::size_t max_traces
  * @param[in] snr_db              Per-sample SNR in dB.
  * @param[in] samples_per_symbol  Samples per symbol, at least 1.
  * @param[in] bits_per_symbol     Bits per symbol, at least 1.
- * @return  Es/N0 = SNR + 10 log10(SPS) and Eb/N0 = Es/N0 - 10 log10(bits per symbol), in dB.
- * @note    Throws std::invalid_argument when either count is below 1.
+ * @return  Es/N0 = SNR + 10 log10(SPS) and Eb/N0 = Es/N0 - 10 log10(bits per symbol), in dB; an error when
+ *          either count is below 1.
  */
-EnergyRatios SnrToEnergyRatios(double snr_db, int samples_per_symbol, int bits_per_symbol) {
+std::expected<EnergyRatios, std::string> SnrToEnergyRatios(double snr_db, int samples_per_symbol, int bits_per_symbol) {
     if (samples_per_symbol < 1 || bits_per_symbol < 1) {
-        throw std::invalid_argument("SPS and bits per symbol must be positive");
+        return std::unexpected(std::string("SPS and bits per symbol must be positive"));
     }
     const auto es_n0 = snr_db + 10 * std::log10(static_cast<double>(samples_per_symbol));
-    return {es_n0, es_n0 - 10 * std::log10(static_cast<double>(bits_per_symbol))};
+    return EnergyRatios{es_n0, es_n0 - 10 * std::log10(static_cast<double>(bits_per_symbol))};
 }
 
 } // namespace Core

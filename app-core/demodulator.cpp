@@ -9,7 +9,6 @@
 #include <bit>
 #include <cmath>
 #include <complex>
-#include <stdexcept>
 #include <string>
 #include <vector>
 
@@ -35,20 +34,26 @@ int LabelOf(const std::string &bits, std::size_t offset, int bits_per_symbol) {
 }
 
 // Ideal decision points (coherent) or ideal phase steps (differential), taken from the mapper itself
-std::vector<std::complex<double>> ReferencePoints(const GenerationConfig &config, bool differential,
-                                                  int bits_per_symbol) {
+std::expected<std::vector<std::complex<double>>, std::string> ReferencePoints(const GenerationConfig &config,
+                                                                              bool differential, int bits_per_symbol) {
     const int label_count = 1 << bits_per_symbol;
     std::vector<std::complex<double>> reference(static_cast<std::size_t>(label_count));
     for (int label = 0; label < label_count; ++label) {
         if (!differential) {
-            reference[static_cast<std::size_t>(label)] =
-                std::complex<double>(MapSymbols(config.Modulation, LabelBits(label, bits_per_symbol))[0]) *
-                config.AmplitudeGain;
+            const auto mapped = MapSymbols(config.Modulation, LabelBits(label, bits_per_symbol));
+            if (!mapped.has_value()) {
+                return std::unexpected(mapped.error());
+            }
+            reference[static_cast<std::size_t>(label)] = std::complex<double>((*mapped)[0]) * config.AmplitudeGain;
         } else {
             // Symbol after label 0, then after label `label`: the ratio is the phase step of `label`
             const auto pair =
                 MapSymbols(config.Modulation, LabelBits(0, bits_per_symbol) + LabelBits(label, bits_per_symbol));
-            reference[static_cast<std::size_t>(label)] = std::complex<double>(pair[1]) / std::complex<double>(pair[0]);
+            if (!pair.has_value()) {
+                return std::unexpected(pair.error());
+            }
+            reference[static_cast<std::size_t>(label)] =
+                std::complex<double>((*pair)[1]) / std::complex<double>((*pair)[0]);
         }
     }
     return reference;
@@ -136,24 +141,31 @@ bool HasReferenceDemodulator(Modulation modulation) {
  * @param[in] first_symbol  First symbol index scored.
  * @param[in] end_symbol    One past the last symbol index scored.
  * @return  The symbol and bit error counts. Empty when the waveform is not linear, the signal carries no bits, or
- *          no symbol qualifies.
+ *          no symbol qualifies; an error when the bits do not match the symbols.
  * @note    One RRC span is excluded at each edge, as for EVM. Differential schemes skip the first symbol of the
- *          range, which has no previous observation. Throws std::invalid_argument when the bits do not match the
- *          symbols.
+ *          range, which has no previous observation.
  */
-std::optional<BitErrors> CountBitErrors(const GeneratedSignal &signal, std::size_t first_symbol,
-                                        std::size_t end_symbol) {
+std::expected<std::optional<BitErrors>, std::string> CountBitErrors(const GeneratedSignal &signal,
+                                                                    std::size_t first_symbol, std::size_t end_symbol) {
     const auto modulation = signal.Config.Modulation;
     if (signal.Family != Family::Linear || !HasReferenceDemodulator(modulation) || signal.Bits.empty()) {
-        return std::nullopt;
+        return std::optional<BitErrors>{};
     }
     const int bits_per_symbol = BitsPerSymbol(modulation);
-    const auto observations = MatchedSymbols(signal);
+    const auto matched = MatchedSymbols(signal);
+    if (!matched.has_value()) {
+        return std::unexpected(matched.error());
+    }
+    const auto &observations = *matched;
     if (signal.Bits.size() != signal.Symbols.size() * static_cast<std::size_t>(bits_per_symbol)) {
-        throw std::invalid_argument("Signal bits do not match its symbols");
+        return std::unexpected(std::string("Signal bits do not match its symbols"));
     }
     const bool differential = IsDifferential(modulation);
-    const auto reference = ReferencePoints(signal.Config, differential, bits_per_symbol);
+    const auto points = ReferencePoints(signal.Config, differential, bits_per_symbol);
+    if (!points.has_value()) {
+        return std::unexpected(points.error());
+    }
+    const auto &reference = *points;
 
     BitErrors result;
     for (std::size_t i = 0; i < observations.Values.size(); ++i) {
@@ -182,9 +194,9 @@ std::optional<BitErrors> CountBitErrors(const GeneratedSignal &signal, std::size
         }
     }
     if (result.SymbolCount == 0) {
-        return std::nullopt;
+        return std::optional<BitErrors>{};
     }
-    return result;
+    return std::optional<BitErrors>{result};
 }
 
 } // namespace Core

@@ -10,6 +10,7 @@
 #include "iq_export.h"
 #include <complex>
 #include <cstdint>
+#include <expected>
 #include <filesystem>
 #include <optional>
 #include <string>
@@ -70,13 +71,14 @@ std::uint32_t DeriveImpairmentSeed(std::uint32_t base_seed, Modulation waveform,
                                    std::uint32_t configured_impairment_seed);
 
 // Frames
-void ValidateFrameRequest(const GenerationConfig &base, Modulation waveform, int frame_size);
-FrameResult GenerateFrame(const GenerationConfig &base, int frame_size, std::size_t frame_index,
-                          const std::optional<double> &snr_db);
+std::expected<void, std::string> ValidateFrameRequest(const GenerationConfig &base, Modulation waveform,
+                                                      int frame_size);
+std::expected<FrameResult, std::string> GenerateFrame(const GenerationConfig &base, int frame_size,
+                                                      std::size_t frame_index, const std::optional<double> &snr_db);
 
 // Batches
-void ValidateBatch(const BatchRequest &request);
-BatchSummary RunBatch(const BatchRequest &request);
+std::expected<void, std::string> ValidateBatch(const BatchRequest &request);
+std::expected<BatchSummary, std::string> RunBatch(const BatchRequest &request);
 
 } // namespace Core
 

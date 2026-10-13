@@ -6,7 +6,7 @@
 #include "ber_job.h"
 
 #include <chrono>
-#include <exception>
+#include <system_error>
 #include <utility>
 
 namespace Core {
@@ -37,9 +37,15 @@ bool BerJob::Start(GenerationConfig config, BerSweepSettings settings) {
     m_Cancel.store(false);
     m_Config = config;
     m_Error.clear();
-    m_Pending = std::async(std::launch::async, [this, config = std::move(config), settings = std::move(settings)] {
-        return BerSweep(config, settings, &m_Cancel, &m_Done);
-    });
+    // std::async reports a thread-creation failure with an exception; the standard library has no other channel
+    try {
+        m_Pending = std::async(std::launch::async, [this, config = std::move(config), settings = std::move(settings)] {
+            return BerSweep(config, settings, &m_Cancel, &m_Done);
+        });
+    } catch (const std::system_error &error) {
+        m_Error = error.what();
+        return false;
+    }
     return true;
 }
 
@@ -58,11 +64,11 @@ bool BerJob::Poll() {
     if (!Busy() || m_Pending.wait_for(std::chrono::seconds(0)) != std::future_status::ready) {
         return false;
     }
-    try {
-        m_Points = m_Pending.get();
-    } catch (const std::exception &error) {
-        m_Pending = {};
-        m_Error = error.what();
+    auto outcome = m_Pending.get();
+    if (outcome.has_value()) {
+        m_Points = std::move(*outcome);
+    } else {
+        m_Error = std::move(outcome).error();
     }
     return true;
 }

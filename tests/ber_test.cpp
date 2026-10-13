@@ -10,6 +10,7 @@
 #include "demodulator.h"
 #include "iq_export.h"
 #include "recording.h"
+#include "test_support.h"
 #include "theory.h"
 #include <cmath>
 #include <filesystem>
@@ -31,7 +32,7 @@ double Measured(Modulation m, double eb_n0_db, std::size_t min_errors = 400) {
     s.EbN0Db = {eb_n0_db};
     s.MinErrors = min_errors;
     s.MaxBits = 3'000'000;
-    const auto points = BerSweep(ConfigFor(m), s);
+    const auto points = Unwrap(BerSweep(ConfigFor(m), s));
     return points.at(0).Ber();
 }
 
@@ -76,7 +77,7 @@ TEST(Demodulator, NoiselessLinkIsErrorFreeForEveryLinearWaveform) {
         if (!IsValid(m) || !HasReferenceDemodulator(m)) {
             continue;
         }
-        const auto errors = CountBitErrors(Generate(ConfigFor(m)));
+        const auto errors = Unwrap(CountBitErrors(Unwrap(Generate(ConfigFor(m)))));
         ASSERT_TRUE(errors) << i;
         EXPECT_GT(errors->BitCount, 0u);
         EXPECT_EQ(errors->BitErrorCount, 0u) << i;
@@ -117,8 +118,8 @@ TEST(Ber, SweepIsReproducible) {
     s.EbN0Db = {2, 4};
     s.MinErrors = 50;
     s.MaxBits = 100000;
-    const auto a = BerSweep(ConfigFor(Modulation::QPSK), s);
-    const auto b = BerSweep(ConfigFor(Modulation::QPSK), s);
+    const auto a = Unwrap(BerSweep(ConfigFor(Modulation::QPSK), s));
+    const auto b = Unwrap(BerSweep(ConfigFor(Modulation::QPSK), s));
     ASSERT_EQ(a.size(), 2u);
     EXPECT_EQ(a[0].Errors.BitErrorCount, b[0].Errors.BitErrorCount);
     EXPECT_GT(a[0].Ber(), a[1].Ber());
@@ -127,7 +128,7 @@ TEST(Ber, SweepIsReproducible) {
 TEST(Ber, RejectsWaveformsWithoutReceiver) {
     BerSweepSettings s;
     s.EbN0Db = {5};
-    EXPECT_THROW(BerSweep(ConfigFor(Modulation::FSK2), s), std::invalid_argument);
+    EXPECT_FALSE(BerSweep(ConfigFor(Modulation::FSK2), s).has_value());
 }
 
 TEST(Ber, CarrierOffsetBreaksCoherentButNotDifferential) {
@@ -137,7 +138,7 @@ TEST(Ber, CarrierOffsetBreaksCoherentButNotDifferential) {
         BerSweepSettings s;
         s.EbN0Db = {30};
         s.MaxBits = 40000;
-        return BerSweep(c, s).at(0).Ber();
+        return Unwrap(BerSweep(c, s)).at(0).Ber();
     };
     EXPECT_GT(run(Modulation::QPSK), 0.1);
     EXPECT_LT(run(Modulation::DQPSK), 0.01);
@@ -151,8 +152,8 @@ TEST(Analyze, ReportsBitErrorsAndTheoryFromARecording) {
     c.SymbolCount = 20000;
     c.Awgn.Enabled = true;
     c.Awgn.SnrDb = 1; // Eb/N0 = 1 + 10 log10(8/2) = 7 dB.
-    ExportSignal(dir / "tx.sigmf-data", Generate(c), ExportFormat::SigMF);
-    const auto report = AnalyzeRecording(ReadRecording(dir / "tx.sigmf-meta"));
+    ASSERT_TRUE(ExportSignal(dir / "tx.sigmf-data", Unwrap(Generate(c)), ExportFormat::SigMF).has_value());
+    const auto report = Unwrap(AnalyzeRecording(Unwrap(ReadRecording(dir / "tx.sigmf-meta"))));
     ASSERT_TRUE(report.Errors.has_value());
     ASSERT_TRUE(report.TheoreticalBer.has_value());
     EXPECT_NEAR(report.MeasuredEbN0Db, 7, 0.3);
@@ -169,14 +170,14 @@ TEST(Analyze, BatchFrameScoresBitsOnItsInterior) {
     request.SnrsDb = {-1};
     request.FrameSize = 2048;
     request.OutputDir = dir;
-    RunBatch(request);
+    ASSERT_TRUE(RunBatch(request).has_value());
     std::filesystem::path meta;
     for (const auto &e : std::filesystem::directory_iterator(dir)) {
         if (e.path().extension() == ".sigmf-meta") {
             meta = e.path();
         }
     }
-    const auto report = AnalyzeRecording(ReadRecording(meta));
+    const auto report = Unwrap(AnalyzeRecording(Unwrap(ReadRecording(meta))));
     ASSERT_TRUE(report.Errors.has_value());
     EXPECT_GT(report.Errors->BitCount, 100u);
     EXPECT_LT(report.Errors->BitCount, 2048u);

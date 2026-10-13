@@ -9,6 +9,7 @@
 #include "generator.h"
 #include <complex>
 #include <cstddef>
+#include <expected>
 #include <string>
 #include <vector>
 
@@ -33,7 +34,7 @@ struct PipelineStages {
     bool Degraded = false;                      // True when AWGN or impairments make received differ from shaped
 };
 
-PipelineStages BuildPipelineStages(const GeneratedSignal &signal);
+std::expected<PipelineStages, std::string> BuildPipelineStages(const GeneratedSignal &signal);
 
 } // namespace Core
 

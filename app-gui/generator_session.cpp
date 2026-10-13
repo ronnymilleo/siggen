@@ -8,6 +8,7 @@
 #include "preset.h"
 #include <algorithm>
 #include <cmath>
+#include <filesystem>
 #include <spdlog/spdlog.h>
 #include <utility>
 
@@ -34,6 +35,7 @@ void LogGenerated(const Core::GeneratedSignal &result) {
  * @param[in] config  Initial settings.
  */
 GeneratorSession::GeneratorSession(Core::GenerationConfig config) : m_Config(std::move(config)) {
+    MarkClean();
 }
 
 /**
@@ -58,16 +60,17 @@ const Core::GenerationConfig &GeneratorSession::GetConfig() const {
  * @return  True on success; on failure the error is logged and kept for GetError().
  */
 bool GeneratorSession::SavePreset(const std::string &path) {
-    try {
-        Core::SavePreset(path, m_Config);
-        spdlog::info("Saved preset: {}", path);
-        m_Error.clear();
-        return true;
-    } catch (const std::exception &error) {
-        spdlog::error("Preset save failed: {}", error.what());
-        m_Error = error.what();
+    if (const auto saved = Core::SavePreset(path, m_Config); !saved.has_value()) {
+        spdlog::error("Preset save failed: {}", saved.error());
+        m_Error = saved.error();
         return false;
     }
+    m_DocumentPath = path;
+    m_DocumentName = std::filesystem::path(path).filename().string();
+    MarkClean();
+    spdlog::info("Saved preset: {}", path);
+    m_Error.clear();
+    return true;
 }
 
 /**
@@ -77,22 +80,57 @@ bool GeneratorSession::SavePreset(const std::string &path) {
  *          GetError().
  */
 bool GeneratorSession::LoadPreset(const std::string &path) {
-    try {
-        auto loaded = Core::LoadPreset(path);
-        m_Config = std::move(loaded);
-        m_PresetNotes = Core::LoadPresetNotes(path);
-        spdlog::info("Loaded preset: {}", path);
-        m_Error.clear();
-        return true;
-    } catch (const std::exception &error) {
-        spdlog::error("Preset load failed: {}", error.what());
-        m_Error = error.what();
+    const auto loaded = Core::LoadPreset(path);
+    const auto notes = Core::LoadPresetNotes(path);
+    if (!loaded.has_value()) {
+        spdlog::error("Preset load failed: {}", loaded.error());
+        m_Error = loaded.error();
         return false;
     }
+    if (!notes.has_value()) {
+        spdlog::error("Preset load failed: {}", notes.error());
+        m_Error = notes.error();
+        return false;
+    }
+    m_Config = std::move(*loaded);
+    m_PresetNotes = std::move(*notes);
+    m_DocumentPath = path;
+    m_DocumentName = std::filesystem::path(path).filename().string();
+    MarkClean();
+    ++m_SettingsVersion;
+    spdlog::info("Loaded preset: {}", path);
+    m_Error.clear();
+    return true;
 }
 
 /**
- * @brief   Returns the notes of the last loaded preset.
+ * @brief   Replaces the settings with a preset read from text, as the compiled-in examples are.
+ * @param[in] text  Preset text, in the file format.
+ * @param[in] name  Name shown in the window title, such as the example title.
+ * @return  True on success; on failure the settings stay as they were, and the error is logged and kept for
+ *          GetError().
+ * @note    The document keeps no path, so saving asks for a destination.
+ */
+bool GeneratorSession::LoadPresetText(const std::string &text, const std::string &name) {
+    const auto parsed = Core::ParsePreset(text);
+    if (!parsed.has_value()) {
+        spdlog::error("Example load failed: {}", parsed.error());
+        m_Error = parsed.error();
+        return false;
+    }
+    m_Config = std::move(*parsed);
+    m_PresetNotes = Core::PresetNotes(text);
+    m_DocumentPath.clear();
+    m_DocumentName = name;
+    MarkClean();
+    ++m_SettingsVersion;
+    spdlog::info("Loaded example: {}", name);
+    m_Error.clear();
+    return true;
+}
+
+/**
+ * @brief   Returns the notes of the last loaded preset or example.
  * @return  The lesson notes, or an empty string when none was loaded or it had none.
  */
 const std::string &GeneratorSession::GetPresetNotes() const {
@@ -100,19 +138,49 @@ const std::string &GeneratorSession::GetPresetNotes() const {
 }
 
 /**
+ * @brief   Tells whether the settings differ from the last preset loaded or saved.
+ * @return  True while there are unsaved changes; Update() refreshes it once per frame.
+ */
+bool GeneratorSession::IsModified() const {
+    return m_Modified;
+}
+
+/**
+ * @brief   Returns the name of the document the settings came from.
+ * @return  The preset file name or the example title; empty while untitled.
+ */
+const std::string &GeneratorSession::GetDocumentName() const {
+    return m_DocumentName;
+}
+
+/**
+ * @brief   Returns where Save writes the settings.
+ * @return  The path of the last preset loaded or saved; empty while the document has neither.
+ */
+const std::string &GeneratorSession::GetDocumentPath() const {
+    return m_DocumentPath;
+}
+
+/**
+ * @brief   Returns how many times the settings were replaced wholesale, by a load or an example.
+ * @return  The version; windows reload their edit buffers when it changes.
+ */
+std::size_t GeneratorSession::GetSettingsVersion() const {
+    return m_SettingsVersion;
+}
+
+/**
  * @brief   Starts generating a copy of the current settings in the background and clears the last error.
  * @note    Does nothing while a generation is pending. A failure to start is logged and kept for GetError().
  */
 void GeneratorSession::StartGeneration() {
-    try {
-        if (m_Job.Start(m_Config)) {
-            spdlog::debug("Started {} generation: {} symbols", Core::ModulationName(m_Config.Modulation),
-                          m_Config.SymbolCount);
-        }
-        m_Error.clear();
-    } catch (const std::exception &error) {
-        spdlog::error("Unable to start generation: {}", error.what());
-        m_Error = error.what();
+    m_Error.clear();
+    if (m_Job.Start(m_Config)) {
+        spdlog::debug("Started {} generation: {} symbols", Core::ModulationName(m_Config.Modulation),
+                      m_Config.SymbolCount);
+    } else if (!m_Job.Error().empty()) {
+        spdlog::error("Unable to start generation: {}", m_Job.Error());
+        m_Error = m_Job.Error();
     }
 }
 
@@ -131,21 +199,23 @@ bool GeneratorSession::IsGenerating() const {
  *          generation keeps the previous result.
  */
 void GeneratorSession::Update() {
+    // Settings that do not serialize are invalid, so they never match the clean state and count as modified
+    const auto serialized = Core::SerializePreset(m_Config);
+    m_Modified = !serialized.has_value() || *serialized != m_CleanSettings;
     if (m_BerJob.Poll()) {
         ++m_BerVersion;
         if (!m_BerJob.Error().empty()) {
             m_Error = m_BerJob.Error();
         }
     }
-    try {
-        if (m_Job.Poll()) {
-            const auto &result = *m_Job.Result();
-            LogGenerated(result);
-            RefreshAnalysis(result);
+    if (m_Job.Poll()) {
+        if (!m_Job.Error().empty()) {
+            spdlog::error("Generation failed: {}", m_Job.Error());
+            m_Error = m_Job.Error();
+        } else if (const auto &result = m_Job.Result()) {
+            LogGenerated(*result);
+            RefreshAnalysis(*result);
         }
-    } catch (const std::exception &error) {
-        spdlog::error("Generation or analysis failed: {}", error.what());
-        m_Error = error.what();
     }
 }
 
@@ -223,9 +293,13 @@ std::optional<double> GeneratorSession::GetMeasuredEbN0Db() const {
     if (!result || !m_Accuracy) {
         return std::nullopt;
     }
-    return Core::SnrToEnergyRatios(m_Accuracy->SnrAfterMatchedDb - m_Accuracy->ExpectedOffsetDb,
-                                   result->Config.SamplesPerSymbol, Core::BitsPerSymbol(result->Config.Modulation))
-        .EbN0Db;
+    const auto ratios =
+        Core::SnrToEnergyRatios(m_Accuracy->SnrAfterMatchedDb - m_Accuracy->ExpectedOffsetDb,
+                                result->Config.SamplesPerSymbol, Core::BitsPerSymbol(result->Config.Modulation));
+    if (!ratios.has_value()) {
+        return std::nullopt;
+    }
+    return ratios->EbN0Db;
 }
 
 /**
@@ -323,39 +397,91 @@ std::size_t GeneratorSession::GetBerVersion() const {
 /**
  * @brief   Recomputes plot data, measurements, bit errors, eye diagram, pipeline stages and spectrum.
  * @param[in] result  The newly generated signal.
+ * @note    The first analysis failure is logged and kept for GetError(); the cleared analysis stays empty.
  */
 void GeneratorSession::RefreshAnalysis(const Core::GeneratedSignal &result) {
     // Cleared and versioned first, so that a failure below leaves no analysis of the previous signal on screen
     m_Plots = {};
+    m_Power = {};
+    m_Accuracy.reset();
+    m_Errors.reset();
+    m_Eye = {};
+    m_Pipeline.reset();
     m_Spectrum = {};
     m_SpectrumDb.clear();
     ++m_ResultVersion;
     ++m_SpectrumVersion;
-    m_Plots = Core::MakePlotData(result);
-    m_Power = Core::MeasurePowerStatistics(result.Samples);
-    m_Accuracy = Core::MeasureSymbolAccuracy(result);
-    m_Errors = Core::CountBitErrors(result);
-    m_Eye = result.Family == Core::Family::Linear ? Core::BuildEyeDiagram(result) : Core::EyeDiagram{};
-    m_Pipeline.reset();
+    const auto failed = [this](const std::string &message) {
+        spdlog::error("Result analysis failed: {}", message);
+        m_Error = message;
+    };
+    const auto plots = Core::MakePlotData(result);
+    if (!plots.has_value()) {
+        failed(plots.error());
+        return;
+    }
+    m_Plots = std::move(*plots);
+    const auto power = Core::MeasurePowerStatistics(result.Samples);
+    if (!power.has_value()) {
+        failed(power.error());
+        return;
+    }
+    m_Power = *power;
+    const auto accuracy = Core::MeasureSymbolAccuracy(result);
+    if (!accuracy.has_value()) {
+        failed(accuracy.error());
+        return;
+    }
+    m_Accuracy = *accuracy;
+    const auto errors = Core::CountBitErrors(result);
+    if (!errors.has_value()) {
+        failed(errors.error());
+        return;
+    }
+    m_Errors = *errors;
     if (result.Family == Core::Family::Linear) {
-        m_Pipeline = Core::BuildPipelineStages(result);
+        const auto eye = Core::BuildEyeDiagram(result);
+        if (!eye.has_value()) {
+            failed(eye.error());
+            return;
+        }
+        m_Eye = std::move(*eye);
+        const auto stages = Core::BuildPipelineStages(result);
+        if (!stages.has_value()) {
+            failed(stages.error());
+            return;
+        }
+        m_Pipeline = std::move(*stages);
     }
     UpdateSpectrum();
 }
 
 /**
  * @brief   Recomputes the Welch PSD of the last result with the selected window, in dB.
+ * @note    A failure is logged and kept for GetError(); the previous spectrum stays.
  */
 void GeneratorSession::UpdateSpectrum() {
     const auto &result = m_Job.Result();
     if (!result) {
         return;
     }
-    m_Spectrum = Core::WelchPsd(result->Samples, result->SampleRateHz, 1024, m_SpectrumWindow);
+    const auto spectrum = Core::WelchPsd(result->Samples, result->SampleRateHz, 1024, m_SpectrumWindow);
+    if (!spectrum.has_value()) {
+        spdlog::error("Spectrum failed: {}", spectrum.error());
+        m_Error = spectrum.error();
+        return;
+    }
+    m_Spectrum = std::move(*spectrum);
     m_SpectrumDb.resize(m_Spectrum.PowerDensity.size());
     std::transform(m_Spectrum.PowerDensity.begin(), m_Spectrum.PowerDensity.end(), m_SpectrumDb.begin(),
                    [](double power) { return 10 * std::log10(std::max(power, 1e-20)); });
     ++m_SpectrumVersion;
+}
+
+void GeneratorSession::MarkClean() {
+    const auto serialized = Core::SerializePreset(m_Config);
+    m_CleanSettings = serialized.has_value() ? std::move(*serialized) : std::string{};
+    m_Modified = false;
 }
 
 } // namespace GUI

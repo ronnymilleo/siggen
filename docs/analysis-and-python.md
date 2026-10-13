@@ -9,7 +9,7 @@ C++ library as the GUI, so the numbers agree everywhere.
 ## SigMF recordings
 
 ```sh
-siggen --modulation 16-QAM --snr-db 20 --format sigmf -o tx.sigmf-data   # also writes tx.sigmf-meta
+siggen-cli --modulation 16-QAM --snr-db 20 --format sigmf -o tx.sigmf-data   # also writes tx.sigmf-meta
 ```
 
 The format is described in [Presets and I/Q export](presets-and-export.md#sigmf). siggen
@@ -17,11 +17,11 @@ reads two datatypes back: `cf32_le` and `ci16_le` (scaled by 1/32768), so record
 SDR tools can be analyzed too; the file is checked for a whole number of samples and for
 non-finite values.
 
-## `siggen analyze`
+## `siggen-cli analyze`
 
 ```sh
-siggen analyze tx.sigmf-meta
-siggen analyze tx.sigmf-data --window blackman --segment 2048 --json
+siggen-cli analyze tx.sigmf-meta
+siggen-cli analyze tx.sigmf-data --window blackman --segment 2048 --json
 ```
 
 ```text
@@ -51,7 +51,7 @@ absent for batch frames shorter than a filter span). With `--json` they appear a
 `bit_errors`, `ber`, `symbol_errors`, `ser` and `theoretical_ber`.
 
 Power, PAPR and the spectrum need only the samples. **EVM and SNR need the symbols**, so
-they appear when the file carries siggen's configuration (a SigMF file written by `siggen --format sigmf` or `siggen batch`) and its
+they appear when the file carries siggen's configuration (a SigMF file written by `siggen-cli --format sigmf` or `siggen-cli batch`) and its
 length matches it: siggen regenerates the ideal symbols from `siggen:preset` and measures
 the *file's* samples against them. If the samples were modified after export, the report
 reflects the modification. Otherwise a `note` line says why EVM is absent. For a batch frame the meta also records the generator preset and where the frame was cut (`siggen:frame`); only symbols whose matched-filter window lies wholly inside the frame are scored, so a frame shorter than a few filter spans may report no EVM.
@@ -67,22 +67,23 @@ errors a differential receiver would make.
 ## Python package
 
 The package is `python/siggen`: pure Python with `ctypes` over a small C interface, so it
-needs only NumPy and no compiler for the Python side. Build the shared library, which the
-`dev` and `headless` presets do (`-DSIGGEN_BUILD_PYTHON=ON` elsewhere):
+needs only NumPy and no compiler for the Python side. Build the shared library with
+`-DSIGGEN_BUILD_PYTHON=ON`:
 
 ```sh
-cmake --workflow --preset headless
+cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Debug -DSIGGEN_BUILD_PYTHON=ON
+cmake --build build
 cd python && python3 -c "import siggen; print(siggen.version())"
 ```
 
-The package finds `libsiggen_c` under `build/*/lib`; set `SIGGEN_LIBRARY` to point at it
+The package finds `libsiggen_c` under `out/*/lib`; set `SIGGEN_LIBRARY` to point at it
 explicitly. It is built for Linux and macOS.
 
 ```python
 import siggen
 
 tx = siggen.generate(modulation="16-QAM", sps=8, snr_db=20, cfo_hz=2)   # CLI option names
-tx.samples            # complex64 array, identical to `siggen --format sigmf`
+tx.samples            # complex64 array, identical to `siggen-cli --format sigmf`
 tx.symbols            # ideal mapped symbols (unit mean energy)
 tx.symbol_accuracy()  # SymbolAccuracy(evm_percent, evm_db, snr_after_matched_db, ...)
 tx.bit_errors()       # BitErrors(bit_errors, bit_count, ber, ...) from the ideal reference receiver
@@ -96,7 +97,7 @@ rx = siggen.load("tx.sigmf-meta")             # any SigMF recording; siggen ones
 ```
 
 `siggen.theoretical_ber("16-QAM", eb_n0_db)` returns the textbook BER (scalar or array, NaN where there is none) and
-`siggen.ber_curve(eb_n0_db, modulation="16-QAM", ...)` runs the same sweep as `siggen ber`, returning a `BerCurve` with
+`siggen.ber_curve(eb_n0_db, modulation="16-QAM", ...)` runs the same sweep as `siggen-cli ber`, returning a `BerCurve` with
 `eb_n0_db`, `snr_db`, `bits`, `bit_errors`, `ber` and `theory` arrays.
 
 `generate` also accepts `preset=` (a preset path or text); keyword options override it.

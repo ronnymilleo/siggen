@@ -6,6 +6,7 @@
 #include "generator.h"
 
 #include "signal_processing.h"
+#include "test_support.h"
 #include <bit>
 #include <cmath>
 #include <gtest/gtest.h>
@@ -19,26 +20,26 @@ TEST(Generator, Mapping) {
     auto qpsk = MapSymbols(Modulation::QPSK, "00011110");
     const float a = 1 / std::sqrt(2.f);
     EXPECT_EQ(qpsk, (std::vector<std::complex<float>>{{a, a}, {a, -a}, {-a, -a}, {-a, a}}));
-    EXPECT_THROW(MapSymbols(Modulation::QPSK, "0"), std::invalid_argument);
-    EXPECT_THROW(MapSymbols(Modulation::BPSK, "2"), std::invalid_argument);
+    EXPECT_FALSE((MapSymbols(Modulation::QPSK, "0")).has_value());
+    EXPECT_FALSE((MapSymbols(Modulation::BPSK, "2")).has_value());
 }
 
 TEST(Generator, DeterministicKnownSeed) {
     GenerationConfig config;
     config.SymbolCount = 5;
-    auto first = Generate(config);
-    EXPECT_EQ(first.Samples, Generate(config).Samples);
+    auto first = Unwrap(Generate(config));
+    EXPECT_EQ(first.Samples, Unwrap(Generate(config)).Samples);
     // First mt19937(5489) outputs: 3499211612,581869302,3890346734,3586334585,545404204.
     EXPECT_EQ(first.Symbols, MapSymbols(Modulation::BPSK, "00010"));
     config.Seed++;
-    EXPECT_NE(first.Samples, Generate(config).Samples);
+    EXPECT_NE(first.Samples, Unwrap(Generate(config)).Samples);
 }
 
 TEST(Generator, PulseLengthDelayAndGain) {
     GenerationConfig config;
     config.SymbolCount = 1;
-    auto result = Generate(config);
-    auto taps = RRCFilter(config.RollOff, config.SpanSymbols, config.SamplesPerSymbol);
+    auto result = Unwrap(Generate(config));
+    auto taps = Unwrap(RRCFilter(config.RollOff, config.SpanSymbols, config.SamplesPerSymbol));
     ASSERT_EQ(result.Samples.size(), taps.size());
     EXPECT_EQ(result.FilterDelaySamples, 40u);
     EXPECT_DOUBLE_EQ(result.SampleRateHz, 8000);
@@ -46,13 +47,13 @@ TEST(Generator, PulseLengthDelayAndGain) {
         EXPECT_FLOAT_EQ(result.Samples[i].real(), static_cast<float>(taps[i]));
     }
     config.SymbolCount = 17;
-    EXPECT_EQ(Generate(config).Samples.size(), 16u * 8 + 81);
+    EXPECT_EQ(Unwrap(Generate(config)).Samples.size(), 16u * 8 + 81);
     config.Pulse = Pulse::Rectangular;
     config.DataSource = DataSource::Explicit;
     config.SymbolCount = 2;
     config.Bits = "01";
     config.AmplitudeGain = 2;
-    result = Generate(config);
+    result = Unwrap(Generate(config));
     EXPECT_EQ(result.Samples.size(), 16u);
     EXPECT_EQ(result.FilterDelaySamples, 0u);
     for (std::size_t i = 0; i < result.Samples.size(); ++i) {
@@ -63,26 +64,26 @@ TEST(Generator, PulseLengthDelayAndGain) {
 TEST(Generator, InvalidConfiguration) {
     GenerationConfig config;
     config.DataSource = DataSource::Explicit;
-    EXPECT_THROW(Generate(config), std::invalid_argument);
+    EXPECT_FALSE((Generate(config)).has_value());
     config.Bits = std::string(256, '0');
-    EXPECT_NO_THROW(Generate(config));
+    EXPECT_TRUE((Generate(config)).has_value());
     config.Bits += '0';
-    EXPECT_THROW(Generate(config), std::invalid_argument);
+    EXPECT_FALSE((Generate(config)).has_value());
     config = {};
     config.SymbolCount = 0;
-    EXPECT_THROW(Generate(config), std::invalid_argument);
+    EXPECT_FALSE((Generate(config)).has_value());
     config = {};
     config.SymbolRateBaud = NAN;
-    EXPECT_THROW(Generate(config), std::invalid_argument);
+    EXPECT_FALSE((Generate(config)).has_value());
     config = {};
     config.AmplitudeGain = INFINITY;
-    EXPECT_THROW(Generate(config), std::invalid_argument);
+    EXPECT_FALSE((Generate(config)).has_value());
     config = {};
     config.Modulation = static_cast<Modulation>(99);
-    EXPECT_THROW(Generate(config), std::invalid_argument);
+    EXPECT_FALSE((Generate(config)).has_value());
     config = {};
     config.SamplesPerSymbol = 1;
-    EXPECT_THROW(Generate(config), std::invalid_argument);
+    EXPECT_FALSE((Generate(config)).has_value());
 }
 
 TEST(Generator, QAM16AllPointsGrayAdjacencyAndEnergy) {
@@ -92,7 +93,7 @@ TEST(Generator, QAM16AllPointsGrayAdjacencyAndEnergy) {
             bits += (word & (1u << b)) ? '1' : '0';
         }
     }
-    const auto points = MapSymbols(Modulation::QAM16, bits);
+    const auto points = Unwrap(MapSymbols(Modulation::QAM16, bits));
     std::set<std::pair<float, float>> unique;
     double energy = 0;
     const float levels[] = {-3, -1, 3, 1};
@@ -118,7 +119,7 @@ TEST(Generator, PSK8AllPointsGrayAdjacencyAndEnergy) {
             bits += (word & (1u << b)) ? '1' : '0';
         }
     }
-    const auto points = MapSymbols(Modulation::PSK8, bits);
+    const auto points = Unwrap(MapSymbols(Modulation::PSK8, bits));
     ASSERT_EQ(points.size(), 8u);
     // Labels 000,001,011,010,110,111,101,100 sit at phases k*pi/4, k=0..7.
     const int phase_of_word[8] = {0, 1, 3, 2, 7, 6, 4, 5};
@@ -144,7 +145,7 @@ TEST(Generator, PSK8AllPointsGrayAdjacencyAndEnergy) {
             }
         }
     }
-    EXPECT_THROW(MapSymbols(Modulation::PSK8, "01"), std::invalid_argument);
+    EXPECT_FALSE((MapSymbols(Modulation::PSK8, "01")).has_value());
 }
 
 TEST(Generator, QAM64AllPointsGrayAdjacencyAndEnergy) {
@@ -154,7 +155,7 @@ TEST(Generator, QAM64AllPointsGrayAdjacencyAndEnergy) {
             bits += (word & (1u << b)) ? '1' : '0';
         }
     }
-    const auto points = MapSymbols(Modulation::QAM64, bits);
+    const auto points = Unwrap(MapSymbols(Modulation::QAM64, bits));
     ASSERT_EQ(points.size(), 64u);
     // Axis levels by three-bit label: 000,-7; 001,-5; 011,-3; 010,-1; 110,+1; 111,+3; 101,+5; 100,+7.
     const float axis[8] = {-7, -5, -1, -3, 7, 5, 1, 3};
@@ -178,7 +179,7 @@ TEST(Generator, QAM64AllPointsGrayAdjacencyAndEnergy) {
             }
         }
     }
-    EXPECT_THROW(MapSymbols(Modulation::QAM64, "01010"), std::invalid_argument);
+    EXPECT_FALSE((MapSymbols(Modulation::QAM64, "01010")).has_value());
 }
 
 TEST(Generator, SixBitExplicitInputLimits) {
@@ -188,19 +189,19 @@ TEST(Generator, SixBitExplicitInputLimits) {
     config.SymbolCount = 65536;
     config.Bits.assign(65536 * 6, '0');
     EXPECT_LT(config.Bits.size(), MaxExplicitBits); // Eight-bit 256-QAM sets the ceiling.
-    EXPECT_NO_THROW(Validate(config));
+    EXPECT_TRUE((Validate(config)).has_value());
     config.Pulse = Pulse::Rectangular;
     config.SamplesPerSymbol = 1;
-    const auto maximum = Generate(config);
+    const auto maximum = Unwrap(Generate(config));
     EXPECT_EQ(maximum.Symbols.size(), 65536u);
     EXPECT_EQ(maximum.Samples.size(), 65536u);
     config.Bits += '0';
-    EXPECT_THROW(Validate(config), std::invalid_argument);
+    EXPECT_FALSE((Validate(config)).has_value());
     config.Bits.assign(MaxExplicitBits + 1, '0');
-    EXPECT_THROW(Validate(config), std::invalid_argument);
+    EXPECT_FALSE((Validate(config)).has_value());
     config.Bits = std::string(65535 * 6, '0');
-    EXPECT_THROW(Validate(config), std::invalid_argument);
-    EXPECT_THROW(MapSymbols(Modulation::WGN, "0"), std::invalid_argument);
+    EXPECT_FALSE((Validate(config)).has_value());
+    EXPECT_FALSE((MapSymbols(Modulation::WGN, "0")).has_value());
 }
 
 TEST(Generator, FamilyTransitionsResetHiddenSettings) {
@@ -212,7 +213,7 @@ TEST(Generator, FamilyTransitionsResetHiddenSettings) {
     config.Seed = 42;
     config.NoiseSeed = 43;
     SelectWaveform(config, Modulation::WGN);
-    EXPECT_NO_THROW(Validate(config));
+    EXPECT_TRUE((Validate(config)).has_value());
     EXPECT_FALSE(config.Awgn.Enabled);
     EXPECT_EQ(config.DataSource, DataSource::Random);
     EXPECT_TRUE(config.Bits.empty());
@@ -222,51 +223,51 @@ TEST(Generator, FamilyTransitionsResetHiddenSettings) {
     config.SymbolCount = 17; // Dormant preset fields must not become active.
     SelectWaveform(config, Modulation::QAM64);
     EXPECT_EQ(config.SymbolCount, 256);
-    EXPECT_NO_THROW(Validate(config));
+    EXPECT_TRUE((Validate(config)).has_value());
 }
 
 TEST(Generator, WGNSourceDefaultsValidationAndDeterminism) {
     GenerationConfig config;
     config.Modulation = Modulation::WGN;
-    EXPECT_NO_THROW(Validate(config));
-    const auto result = Generate(config);
+    EXPECT_TRUE((Validate(config)).has_value());
+    const auto result = Unwrap(Generate(config));
     EXPECT_EQ(result.Family, Family::Noise);
     EXPECT_EQ(result.Samples.size(), 2048u);
     EXPECT_DOUBLE_EQ(result.SampleRateHz, 8000);
     EXPECT_EQ(result.FilterDelaySamples, 0u);
     EXPECT_TRUE(result.Symbols.empty());
-    EXPECT_EQ(Generate(config).Samples, result.Samples);
+    EXPECT_EQ(Unwrap(Generate(config)).Samples, result.Samples);
     EXPECT_EQ(result.Noise.NoiseSeed, config.NoiseSeed);
     auto other = config;
     other.NoiseSeed++;
-    EXPECT_NE(Generate(other).Samples, result.Samples);
+    EXPECT_NE(Unwrap(Generate(other)).Samples, result.Samples);
     // The data seed does not influence the noise source.
     other = config;
     other.Seed += 77;
-    EXPECT_EQ(Generate(other).Samples, result.Samples);
+    EXPECT_EQ(Unwrap(Generate(other)).Samples, result.Samples);
     // Gain scales the noise amplitude; reported power includes gain squared.
     other = config;
     other.AmplitudeGain = 2;
-    const auto scaled = Generate(other);
+    const auto scaled = Unwrap(Generate(other));
     for (std::size_t k = 0; k < result.Samples.size(); ++k) {
         EXPECT_EQ(scaled.Samples[k], result.Samples[k] * 2.f);
     }
     // Incompatible settings fail.
     other = config;
     other.Awgn.Enabled = true;
-    EXPECT_THROW(Validate(other), std::invalid_argument);
+    EXPECT_FALSE((Validate(other)).has_value());
     other = config;
     other.NoiseSource.SampleCount = 0;
-    EXPECT_THROW(Validate(other), std::invalid_argument);
+    EXPECT_FALSE((Validate(other)).has_value());
     other = config;
     other.NoiseSource.SampleRateHz = 0;
-    EXPECT_THROW(Validate(other), std::invalid_argument);
+    EXPECT_FALSE((Validate(other)).has_value());
     other = config;
     other.NoiseSource.NoisePower = -1;
-    EXPECT_THROW(Validate(other), std::invalid_argument);
+    EXPECT_FALSE((Validate(other)).has_value());
     other = config;
     other.NoiseSource.NoisePower = NAN;
-    EXPECT_THROW(Validate(other), std::invalid_argument);
+    EXPECT_FALSE((Validate(other)).has_value());
 }
 
 } // namespace Core

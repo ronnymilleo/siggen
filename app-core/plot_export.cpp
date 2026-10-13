@@ -16,7 +16,7 @@
 #include <iterator>
 #include <limits>
 #include <memory>
-#include <stdexcept>
+#include <system_error>
 #include <utility>
 
 #define STB_IMAGE_WRITE_STATIC
@@ -838,15 +838,16 @@ void DrawFigure(Canvas &canvas, const Figure &figure, const ImageStyle &style) {
     }
 }
 
-void ValidateFigure(const Figure &figure, const ImageStyle &style) {
+std::expected<void, std::string> ValidateFigure(const Figure &figure, const ImageStyle &style) {
     if (style.Width < MinImageSize || style.Height < MinImageSize || style.Width > MaxImageSize ||
         style.Height > MaxImageSize) {
-        throw std::invalid_argument("Image width and height must be between " + std::to_string(MinImageSize) + " and " +
-                                    std::to_string(MaxImageSize) + " pixels");
+        return std::unexpected("Image width and height must be between " + std::to_string(MinImageSize) + " and " +
+                               std::to_string(MaxImageSize) + " pixels");
     }
     if (figure.Panels.empty()) {
-        throw std::invalid_argument("Figure has no panels");
+        return std::unexpected(std::string("Figure has no panels"));
     }
+    return {};
 }
 
 // endregion
@@ -857,11 +858,12 @@ void ValidateFigure(const Figure &figure, const ImageStyle &style) {
  * @brief   Renders a figure as an SVG document.
  * @param[in] figure    Figure with at least one panel.
  * @param[in] style     Size, between MinImageSize and MaxImageSize pixels on each side, and theme.
- * @return  The SVG text.
- * @note    Throws std::invalid_argument for a size out of range or an empty figure.
+ * @return  The SVG text; an error for a size out of range or an empty figure.
  */
-std::string RenderSvg(const Figure &figure, const ImageStyle &style) {
-    ValidateFigure(figure, style);
+std::expected<std::string, std::string> RenderSvg(const Figure &figure, const ImageStyle &style) {
+    if (const auto validated = ValidateFigure(figure, style); !validated.has_value()) {
+        return std::unexpected(validated.error());
+    }
     SvgCanvas canvas(style, figure.Title);
     DrawFigure(canvas, figure, style);
     return canvas.Finish();
@@ -871,11 +873,12 @@ std::string RenderSvg(const Figure &figure, const ImageStyle &style) {
  * @brief   Renders a figure as antialiased RGB pixels.
  * @param[in] figure    Figure with at least one panel.
  * @param[in] style     Size and theme, as in RenderSvg().
- * @return  Row-major RGB bytes, width * height * 3.
- * @note    Throws std::invalid_argument for a size out of range or an empty figure.
+ * @return  Row-major RGB bytes, width * height * 3; an error for a size out of range or an empty figure.
  */
-std::vector<std::uint8_t> RenderRgb(const Figure &figure, const ImageStyle &style) {
-    ValidateFigure(figure, style);
+std::expected<std::vector<std::uint8_t>, std::string> RenderRgb(const Figure &figure, const ImageStyle &style) {
+    if (const auto validated = ValidateFigure(figure, style); !validated.has_value()) {
+        return std::unexpected(validated.error());
+    }
     RasterCanvas canvas(style);
     DrawFigure(canvas, figure, style);
     return canvas.Finish();
@@ -885,19 +888,21 @@ std::vector<std::uint8_t> RenderRgb(const Figure &figure, const ImageStyle &styl
  * @brief   Renders a figure as a PNG image.
  * @param[in] figure    Figure with at least one panel.
  * @param[in] style     Size and theme, as in RenderSvg().
- * @return  The PNG file bytes.
- * @note    Throws std::invalid_argument like RenderRgb() and std::runtime_error when encoding fails.
+ * @return  The PNG file bytes; an error like RenderRgb() or when encoding fails.
  */
-std::vector<std::uint8_t> RenderPng(const Figure &figure, const ImageStyle &style) {
+std::expected<std::vector<std::uint8_t>, std::string> RenderPng(const Figure &figure, const ImageStyle &style) {
     const auto rgb = RenderRgb(figure, style);
+    if (!rgb.has_value()) {
+        return std::unexpected(rgb.error());
+    }
     std::vector<std::uint8_t> png;
     const auto sink = [](void *context, void *data, int size) {
         auto *output = static_cast<std::vector<std::uint8_t> *>(context);
         output->insert(output->end(), static_cast<const std::uint8_t *>(data),
                        static_cast<const std::uint8_t *>(data) + size);
     };
-    if (!stbi_write_png_to_func(sink, &png, style.Width, style.Height, 3, rgb.data(), style.Width * 3)) {
-        throw std::runtime_error("PNG encoding failed");
+    if (!stbi_write_png_to_func(sink, &png, style.Width, style.Height, 3, rgb->data(), style.Width * 3)) {
+        return std::unexpected(std::string("PNG encoding failed"));
     }
     return png;
 }
@@ -910,30 +915,47 @@ std::vector<std::uint8_t> RenderPng(const Figure &figure, const ImageStyle &styl
  * @param[in] style         Size and theme, as in RenderSvg().
  * @param[in] overwrite     Replaces an existing file; otherwise refuses it, with exclusive creation guarding
  *                          against a file appearing after a UI check.
+ * @return  Nothing on success; an error for an empty destination or a bad figure, when the file exists and
+ *          @p overwrite is false, or on an I/O failure.
  * @note    The figure is rendered before the file is opened, so a bad figure never leaves an empty file behind.
- *          Throws std::invalid_argument for an empty destination or a bad figure, std::runtime_error when the file
- *          exists and @p overwrite is false, and std::ios_base::failure on I/O errors.
  */
-void ExportFigure(const std::filesystem::path &destination, const Figure &figure, const ImageFormat format,
-                  const ImageStyle &style, const bool overwrite) {
+std::expected<void, std::string> ExportFigure(const std::filesystem::path &destination, const Figure &figure,
+                                              const ImageFormat format, const ImageStyle &style, const bool overwrite) {
     if (destination.empty()) {
-        throw std::invalid_argument("Image destination is empty");
+        return std::unexpected(std::string("Image destination is empty"));
     }
     std::vector<std::uint8_t> bytes;
     if (format == ImageFormat::PNG) {
-        bytes = RenderPng(figure, style);
+        const auto png = RenderPng(figure, style);
+        if (!png.has_value()) {
+            return std::unexpected(png.error());
+        }
+        bytes = std::move(*png);
     } else {
         const auto svg = RenderSvg(figure, style);
-        bytes.assign(svg.begin(), svg.end());
+        if (!svg.has_value()) {
+            return std::unexpected(svg.error());
+        }
+        bytes.assign(svg->begin(), svg->end());
     }
-    if (!overwrite && std::filesystem::exists(destination)) {
-        throw std::runtime_error("Image destination already exists; confirm overwrite");
+    std::error_code ec;
+    if (!overwrite && std::filesystem::exists(destination, ec)) {
+        return std::unexpected(std::string("Image destination already exists; confirm overwrite"));
     }
     std::ofstream file;
-    file.exceptions(std::ios::badbit | std::ios::failbit);
     file.open(destination, std::ios::binary | (overwrite ? std::ios::trunc : std::ios::noreplace));
+    if (!file) {
+        return std::unexpected("Cannot create image file: " + destination.string());
+    }
     file.write(reinterpret_cast<const char *>(bytes.data()), static_cast<std::streamsize>(bytes.size()));
     file.close();
+    if (file.fail()) {
+        if (!overwrite) {
+            std::filesystem::remove(destination, ec);
+        }
+        return std::unexpected("Failed writing image file: " + destination.string());
+    }
+    return {};
 }
 
 /**

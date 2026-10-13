@@ -4,10 +4,19 @@
 
 ## Presets
 
-The **Presets** section accepts a complete path (default `default.preset`). Save
-writes the versioned text format below. Load parses into a temporary configuration
-and applies it only after every field passes validation. Errors leave current
-settings and the previous result intact. Saving replaces the selected preset.
+The **File** menu opens and saves presets: *Open Preset...* (Ctrl+O) asks for a path,
+*Save Preset* (Ctrl+S) writes back to the path the settings came from, and *Save Preset
+As...* (Ctrl+Shift+S) asks for a new one. Save writes the versioned text format below.
+Load parses into a temporary configuration and applies it only after every field passes
+validation. Errors leave current settings and the previous result intact, and appear in
+the Signal Setup window. Saving replaces the selected preset. The window title names the
+document and gains an asterisk while the settings differ from it; quitting then asks
+before the changes are lost.
+
+The guided lessons ship inside the executable: **File > Examples** lists them, each with
+its lesson notes in a tooltip, and loading one shows the notes in Signal Setup. Their
+sources live in `app-gui/examples/` and are compiled in, so the binary needs no data files
+next to it.
 
 ```ini
 [IQ Generator Preset]
@@ -66,7 +75,7 @@ followed by one complex sample per row; decimal precision preserves the stored
 float32 components and double timestamps on round trip. SigMF is binary: the
 samples are headerless little-endian IEEE-754 float32 (`cf32_le`), interleaved as
 `I0,Q0,I1,Q1,...`, eight bytes per complex sample, described by a JSON file (see
-below). Batches (`siggen batch`) write one SigMF pair per frame, or CSV.
+below). Batches (`siggen-cli batch`) write one SigMF pair per frame, or CSV.
 
 CSV writes `<destination>.json`; SigMF writes `<name>.sigmf-meta`. The
 version-2 sidecar object (also carried inside the SigMF metadata) records the
@@ -103,7 +112,7 @@ float32 I/Q samples into `<name>.sigmf-data` and a [SigMF](https://sigmf.org)
 the meta file is its sibling and both follow the same overwrite rules as CSV. The `global` object holds `core:datatype` (`cf32_le`), `core:sample_rate`,
 `core:version`, `core:description` and `core:recorder`, followed by siggen's own
 fields in the `siggen:` namespace: `siggen:preset` (the configuration in the preset
-text format, which is what lets `siggen analyze` and the Python package re-measure the
+text format, which is what lets `siggen-cli analyze` and the Python package re-measure the
 file) and `siggen:metadata` (the version-2 object described above). `captures` has one
 segment starting at sample 0, and `annotations` is empty. Other SigMF tools ignore
 the `siggen:` fields.

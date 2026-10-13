@@ -67,37 +67,10 @@ TEST(CommandLine, DefaultModeExportsCsv) {
     CommandLine cli("test-version");
     const char *argv[] = {"siggen"};
     cli.App.parse(1, argv);
-    EXPECT_FALSE(cli.Gui);
     EXPECT_FALSE(cli.Overwrite);
     EXPECT_TRUE(cli.Output.empty());
     EXPECT_EQ(cli.Format, "csv");
     EXPECT_FALSE(cli.BatchSelected());
-}
-
-TEST(CommandLine, GuiCannotSilentlyIgnoreExportOptions) {
-    for (const char *option : {"--output=custom.csv", "--overwrite", "--format=sigmf"}) {
-        CommandLine cli("test-version");
-        const char *argv[] = {"siggen", "--gui", option};
-        EXPECT_THROW(cli.App.parse(3, argv), CLI::ExcludesError) << option;
-    }
-}
-
-TEST(CommandLine, GuiAcceptsPresetAndSignalOptions) {
-    CommandLine cli("test-version");
-    const char *argv[] = {"siggen", "--gui",  "--preset", "custom.preset", "--modulation",
-                          "64-QAM", "--gain", "2",        "--snr-db",      "10"};
-    cli.App.parse(std::size(argv), argv);
-    EXPECT_TRUE(cli.Gui);
-    EXPECT_EQ(cli.Preset, "custom.preset");
-    EXPECT_EQ(cli.Modulation, "64-QAM");
-    EXPECT_DOUBLE_EQ(cli.Gain, 2);
-    EXPECT_EQ(cli.SnrDb, "10");
-}
-
-TEST(CommandLine, GuiAndBatchAreExclusive) {
-    CommandLine cli("test-version");
-    const char *argv[] = {"siggen", "--gui", "batch"};
-    EXPECT_THROW(cli.App.parse(3, argv), CLI::ExcludesError);
 }
 
 TEST(CommandLine, SignalAndNoiseOptionsParse) {

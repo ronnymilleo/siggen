@@ -9,7 +9,6 @@
 #include <array>
 #include <cctype>
 #include <span>
-#include <stdexcept>
 #include <string>
 #include <string_view>
 
@@ -59,25 +58,25 @@ std::span<const WaveformDescriptor> Waveforms() {
 /**
  * @brief   Looks up the capabilities of a waveform.
  * @param[in] modulation  Waveform to look up.
- * @return  Its descriptor.
- * @note    Throws std::invalid_argument for a value outside the table.
+ * @return  Its descriptor, or nullptr for a value outside the table.
  */
-const WaveformDescriptor &GetWaveformDescriptor(Modulation modulation) {
+const WaveformDescriptor *FindWaveform(const Modulation modulation) {
     for (const auto &entry : Descriptors) {
         if (entry.Modulation == modulation) {
-            return entry;
+            return &entry;
         }
     }
-    throw std::invalid_argument("Unsupported waveform");
+    return nullptr;
 }
 
 /**
  * @brief   Returns how a waveform is generated.
  * @param[in] modulation  Waveform to look up.
- * @return  Its family.
+ * @return  Its family; Family::Linear for an unsupported value, which validated paths never produce.
  */
-Family WaveformFamily(Modulation modulation) {
-    return GetWaveformDescriptor(modulation).Family;
+Family WaveformFamily(const Modulation modulation) {
+    const auto *descriptor = FindWaveform(modulation);
+    return descriptor ? descriptor->Family : Family::Linear;
 }
 
 /**
@@ -100,28 +99,31 @@ const char *FamilyName(Family family) {
 /**
  * @brief   Returns the number of bits each symbol of a waveform carries.
  * @param[in] modulation  Waveform to look up.
- * @return  Bits per symbol; zero for noise sources.
+ * @return  Bits per symbol; zero for noise sources and unsupported values.
  */
-int BitsPerSymbol(Modulation modulation) {
-    return GetWaveformDescriptor(modulation).BitsPerSymbol;
+int BitsPerSymbol(const Modulation modulation) {
+    const auto *descriptor = FindWaveform(modulation);
+    return descriptor ? descriptor->BitsPerSymbol : 0;
 }
 
 /**
  * @brief   Returns the canonical name of a waveform, as used by the CLI and presets.
  * @param[in] modulation  Waveform to name.
- * @return  The canonical name, such as "16-QAM".
+ * @return  The canonical name, such as "16-QAM"; "unknown" for an unsupported value.
  */
-const char *ModulationName(Modulation modulation) {
-    return GetWaveformDescriptor(modulation).CanonicalName.data();
+const char *ModulationName(const Modulation modulation) {
+    const auto *descriptor = FindWaveform(modulation);
+    return descriptor ? descriptor->CanonicalName.data() : "unknown";
 }
 
 /**
  * @brief   Returns the stable serialized and seed-derivation identifier of a waveform.
  * @param[in] modulation  Waveform to look up.
- * @return  An identifier independent of the enum and table order.
+ * @return  An identifier independent of the enum and table order; -1 for an unsupported value.
  */
-int WaveformId(Modulation modulation) {
-    return GetWaveformDescriptor(modulation).StableId;
+int WaveformId(const Modulation modulation) {
+    const auto *descriptor = FindWaveform(modulation);
+    return descriptor ? descriptor->StableId : -1;
 }
 
 /**
@@ -130,8 +132,7 @@ int WaveformId(Modulation modulation) {
  * @return  True when the capability table has an entry for it.
  */
 bool IsValid(Modulation modulation) {
-    return std::any_of(Descriptors.begin(), Descriptors.end(),
-                       [&](const auto &entry) { return entry.Modulation == modulation; });
+    return FindWaveform(modulation) != nullptr;
 }
 
 /**

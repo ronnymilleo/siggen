@@ -10,6 +10,7 @@
 
 #include <array>
 #include <cstdint>
+#include <expected>
 #include <filesystem>
 #include <optional>
 #include <string>
@@ -96,11 +97,11 @@ constexpr int MinImageSize = 200;
 constexpr int MaxImageSize = 8192;
 
 // Rendering
-std::string RenderSvg(const Figure &figure, const ImageStyle &style = {});
-std::vector<std::uint8_t> RenderRgb(const Figure &figure, const ImageStyle &style = {});
-std::vector<std::uint8_t> RenderPng(const Figure &figure, const ImageStyle &style = {});
-void ExportFigure(const std::filesystem::path &destination, const Figure &figure, ImageFormat format,
-                  const ImageStyle &style = {}, bool overwrite = false);
+std::expected<std::string, std::string> RenderSvg(const Figure &figure, const ImageStyle &style = {});
+std::expected<std::vector<std::uint8_t>, std::string> RenderRgb(const Figure &figure, const ImageStyle &style = {});
+std::expected<std::vector<std::uint8_t>, std::string> RenderPng(const Figure &figure, const ImageStyle &style = {});
+std::expected<void, std::string> ExportFigure(const std::filesystem::path &destination, const Figure &figure,
+                                              ImageFormat format, const ImageStyle &style = {}, bool overwrite = false);
 
 // Axis ticks
 std::vector<double> NiceTicks(double lo, double hi, int target_count = 6);

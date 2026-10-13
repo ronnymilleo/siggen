@@ -18,10 +18,10 @@ namespace GUI {
 /**
  * @class   ControlsWindow
  * @brief   Edits the settings of the session, starts the generation, exports the last result as I/Q samples and
- *          saves or loads presets.
+ *          shows the notes of the loaded preset or example.
  * @details Only the controls of the selected waveform family are shown. Invalid settings are explained below the
  *          controls and disable Generate. The window owns the edit buffers and the export dialog; the settings live
- *          in the session.
+ *          in the session, and presets and examples come from the File menu.
  */
 class ControlsWindow : public AppWindow {
 public:
@@ -44,7 +44,7 @@ private:
 
     // Actions
     void DrawActions(bool settings_valid);
-    void DrawPresets();
+    void DrawPresetNotes();
 
     // I/Q export
     void DrawExportDialog();
@@ -53,8 +53,8 @@ private:
     GeneratorSession &m_Session;
 
     // Edit buffers
-    std::vector<char> m_BitInput; // Null-terminated edit buffer for explicit bits
-    char m_PresetPath[1024] = "default.preset";
+    std::vector<char> m_BitInput;      // Null-terminated edit buffer for explicit bits
+    std::size_t m_SettingsVersion = 0; // Last session version the bit editor copied
 
     // I/Q export
     char m_ExportPath[1024] = "signal.csv";

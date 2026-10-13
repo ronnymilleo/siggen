@@ -1,0 +1,10 @@
+[Desktop Entry]
+Type=Application
+Name=Siggen
+GenericName=Signal Generator
+Comment=Generate, analyze and export complex baseband I/Q signals
+Exec=siggen
+Icon=siggen
+Terminal=false
+Categories=Science;Engineering;
+Keywords=signal;iq;baseband;sdr;modulation;dsp;sigmf;

@@ -12,18 +12,26 @@ concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
 
+# The Linux jobs run in an archlinux container, the distribution the project is developed on: the pinned
+# CMake version is newer than Ubuntu's. SDL3 comes from its vendor submodule; its build dependencies are those
+# of the Arch sdl3 package (makedepends, without the audio ones), since SDL fails to configure when an X11
+# extension it enables is missing. The tests never open a window: the UI smoke tests run on headless ImGui frames
+env:
+  PACKAGES: >-
+    git cmake ninja gcc clang python pkgconf ccache python-numpy
+    libxcursor libxi libxfixes libxinerama libxrandr libxss libxtst libxkbcommon wayland wayland-protocols libdecor mesa
+  # Compiled objects are kept between runs, so a push only recompiles what changed
+  CCACHE_MAXSIZE: 500M
+  COMPILER_LAUNCHER: -DCMAKE_C_COMPILER_LAUNCHER=ccache -DCMAKE_CXX_COMPILER_LAUNCHER=ccache
+
 jobs:
-  # Formatting and naming need the same clang-format/clang-tidy as development, so they run on Arch Linux.
-  # The GUI is configured too, so clang-tidy also sees app-gui/ in the compile database
-  lint:
+  linux:
     runs-on: ubuntu-latest
     container: archlinux:latest
     steps:
       # git must exist before checkout, or the submodules are not fetched
       - name: Install build dependencies
-        run: >-
-          pacman -Syu --noconfirm --needed git cmake ninja gcc clang
-          libx11 libxrandr libxinerama libxcursor libxi mesa libglvnd
+        run: pacman -Syu --noconfirm --needed $PACKAGES
 
       - name: Check out the repository
         uses: actions/checkout@v7
@@ -33,55 +41,117 @@ jobs:
       - name: Trust the workspace
         run: git config --global --add safe.directory "$GITHUB_WORKSPACE"
 
+      # In a container, only $GITHUB_WORKSPACE holds the path as the container sees it
+      - name: Locate the compiler cache
+        run: echo "CCACHE_DIR=$GITHUB_WORKSPACE/.ccache" >> "$GITHUB_ENV"
+
+      # Each run saves a new cache and restores the newest one of its job, whatever the branch
+      - name: Restore the compiler cache
+        uses: actions/cache@v6
+        with:
+          path: .ccache
+          key: ccache-debug-${{ github.sha }}
+          restore-keys: ccache-debug-
+
       - name: Configure
-        run: cmake --preset dev
+        run: >-
+          cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Debug -DSIGGEN_BUILD_TESTS=ON
+          -DSIGGEN_BUILD_PYTHON=ON $COMPILER_LAUNCHER
 
-      # Building siggen runs clang-format on every source, so any change means unformatted code was committed.
-      # Only C++ files are compared, so other local edits (act copies the working tree) do not count
       - name: Build
-        run: cmake --build --preset dev --target siggen
+        run: cmake --build build
 
+      # The build runs clang-format on every source, so any change means unformatted code was committed.
+      # Only C++ files are compared, so other local edits (act copies the working tree) do not count
       - name: Check formatting
         run: git diff --exit-code -- '*.cpp' '*.h'
 
-      - name: Check naming
-        # python/csrc is a C ABI loaded with ctypes, so its siggen_* names stay C-style
-        run: clang-tidy -p build/dev --warnings-as-errors='*' $(git ls-files '*.cpp' ':!python/')
+      - name: Run tests
+        run: ctest --test-dir build --output-on-failure
 
-  linux-headless:
-    runs-on: ubuntu-24.04
+      # One clang-tidy per core, on the sources of the project only (the vendor libraries are in the database too)
+      - name: Check naming
+        run: >-
+          run-clang-tidy -p build -quiet -j "$(nproc)" -warnings-as-errors='*'
+          '/(app-core|app-cli|app-gui|tests)/|/main\.cpp$'
+
+      - name: Compiler cache statistics
+        run: ccache --show-stats
+
+  linux-sanitizers:
+    runs-on: ubuntu-latest
+    container: archlinux:latest
+    steps:
+      - name: Install build dependencies
+        run: pacman -Syu --noconfirm --needed $PACKAGES
+
+      - name: Check out the repository
+        uses: actions/checkout@v7
+        with:
+          submodules: recursive
+
+      - name: Locate the compiler cache
+        run: echo "CCACHE_DIR=$GITHUB_WORKSPACE/.ccache" >> "$GITHUB_ENV"
+
+      - name: Restore the compiler cache
+        uses: actions/cache@v6
+        with:
+          path: .ccache
+          key: ccache-sanitizers-${{ github.sha }}
+          restore-keys: ccache-sanitizers-
+
+      - name: Configure with AddressSanitizer and UndefinedBehaviorSanitizer
+        run: >-
+          cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Debug -DSIGGEN_BUILD_TESTS=ON
+          -DSIGGEN_BUILD_GUI=OFF -DSIGGEN_SANITIZER=address-undefined $COMPILER_LAUNCHER
+
+      - name: Build
+        run: cmake --build build
+
+      - name: Run tests
+        run: ctest --test-dir build --output-on-failure
+
+  windows:
+    # windows-latest is the Windows Server 2025 image with Visual Studio 2026, and comes with CMake and
+    # Ninja; SDL3 comes from its vendor submodule and needs nothing else
+    runs-on: windows-latest
     steps:
       - name: Check out the repository
         uses: actions/checkout@v7
         with:
           submodules: recursive
 
-      - name: Install build tools
-        run: sudo apt-get update && sudo apt-get install --yes cmake ninja-build g++ clang python3-numpy
+      # Ninja looks for cl in the environment, which vcvarsall sets up
+      - name: Set up the MSVC environment
+        uses: ilammy/msvc-dev-cmd@v1
 
-      - name: Validate GCC
-        run: cmake --workflow --preset headless
+      - name: Configure
+        run: cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Debug -DSIGGEN_BUILD_TESTS=ON
 
-      - name: Validate Clang
-        run: cmake --workflow --preset clang-headless
+      - name: Build
+        run: cmake --build build
+
+      - name: Run tests
+        run: ctest --test-dir build --output-on-failure
 
   macos:
-    runs-on: macos-latest
+    # macos-26 is an Apple silicon image with Xcode 26, whose SDK the macOS 26 deployment target of the project
+    # needs; SDL3 comes from its vendor submodule
+    runs-on: macos-26
     steps:
+      - name: Install build dependencies
+        run: brew install cmake ninja
+
       - name: Check out the repository
         uses: actions/checkout@v7
         with:
           submodules: recursive
 
-      - name: Install build tools
-        run: brew install ninja
+      - name: Configure
+        run: cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Debug -DSIGGEN_BUILD_TESTS=ON
 
-      - name: Validate headless build and tests
-        run: cmake --workflow --preset headless
+      - name: Build
+        run: cmake --build build
 
-      # The UI smoke tests open a native window, which hosted runners cannot
-      # reliably provide, so the GUI is only configured and compiled here.
-      - name: Build GUI
-        run: |
-          cmake --preset dev
-          cmake --build --preset dev
+      - name: Run tests
+        run: ctest --test-dir build --output-on-failure

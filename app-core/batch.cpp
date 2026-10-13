@@ -22,8 +22,8 @@
 #include <set>
 #include <span>
 #include <sstream>
-#include <stdexcept>
 #include <string>
+#include <system_error>
 #include <utility>
 
 namespace Core {
@@ -35,7 +35,7 @@ constexpr std::uint32_t StreamTagData = 1;
 constexpr std::uint32_t StreamTagNoise = 2;
 constexpr std::uint32_t StreamTagImpairment = 3;
 
-constexpr std::size_t MaxFrameSymbols = 65536;
+constexpr std::size_t MaxFrameSymbols = MaxSymbolCount;
 
 /**
  * @struct  FrameLocation
@@ -66,11 +66,15 @@ std::size_t GuardSymbols(const GenerationConfig &config) {
     return UsesRrc(config) ? static_cast<std::size_t>(config.SpanSymbols) : 0;
 }
 
-FrameResult GenerateNoiseFrame(GenerationConfig &config, const int frame_size, FrameResult frame) {
+std::expected<FrameResult, std::string> GenerateNoiseFrame(GenerationConfig &config, const int frame_size,
+                                                           FrameResult frame) {
     config.NoiseSource.SampleCount = frame_size;
-    auto full = Generate(config);
-    frame.Samples = std::move(full.Samples);
-    frame.SampleRateHz = full.SampleRateHz;
+    const auto full = Generate(config);
+    if (!full.has_value()) {
+        return std::unexpected(full.error());
+    }
+    frame.Samples = full->Samples;
+    frame.SampleRateHz = full->SampleRateHz;
     frame.Noise = NoiseRecord{false, 0, 0, 0, 0, config.NoiseSource.NoisePower, frame.NoiseSeed};
     return frame;
 }
@@ -82,18 +86,26 @@ FrameResult GenerateNoiseFrame(GenerationConfig &config, const int frame_size, F
  * @param[in]     frame         Frame with its derived seeds set.
  * @return  The cropped clean frame, without AWGN or impairments.
  */
-FrameResult GenerateSymbolFrame(GenerationConfig &config, const int frame_size, FrameResult frame) {
+std::expected<FrameResult, std::string> GenerateSymbolFrame(GenerationConfig &config, const int frame_size,
+                                                            FrameResult frame) {
     config.Seed = frame.DataSeed;
     const auto samples_per_symbol = static_cast<std::size_t>(config.SamplesPerSymbol);
     const auto guard = GuardSymbols(config);
     config.SymbolCount = static_cast<int>(PayloadSymbols(frame_size, samples_per_symbol) + 2 * guard);
-    auto full = Generate(config);
-    frame.GeneratorPreset = SerializePreset(config);
-    frame.CropOffset = guard * samples_per_symbol + full.FilterDelaySamples;
-    frame.FilterDelaySamples = full.FilterDelaySamples;
-    frame.SampleRateHz = full.SampleRateHz;
-    frame.Samples.assign(full.Samples.begin() + static_cast<std::ptrdiff_t>(frame.CropOffset),
-                         full.Samples.begin() +
+    const auto full = Generate(config);
+    if (!full.has_value()) {
+        return std::unexpected(full.error());
+    }
+    const auto preset = SerializePreset(config);
+    if (!preset.has_value()) {
+        return std::unexpected(preset.error());
+    }
+    frame.GeneratorPreset = std::move(*preset);
+    frame.CropOffset = guard * samples_per_symbol + full->FilterDelaySamples;
+    frame.FilterDelaySamples = full->FilterDelaySamples;
+    frame.SampleRateHz = full->SampleRateHz;
+    frame.Samples.assign(full->Samples.begin() + static_cast<std::ptrdiff_t>(frame.CropOffset),
+                         full->Samples.begin() +
                              static_cast<std::ptrdiff_t>(frame.CropOffset + static_cast<std::size_t>(frame_size)));
     return frame;
 }
@@ -115,67 +127,77 @@ std::size_t PointsPerSeed(const Modulation waveform, const BatchRequest &request
     return (WaveformFamily(waveform) == Family::Noise || request.SnrsDb.empty()) ? 1 : request.SnrsDb.size();
 }
 
-void ValidateBatchSettings(const BatchRequest &request) {
+std::expected<void, std::string> ValidateBatchSettings(const BatchRequest &request) {
     if (request.FramesPerPoint < 1) {
-        throw std::invalid_argument("Frames per point must be at least 1");
+        return std::unexpected(std::string("Frames per point must be at least 1"));
     }
     if (request.Format != ExportFormat::CSV && request.Format != ExportFormat::SigMF) {
-        throw std::invalid_argument("Unsupported batch format");
+        return std::unexpected(std::string("Unsupported batch format"));
     }
     if (request.OutputDir.empty()) {
-        throw std::invalid_argument("Batch output directory is empty");
+        return std::unexpected(std::string("Batch output directory is empty"));
     }
     if (request.Base.DataSource == DataSource::Explicit) {
-        throw std::invalid_argument("Batch generation requires seeded random data");
+        return std::unexpected(std::string("Batch generation requires seeded random data"));
     }
-    if (std::filesystem::exists(request.OutputDir)) {
-        throw std::runtime_error("Batch output directory already exists: " + request.OutputDir.string());
+    std::error_code ec;
+    if (std::filesystem::exists(request.OutputDir, ec)) {
+        return std::unexpected("Batch output directory already exists: " + request.OutputDir.string());
     }
+    return {};
 }
 
-void ValidateSweepAxes(const std::vector<Modulation> &waveforms, const std::vector<std::uint32_t> &seeds,
-                       const std::vector<double> &snrs_db) {
+std::expected<void, std::string> ValidateSweepAxes(const std::vector<Modulation> &waveforms,
+                                                   const std::vector<std::uint32_t> &seeds,
+                                                   const std::vector<double> &snrs_db) {
     std::set<int> waveform_ids;
     for (const auto waveform : waveforms) {
         if (!IsValid(waveform)) {
-            throw std::invalid_argument("Unsupported modulation");
+            return std::unexpected(std::string("Unsupported modulation"));
         }
         if (!waveform_ids.insert(WaveformId(waveform)).second) {
-            throw std::invalid_argument(std::string("Duplicate waveform in sweep: ") + ModulationName(waveform));
+            return std::unexpected(std::string("Duplicate waveform in sweep: ") + ModulationName(waveform));
         }
     }
     std::set<std::uint32_t> unique_seeds;
     for (const auto seed : seeds) {
         if (!unique_seeds.insert(seed).second) {
-            throw std::invalid_argument("Duplicate seed in sweep: " + std::to_string(seed));
+            return std::unexpected("Duplicate seed in sweep: " + std::to_string(seed));
         }
     }
     std::set<double> unique_snrs;
     for (const auto snr : snrs_db) {
         if (!std::isfinite(snr)) {
-            throw std::invalid_argument("SNR values must be finite");
+            return std::unexpected(std::string("SNR values must be finite"));
         }
         if (!unique_snrs.insert(snr).second) {
-            throw std::invalid_argument("Duplicate SNR in sweep: " + std::to_string(snr));
+            return std::unexpected("Duplicate SNR in sweep: " + std::to_string(snr));
         }
     }
+    return {};
 }
 
-// SnrPowerRatio() throws for SNRs whose power ratio is out of range
-void ValidateAwgnSettings(const Modulation waveform, const BatchRequest &request) {
-    if (!GetWaveformDescriptor(waveform).AwgnSupported || (request.SnrsDb.empty() && !request.Base.Awgn.Enabled)) {
-        return;
+// SnrPowerRatio() fails for SNRs whose power ratio is out of range
+std::expected<void, std::string> ValidateAwgnSettings(const Modulation waveform, const BatchRequest &request) {
+    const auto *descriptor = FindWaveform(waveform);
+    if (descriptor == nullptr || !descriptor->AwgnSupported || (request.SnrsDb.empty() && !request.Base.Awgn.Enabled)) {
+        return {};
     }
     if (request.Base.AmplitudeGain == 0) {
-        throw std::invalid_argument("AWGN reference power must be positive");
+        return std::unexpected(std::string("AWGN reference power must be positive"));
     }
     if (request.SnrsDb.empty()) {
-        SnrPowerRatio(request.Base.Awgn.SnrDb);
+        if (const auto ratio = SnrPowerRatio(request.Base.Awgn.SnrDb); !ratio.has_value()) {
+            return std::unexpected(ratio.error());
+        }
     } else {
         for (const auto snr : request.SnrsDb) {
-            SnrPowerRatio(snr);
+            if (const auto ratio = SnrPowerRatio(snr); !ratio.has_value()) {
+                return std::unexpected(ratio.error());
+            }
         }
     }
+    return {};
 }
 
 // endregion
@@ -432,23 +454,33 @@ std::size_t CountPoints(const std::vector<Modulation> &waveforms, const std::siz
     return point_count;
 }
 
-std::ofstream OpenManifest(const BatchRequest &request, const std::size_t point_count) {
+std::expected<std::ofstream, std::string> OpenManifest(const BatchRequest &request, const std::size_t point_count) {
     const auto frame_count = point_count * static_cast<std::size_t>(request.FramesPerPoint);
     std::ofstream manifest(request.OutputDir / "manifest.jsonl", std::ios::binary | std::ios::noreplace);
-    manifest.exceptions(std::ios::badbit | std::ios::failbit);
+    if (!manifest) {
+        return std::unexpected("Cannot create batch manifest in " + request.OutputDir.string());
+    }
     manifest << ManifestHeader(request, point_count, frame_count);
     manifest.flush();
+    if (!manifest) {
+        return std::unexpected(std::string("Failed writing the batch manifest"));
+    }
     return manifest;
 }
 
 /**
  * @brief   Generates one frame, writes its sample file and sidecar, then appends its manifest record.
+ * @return  Nothing on success; the generation or write error otherwise.
  * @note    The record is appended only after both frame files closed successfully, so the manifest lists only
  *          complete frames.
  */
-void WriteFrame(const BatchRequest &request, const GenerationConfig &config, const FrameLocation &location,
-                std::ofstream &manifest) {
-    const auto frame = GenerateFrame(config, request.FrameSize, location.FrameIndex, location.SnrDb);
+std::expected<void, std::string> WriteFrame(const BatchRequest &request, const GenerationConfig &config,
+                                            const FrameLocation &location, std::ofstream &manifest) {
+    const auto generated = GenerateFrame(config, request.FrameSize, location.FrameIndex, location.SnrDb);
+    if (!generated.has_value()) {
+        return std::unexpected(generated.error());
+    }
+    const auto &frame = *generated;
     const auto data_name = FrameBasename(location.PointIndex, location.FrameIndex) + FormatExtension(request.Format);
     auto sidecar = FrameSidecar(request, location, frame, data_name);
     if (request.Format == ExportFormat::SigMF) {
@@ -457,16 +489,27 @@ void WriteFrame(const BatchRequest &request, const GenerationConfig &config, con
     {
         std::ofstream data_file(request.OutputDir / data_name, std::ios::binary | std::ios::noreplace);
         std::ofstream sidecar_file(request.OutputDir / MetadataPath(data_name), std::ios::binary | std::ios::noreplace);
-        data_file.exceptions(std::ios::badbit | std::ios::failbit);
-        sidecar_file.exceptions(std::ios::badbit | std::ios::failbit);
-        WriteSamples(data_file, std::span<const std::complex<float>>(frame.Samples), frame.SampleRateHz,
-                     request.Format);
+        if (!data_file || !sidecar_file) {
+            return std::unexpected("Cannot create the frame files for " + data_name);
+        }
+        if (const auto written = WriteSamples(data_file, std::span<const std::complex<float>>(frame.Samples),
+                                              frame.SampleRateHz, request.Format);
+            !written.has_value()) {
+            return written;
+        }
         sidecar_file << sidecar;
         data_file.close();
         sidecar_file.close();
+        if (data_file.fail() || sidecar_file.fail()) {
+            return std::unexpected("Failed writing the frame files for " + data_name);
+        }
     }
     manifest << ManifestRecord(request, location, frame, data_name);
     manifest.flush();
+    if (!manifest) {
+        return std::unexpected(std::string("Failed writing the batch manifest"));
+    }
+    return {};
 }
 
 // endregion
@@ -522,16 +565,16 @@ std::uint32_t DeriveImpairmentSeed(const std::uint32_t base_seed, const Modulati
  * @param[in] base          Base configuration.
  * @param[in] waveform      Waveform of the frame, replacing the base modulation.
  * @param[in] frame_size    Samples per frame, 1 to MaxSignalSamples.
- * @note    Throws std::invalid_argument for an unsupported waveform, frame size or configuration, and
- *          std::length_error when the frame with its guard symbols exceeds the symbol limit or the crop does not
- *          fit the generated buffer.
+ * @return  Nothing on success; an error for an unsupported waveform, frame size or configuration, or when the
+ *          frame with its guard symbols exceeds the symbol limit or the crop does not fit the generated buffer.
  */
-void ValidateFrameRequest(const GenerationConfig &base, const Modulation waveform, const int frame_size) {
+std::expected<void, std::string> ValidateFrameRequest(const GenerationConfig &base, const Modulation waveform,
+                                                      const int frame_size) {
     if (!IsValid(waveform)) {
-        throw std::invalid_argument("Unsupported modulation");
+        return std::unexpected(std::string("Unsupported modulation"));
     }
     if (frame_size < 1 || static_cast<std::size_t>(frame_size) > MaxSignalSamples) {
-        throw std::invalid_argument("Frame size must be 1–4194304 samples");
+        return std::unexpected(std::string("Frame size must be 1–4194304 samples"));
     }
     auto config = base;
     config.Modulation = waveform;
@@ -542,27 +585,31 @@ void ValidateFrameRequest(const GenerationConfig &base, const Modulation wavefor
         // WGN ignores the SNR axis entirely; any base AWGN setting is inactive
         config.Awgn.Enabled = false;
         config.Impairments = {};
-        Validate(config);
-        return;
+        return Validate(config);
     }
     // Validate pulse, rate and gain ranges with a trivial length before the frame arithmetic
     config.SymbolCount = 1;
-    Validate(config);
+    if (const auto validated = Validate(config); !validated.has_value()) {
+        return validated;
+    }
     const auto samples_per_symbol = static_cast<std::size_t>(config.SamplesPerSymbol);
     const auto guard = GuardSymbols(config);
     const auto symbols = PayloadSymbols(frame_size, samples_per_symbol) + 2 * guard;
     if (symbols > MaxFrameSymbols) {
-        throw std::length_error("Frame generation exceeds symbol limit including guards");
+        return std::unexpected(std::string("Frame generation exceeds symbol limit including guards"));
     }
     config.SymbolCount = static_cast<int>(symbols);
-    Validate(config);
+    if (const auto validated = Validate(config); !validated.has_value()) {
+        return validated;
+    }
     const auto taps =
         UsesRrc(config) ? static_cast<std::size_t>(config.SpanSymbols) * samples_per_symbol + 1 : samples_per_symbol;
     const auto full_size = (symbols - 1) * samples_per_symbol + taps + QuadratureDelaySamples(config);
     const auto offset = guard * samples_per_symbol + (UsesRrc(config) ? (taps - 1) / 2 : 0);
     if (offset + static_cast<std::size_t>(frame_size) > full_size) {
-        throw std::length_error("Frame crop exceeds generated buffer");
+        return std::unexpected(std::string("Frame crop exceeds generated buffer"));
     }
+    return {};
 }
 
 /**
@@ -572,14 +619,17 @@ void ValidateFrameRequest(const GenerationConfig &base, const Modulation wavefor
  * @param[in] frame_index   Index of the frame within its point; feeds the seed derivation.
  * @param[in] snr_db        Enables AWGN at this SNR for linear waveforms; empty keeps the base noise setting.
  *                          Noise sources ignore it.
- * @return  The frame. Its timestamps always start at zero; the crop offset is reported separately.
+ * @return  The frame; its timestamps always start at zero and the crop offset is reported separately. An error
+ *          like ValidateFrameRequest(), or a generation, AWGN or impairment failure.
  * @note    Symbol frames are generated with guard symbols and cropped after the filter delay. AWGN measures its
- *          reference power over the retained clean frame; impairments run after it on the cropped frame. Throws
- *          like ValidateFrameRequest().
+ *          reference power over the retained clean frame; impairments run after it on the cropped frame.
  */
-FrameResult GenerateFrame(const GenerationConfig &base, const int frame_size, const std::size_t frame_index,
-                          const std::optional<double> &snr_db) {
-    ValidateFrameRequest(base, base.Modulation, frame_size);
+std::expected<FrameResult, std::string> GenerateFrame(const GenerationConfig &base, const int frame_size,
+                                                      const std::size_t frame_index,
+                                                      const std::optional<double> &snr_db) {
+    if (const auto validated = ValidateFrameRequest(base, base.Modulation, frame_size); !validated.has_value()) {
+        return std::unexpected(validated.error());
+    }
     FrameResult frame;
     frame.DataSeed = DeriveDataSeed(base.Seed, base.Modulation, frame_index);
     frame.NoiseSeed = DeriveNoiseSeed(base.Seed, base.Modulation, frame_index, base.NoiseSeed);
@@ -596,13 +646,25 @@ FrameResult GenerateFrame(const GenerationConfig &base, const int frame_size, co
     if (WaveformFamily(base.Modulation) == Family::Noise) {
         return GenerateNoiseFrame(config, frame_size, std::move(frame));
     }
-    frame = GenerateSymbolFrame(config, frame_size, std::move(frame));
+    const auto generated = GenerateSymbolFrame(config, frame_size, std::move(frame));
+    if (!generated.has_value()) {
+        return std::unexpected(generated.error());
+    }
+    frame = std::move(*generated);
     if (effective_snr) {
-        frame.Noise = AddAwgn(frame.Samples, 0, frame.Samples.size(), *effective_snr, frame.NoiseSeed);
+        const auto noise = AddAwgn(frame.Samples, 0, frame.Samples.size(), *effective_snr, frame.NoiseSeed);
+        if (!noise.has_value()) {
+            return std::unexpected(noise.error());
+        }
+        frame.Noise = *noise;
     }
     if (base.Impairments.Active()) {
         frame.ImpairmentSeed = DeriveImpairmentSeed(base.Seed, base.Modulation, frame_index, base.ImpairmentSeed);
-        ApplyImpairments(frame.Samples, frame.SampleRateHz, base.Impairments, frame.ImpairmentSeed);
+        if (const auto applied =
+                ApplyImpairments(frame.Samples, frame.SampleRateHz, base.Impairments, frame.ImpairmentSeed);
+            !applied.has_value()) {
+            return std::unexpected(applied.error());
+        }
         frame.ImpairmentsApplied = true;
     }
     return frame;
@@ -611,47 +673,62 @@ FrameResult GenerateFrame(const GenerationConfig &base, const int frame_size, co
 /**
  * @brief   Validates a complete sweep, including checked size arithmetic, before any output is created.
  * @param[in] request   Batch request.
- * @note    Throws std::invalid_argument for invalid settings, duplicate or invalid axis values and frames that
- *          cannot be generated, std::runtime_error when the output directory already exists, and std::length_error
- *          when the sweep exceeds MaxBatchFrames frames.
+ * @return  Nothing on success; an error for invalid settings, duplicate or invalid axis values, frames that
+ *          cannot be generated, an existing output directory, or a sweep beyond MaxBatchFrames frames.
  */
-void ValidateBatch(const BatchRequest &request) {
-    ValidateBatchSettings(request);
+std::expected<void, std::string> ValidateBatch(const BatchRequest &request) {
+    if (const auto checked = ValidateBatchSettings(request); !checked.has_value()) {
+        return checked;
+    }
     const auto waveforms = EffectiveWaveforms(request);
     const auto seeds = EffectiveSeeds(request);
-    ValidateSweepAxes(waveforms, seeds, request.SnrsDb);
+    if (const auto checked = ValidateSweepAxes(waveforms, seeds, request.SnrsDb); !checked.has_value()) {
+        return checked;
+    }
     std::size_t points = 0;
     for (const auto waveform : waveforms) {
-        ValidateFrameRequest(request.Base, waveform, request.FrameSize);
-        ValidateAwgnSettings(waveform, request);
+        if (const auto checked = ValidateFrameRequest(request.Base, waveform, request.FrameSize);
+            !checked.has_value()) {
+            return checked;
+        }
+        if (const auto checked = ValidateAwgnSettings(waveform, request); !checked.has_value()) {
+            return checked;
+        }
         const auto per_seed = PointsPerSeed(waveform, request);
         if (seeds.size() > (MaxBatchFrames - points) / per_seed) {
-            throw std::length_error("Batch exceeds frame limit");
+            return std::unexpected(std::string("Batch exceeds frame limit"));
         }
         points += seeds.size() * per_seed;
     }
     if (request.FramesPerPoint > static_cast<int>(MaxBatchFrames / points)) {
-        throw std::length_error("Batch exceeds frame limit");
+        return std::unexpected(std::string("Batch exceeds frame limit"));
     }
+    return {};
 }
 
 /**
  * @brief   Validates and runs a sweep, writing every frame, its sidecar and the manifest to a new directory.
  * @param[in] request   Batch request; the output directory must not exist (existing directories are left
  *                      untouched).
- * @return  The number of points and frames written.
- * @note    Throws like ValidateBatch() before creating anything. Fails fast on generation or write errors and
- *          keeps the frames already completed; an interrupted run simply lacks the summary record.
+ * @return  The number of points and frames written; an error like ValidateBatch() before creating anything, or
+ *          the first generation or write failure.
+ * @note    Fails fast and keeps the frames already completed; an interrupted run simply lacks the summary record.
  */
-BatchSummary RunBatch(const BatchRequest &request) {
-    ValidateBatch(request);
-    if (!std::filesystem::create_directory(request.OutputDir)) {
-        throw std::runtime_error("Batch output directory already exists: " + request.OutputDir.string());
+std::expected<BatchSummary, std::string> RunBatch(const BatchRequest &request) {
+    if (const auto validated = ValidateBatch(request); !validated.has_value()) {
+        return std::unexpected(validated.error());
+    }
+    std::error_code ec;
+    if (!std::filesystem::create_directory(request.OutputDir, ec) || ec) {
+        return std::unexpected("Batch output directory already exists: " + request.OutputDir.string());
     }
     const auto waveforms = EffectiveWaveforms(request);
     const auto seeds = EffectiveSeeds(request);
     // Total counts are known up front; the header advertises the full sweep
     auto manifest = OpenManifest(request, CountPoints(waveforms, seeds.size(), request));
+    if (!manifest.has_value()) {
+        return std::unexpected(manifest.error());
+    }
     BatchSummary summary;
     FrameLocation location;
     for (const auto waveform : waveforms) {
@@ -666,7 +743,9 @@ BatchSummary RunBatch(const BatchRequest &request) {
                 config.Seed = seed;
                 for (auto frame_index = 0; frame_index < request.FramesPerPoint; ++frame_index) {
                     location.FrameIndex = static_cast<std::size_t>(frame_index);
-                    WriteFrame(request, config, location, manifest);
+                    if (const auto written = WriteFrame(request, config, location, *manifest); !written.has_value()) {
+                        return std::unexpected(written.error());
+                    }
                     ++summary.FrameCount;
                 }
                 ++location.PointIndex;
@@ -674,9 +753,12 @@ BatchSummary RunBatch(const BatchRequest &request) {
             }
         }
     }
-    manifest << ManifestSummary(summary);
-    manifest.flush();
-    manifest.close();
+    *manifest << ManifestSummary(summary);
+    manifest->flush();
+    manifest->close();
+    if (manifest->fail()) {
+        return std::unexpected(std::string("Failed writing the batch manifest summary"));
+    }
     return summary;
 }
 

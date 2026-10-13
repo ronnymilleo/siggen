@@ -5,6 +5,7 @@
 
 #include "summary_window.h"
 
+#include "theme.h"
 #include "theory.h"
 #include "widgets.h"
 #include <complex>
@@ -26,7 +27,7 @@ void SummaryWindow::Draw() {
         return;
     }
     if (result->Config != m_Session.GetConfig()) {
-        ImGui::TextColored(WarningColor, "Settings changed. Generate to update the displayed result.");
+        ImGui::TextColored(GetWarningTextColor(), "Settings changed. Generate to update the displayed result.");
     }
     if (result->Family == Core::Family::Noise) {
         DrawNoiseSummary(*result);
@@ -81,30 +82,6 @@ void SummaryWindow::DrawSymbolSummary(const Core::GeneratedSignal &result) {
     }
 }
 
-/**
- * @brief   Shows the reference demodulator's BER, bit errors and SER, the measured Eb/N0 and the textbook BER there.
- * @param[in] result  The last generated signal; only its waveform is read.
- * @note    Draws nothing for waveforms without a reference receiver.
- */
-void SummaryWindow::DrawBitErrors(const Core::GeneratedSignal &result) {
-    const auto &errors = m_Session.GetBitErrors();
-    const auto eb_n0_db = m_Session.GetMeasuredEbN0Db();
-    if (!errors || !eb_n0_db) {
-        return;
-    }
-    Metric("BER", errors->BitErrorCount ? FormatNumber("%.3g", errors->Ber()) : std::string("0"), true);
-    Hint("Bit error rate of the ideal reference receiver: perfect timing, known gain, matched filter and no carrier "
-         "recovery. Edge symbols are excluded, as for EVM.");
-    Metric("Bit errors", std::to_string(errors->BitErrorCount) + " / " + std::to_string(errors->BitCount));
-    Metric("SER", FormatNumber("%.3g", errors->Ser()));
-    Metric("Eb/N0 (measured)", FormatNumber("%.4g dB", *eb_n0_db));
-    if (const auto theory = Core::TheoreticalBer(result.Config.Modulation, *eb_n0_db)) {
-        Metric("Theory BER", FormatNumber("%.3g", *theory));
-        Hint("Textbook BER of an ideal receiver at the measured Eb/N0. A short signal has few bits, so the measured "
-             "value scatters around it; the BER tab sweeps many.");
-    }
-}
-
 void SummaryWindow::DrawMeasurements(const Core::GeneratedSignal &result) {
     const auto &power = m_Session.GetPowerStatistics();
     const auto &accuracy = m_Session.GetSymbolAccuracy();
@@ -129,6 +106,30 @@ void SummaryWindow::DrawMeasurements(const Core::GeneratedSignal &result) {
                                "filter. The measured value varies with the noise realization.",
                                result.Noise.RequestedSnrDb, result.Noise.RequestedSnrDb + accuracy->ExpectedOffsetDb);
         }
+    }
+}
+
+/**
+ * @brief   Shows the reference demodulator's BER, bit errors and SER, the measured Eb/N0 and the textbook BER there.
+ * @param[in] result  The last generated signal; only its waveform is read.
+ * @note    Draws nothing for waveforms without a reference receiver.
+ */
+void SummaryWindow::DrawBitErrors(const Core::GeneratedSignal &result) {
+    const auto &errors = m_Session.GetBitErrors();
+    const auto eb_n0_db = m_Session.GetMeasuredEbN0Db();
+    if (!errors || !eb_n0_db) {
+        return;
+    }
+    Metric("BER", errors->BitErrorCount ? FormatNumber("%.3g", errors->Ber()) : std::string("0"), true);
+    Hint("Bit error rate of the ideal reference receiver: perfect timing, known gain, matched filter and no carrier "
+         "recovery. Edge symbols are excluded, as for EVM.");
+    Metric("Bit errors", std::to_string(errors->BitErrorCount) + " / " + std::to_string(errors->BitCount));
+    Metric("SER", FormatNumber("%.3g", errors->Ser()));
+    Metric("Eb/N0 (measured)", FormatNumber("%.4g dB", *eb_n0_db));
+    if (const auto theory = Core::TheoreticalBer(result.Config.Modulation, *eb_n0_db)) {
+        Metric("Theory BER", FormatNumber("%.3g", *theory));
+        Hint("Textbook BER of an ideal receiver at the measured Eb/N0. A short signal has few bits, so the measured "
+             "value scatters around it; the BER tab sweeps many.");
     }
 }
 

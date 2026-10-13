@@ -41,7 +41,7 @@ target_include_directories(siggen-tests
 
 target_compile_definitions(siggen-tests
         PRIVATE
-            SIGGEN_PRESET_DIR="${PROJECT_SOURCE_DIR}/presets"
+            SIGGEN_PRESET_DIR="${PROJECT_SOURCE_DIR}/app-gui/examples"
 )
 
 target_link_libraries(siggen-tests
@@ -58,7 +58,7 @@ gtest_discover_tests(siggen-tests DISCOVERY_MODE PRE_TEST)
 # Command line tests
 # =============================================================================
 
-if(SIGGEN_BUILD_APP)
+if(SIGGEN_BUILD_CLI)
     add_executable(siggen-cli-tests
                 cli_config_test.cpp
                 command_line_test.cpp
@@ -76,9 +76,8 @@ if(SIGGEN_BUILD_APP)
     # Runs the real executable end to end, without a display
     add_test(NAME CLI.EndToEnd
             COMMAND ${CMAKE_COMMAND}
-                -DEXECUTABLE=$<TARGET_FILE:siggen>
+                -DEXECUTABLE=$<TARGET_FILE:siggen-cli>
                 -DWORK_DIR=${CMAKE_CURRENT_BINARY_DIR}/cli-integration
-                -DHAS_GUI=${SIGGEN_BUILD_GUI}
                 -P ${CMAKE_CURRENT_SOURCE_DIR}/cli_integration.cmake
     )
 endif()

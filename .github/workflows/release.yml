@@ -1,0 +1,128 @@
+name: Release
+
+# A version tag, such as v0.5.0, builds the AppImage, the Windows zip and the macOS disk image and publishes them
+# with a GitHub release of that tag; a tag with a suffix, such as v0.5.0-rc1, publishes a pre-release
+on:
+  push:
+    tags:
+      - 'v*'
+
+jobs:
+  appimage:
+    runs-on: ubuntu-24.04
+    # The oldest base the AppImage supports, the same one packaging/appimage/build.sh is tested in
+    container: ubuntu:24.04
+    steps:
+      # git must exist before checkout, or the submodules are not fetched
+      - name: Install git
+        run: apt-get update && apt-get install -y --no-install-recommends git ca-certificates
+
+      - name: Check out the repository
+        uses: actions/checkout@v7
+        with:
+          submodules: recursive
+
+      - name: Build the AppImage
+        run: packaging/appimage/build.sh
+
+      - name: Keep the AppImage for the release
+        uses: actions/upload-artifact@v4
+        with:
+          name: appimage
+          path: out/appimage/*.AppImage
+
+  windows:
+    # windows-latest is the Windows Server 2025 image with Visual Studio 2026, CMake and Ninja; every dependency
+    # comes from its vendor submodule and the C++ runtime is linked statically, so the zip runs on any Windows 10
+    # or newer
+    runs-on: windows-latest
+    steps:
+      - name: Check out the repository
+        uses: actions/checkout@v7
+        with:
+          submodules: recursive
+
+      # Ninja looks for cl in the environment, which vcvarsall sets up
+      - name: Set up the MSVC environment
+        uses: ilammy/msvc-dev-cmd@v1
+
+      - name: Build
+        run: |
+          cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Release
+          cmake --build build
+
+      # The install rules lay out the folder: the programs, the icon, the notices and the licenses
+      - name: Build the zip
+        run: |
+          $Name = "siggen-$('${{ github.ref_name }}'.TrimStart('v'))-windows-x64"
+          cmake --install build --prefix "out/zip/$Name"
+          Compress-Archive "out/zip/$Name" "out/zip/$Name.zip"
+
+      - name: Keep the zip for the release
+        uses: actions/upload-artifact@v4
+        with:
+          name: windows
+          path: out/zip/*.zip
+
+  macos:
+    # macos-26 is an Apple silicon image with Xcode 26, whose SDK the macOS 26 deployment target of the project
+    # needs; the disk image is for Apple silicon
+    runs-on: macos-26
+    steps:
+      - name: Install build tools
+        run: brew install cmake ninja pkgconf
+
+      - name: Check out the repository
+        uses: actions/checkout@v7
+        with:
+          submodules: recursive
+
+      - name: Build the disk image
+        run: packaging/macos/build.sh
+
+      - name: Keep the disk image for the release
+        uses: actions/upload-artifact@v4
+        with:
+          name: macos
+          path: out/macos/*.dmg
+
+  # One job publishes every file, so the release is created once
+  publish:
+    needs: [appimage, windows, macos]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      # The attestation signs with a Sigstore certificate from the workflow's OIDC token and stores the record
+      id-token: write
+      attestations: write
+      artifact-metadata: write
+    steps:
+      - name: Collect the AppImage, the zip and the disk image
+        uses: actions/download-artifact@v4
+        with:
+          path: release
+          merge-multiple: true
+
+      # Users check a download with sha256sum -c SHA256SUMS on Linux, certutil -hashfile <file> SHA256 on Windows,
+      # or shasum -a 256 -c SHA256SUMS on macOS
+      - name: Write the checksums
+        working-directory: release
+        run: sha256sum *.AppImage *.zip *.dmg > SHA256SUMS
+
+      # Proves the files were built by this workflow from the tagged commit:
+      # gh attestation verify <file> --repo ronnymilleo/siggen
+      - name: Attest the build provenance
+        uses: actions/attest@v4
+        with:
+          subject-path: |
+            release/*.AppImage
+            release/*.zip
+            release/*.dmg
+
+      - name: Publish the release
+        uses: softprops/action-gh-release@v3
+        with:
+          files: release/*
+          generate_release_notes: true
+          # A tag with a suffix, such as v0.5.0-rc1, is a test build and never becomes the latest release
+          prerelease: ${{ contains(github.ref_name, '-') }}

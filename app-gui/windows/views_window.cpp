@@ -8,6 +8,7 @@
 #include "help_topics.h"
 #include "implot.h"
 #include "plot_figures.h"
+#include "theme.h"
 #include "theory.h"
 #include "widgets.h"
 #include <algorithm>
@@ -123,11 +124,11 @@ void ViewsWindow::DrawFrequencyTab() {
     if (ImPlot::BeginPlot("Instantaneous frequency", ImVec2(-1, -1))) {
         ImPlot::SetupAxes("Time (s)", "Frequency (Hz)", ImPlotAxisFlags_AutoFit, ImPlotAxisFlags_AutoFit);
         ImPlot::SetNextLineStyle(InPhaseColor);
-        ImPlot::PlotLine("Estimate", plots.FreqTime.data(), plots.FreqEstimate.data(),
-                         static_cast<int>(plots.FreqTime.size()));
+        ImPlot::PlotLine("Estimate", plots.FrequencyTime.data(), plots.FrequencyEstimate.data(),
+                         static_cast<int>(plots.FrequencyTime.size()));
         ImPlot::SetNextLineStyle(QuadratureColor, 2.f);
-        ImPlot::PlotLine("Nominal tone", plots.FreqTime.data(), plots.FreqNominal.data(),
-                         static_cast<int>(plots.FreqTime.size()));
+        ImPlot::PlotLine("Nominal tone", plots.FrequencyTime.data(), plots.FrequencyNominal.data(),
+                         static_cast<int>(plots.FrequencyTime.size()));
         ImPlot::EndPlot();
     }
     ImGui::EndTabItem();
@@ -455,7 +456,7 @@ void ViewsWindow::DrawBerPlot(const Core::GeneratedSignal &result) {
         ExportImageButton("ber", [&] { return Core::BerFigure(points, swept.Modulation, current); });
     }
     if (swept != result.Config) {
-        ImGui::TextColored(WarningColor,
+        ImGui::TextColored(GetWarningTextColor(),
                            "This curve was measured for %s with other settings than the displayed signal.",
                            Core::ModulationName(swept.Modulation));
     }
@@ -548,16 +549,11 @@ void ViewsWindow::DrawSpectrumTab() {
  */
 void ViewsWindow::ExportImageButton(const char *stem, const std::function<Core::Figure()> &build) {
     if (ImGui::Button("Export image...")) {
-        try {
-            m_ImageFigure = build();
-            std::snprintf(m_ImagePath, sizeof m_ImagePath, "siggen-%s.%s", stem, m_ImageFormat == 0 ? "png" : "svg");
-            m_ImageStatus.clear();
-            m_ImageConfirmOverwrite = false;
-            m_ImageOpenRequested = true;
-        } catch (const std::exception &error) {
-            spdlog::error("Unable to prepare image: {}", error.what());
-            m_Session.SetError(error.what());
-        }
+        m_ImageFigure = build();
+        std::snprintf(m_ImagePath, sizeof m_ImagePath, "siggen-%s.%s", stem, m_ImageFormat == 0 ? "png" : "svg");
+        m_ImageStatus.clear();
+        m_ImageConfirmOverwrite = false;
+        m_ImageOpenRequested = true;
     }
     Hint("Save this plot as a PNG or SVG image for slides and reports. The image is drawn from the plotted data, so it "
          "does not depend on the window size.");
@@ -597,13 +593,12 @@ void ViewsWindow::DrawImageExportDialog() {
     m_ImageHeight = std::clamp(m_ImageHeight, Core::MinImageSize, Core::MaxImageSize);
     ImGui::Combo("Background", &m_ImageTheme, "Dark (matches the app)\0Light (for print)\0");
     if (ImGui::Button("Save image")) {
-        try {
-            m_ImageConfirmOverwrite = std::filesystem::exists(m_ImagePath);
-            if (!m_ImageConfirmOverwrite) {
-                ExportImage(false);
-            }
-        } catch (const std::exception &error) {
-            m_ImageStatus = error.what();
+        std::error_code ec;
+        m_ImageConfirmOverwrite = std::filesystem::exists(m_ImagePath, ec);
+        if (ec) {
+            m_ImageStatus = ec.message();
+        } else if (!m_ImageConfirmOverwrite) {
+            ExportImage(false);
         }
     }
     if (m_ImageConfirmOverwrite) {
@@ -631,20 +626,21 @@ void ViewsWindow::DrawImageExportDialog() {
  * @param[in] overwrite  True to replace an existing file.
  */
 void ViewsWindow::ExportImage(bool overwrite) {
-    try {
-        Core::ImageStyle style;
-        style.Width = m_ImageWidth;
-        style.Height = m_ImageHeight;
-        style.Dark = m_ImageTheme == 0;
+    Core::ImageStyle style;
+    style.Width = m_ImageWidth;
+    style.Height = m_ImageHeight;
+    style.Dark = m_ImageTheme == 0;
+    const auto exported =
         Core::ExportFigure(m_ImagePath, *m_ImageFigure,
                            m_ImageFormat == 0 ? Core::ImageFormat::PNG : Core::ImageFormat::SVG, style, overwrite);
-        spdlog::info("Exported image {} ({}x{})", m_ImagePath, style.Width, style.Height);
-        m_ImageStatus = std::string("Saved ") + m_ImagePath;
-        m_ImageConfirmOverwrite = false;
-    } catch (const std::exception &error) {
-        spdlog::error("Image export to {} failed: {}", m_ImagePath, error.what());
-        m_ImageStatus = std::string("Export failed: ") + error.what();
+    if (!exported.has_value()) {
+        spdlog::error("Image export to {} failed: {}", m_ImagePath, exported.error());
+        m_ImageStatus = "Export failed: " + exported.error();
+        return;
     }
+    spdlog::info("Exported image {} ({}x{})", m_ImagePath, style.Width, style.Height);
+    m_ImageStatus = std::string("Saved ") + m_ImagePath;
+    m_ImageConfirmOverwrite = false;
 }
 
 } // namespace GUI
