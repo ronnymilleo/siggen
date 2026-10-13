@@ -176,8 +176,17 @@ endif()
 # =============================================================================
 
 if(SIGGEN_BUILD_GUI AND EXISTS "${CMAKE_SOURCE_DIR}/assets")
+    # The window icon, assets/icon.png, travels with the program: the GUI looks for it next to the executable and,
+    # on macOS, under ../Resources. In a bundle the assets must land in Contents/Resources, not next to the
+    # executable in Contents/MacOS: codesign treats every non-code file under Contents/MacOS as an unsigned
+    # nested-code subcomponent and refuses to seal the bundle (like imcsim, Contents/MacOS carries only the program).
+    if(APPLE)
+        set(SIGGEN_ASSETS_DEST "$<TARGET_FILE_DIR:siggen>/../Resources/assets")
+    else()
+        set(SIGGEN_ASSETS_DEST "$<TARGET_FILE_DIR:siggen>/assets")
+    endif()
     add_custom_command(TARGET siggen POST_BUILD
-            COMMAND ${CMAKE_COMMAND} -E copy_directory "${CMAKE_SOURCE_DIR}/assets" "$<TARGET_FILE_DIR:siggen>/assets"
+            COMMAND ${CMAKE_COMMAND} -E copy_directory "${CMAKE_SOURCE_DIR}/assets" "${SIGGEN_ASSETS_DEST}"
             COMMENT "Copying assets next to the executable"
             VERBATIM
     )

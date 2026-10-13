@@ -160,12 +160,15 @@ jobs:
         with:
           submodules: recursive
 
-      # The Python package tests need NumPy for the interpreter CMake discovers
+      # The Python package tests need NumPy for the interpreter CMake discovers. Each step runs in a fresh shell, so
+      # the venv is put on GITHUB_PATH for the Configure step's find_package(Python3) to find this numpy-enabled
+      # interpreter (activating it here would not carry over to the next step).
       - name: Install NumPy
         run: |
           python3 -m venv /tmp/buildenv
           source /tmp/buildenv/bin/activate
           python3 -m pip install --upgrade numpy
+          echo "/tmp/buildenv/bin" >> "$GITHUB_PATH"
 
       - name: Configure
         run: >-

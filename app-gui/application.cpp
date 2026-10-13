@@ -31,8 +31,9 @@ constexpr bool GPUDebugMode = true;
 #endif
 
 /**
- * @brief   Locates assets/icon.png: next to the executable (build tree, Windows zip, macOS bundle), in the shared
- *          data folder of an installation (Linux, AppImage) or, failing those, in the working directory.
+ * @brief   Locates assets/icon.png: next to the executable (build tree, Windows zip), in a macOS bundle's
+ *          Contents/Resources (../Resources from the executable in Contents/MacOS), in the shared data folder of an
+ *          installation (Linux, AppImage) or, failing those, in the working directory.
  * @return  The first candidate that exists, or the working-directory relative path.
  */
 std::string FindWindowIcon() {
@@ -40,6 +41,7 @@ std::string FindWindowIcon() {
     // In SDL3 this is a cached path that must not be freed
     if (const char *base = SDL_GetBasePath(); base != nullptr) {
         candidates.push_back(std::string(base) + "assets/icon.png");
+        candidates.push_back(std::string(base) + "../Resources/assets/icon.png"); // macOS bundle
         candidates.push_back(std::string(base) + "../share/siggen/assets/icon.png");
     }
     candidates.emplace_back("assets/icon.png");
