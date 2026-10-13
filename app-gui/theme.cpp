@@ -312,6 +312,13 @@ void ApplyTheme() {
 }
 
 /**
+ * @brief   Loads the bundled interface font, Inter; the atlas keeps the default glyphs as fallback.
+ */
+void LoadThemeFonts() {
+    AddBundledFont(InterFont);
+}
+
+/**
  * @brief   Keeps the chosen theme in imgui.ini, by name, and applies it when the file is read.
  * @note    Call once after the ImGui context exists and before the first frame.
  */
@@ -340,13 +347,6 @@ void RegisterThemeSettingsHandler() {
         buffer->appendf("Name=%s\n\n", GetPalette().Name);
     };
     ImGui::AddSettingsHandler(&handler);
-}
-
-/**
- * @brief   Loads the bundled interface font, Inter; the atlas keeps the default glyphs as fallback.
- */
-void LoadThemeFonts() {
-    AddBundledFont(InterFont);
 }
 
 /**

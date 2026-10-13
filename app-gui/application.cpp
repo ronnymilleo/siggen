@@ -226,6 +226,12 @@ void Application::PollEvents() {
     }
 }
 
+void Application::NewFrame() {
+    ImGui_ImplSDLGPU3_NewFrame();
+    ImGui_ImplSDL3_NewFrame();
+    ImGui::NewFrame();
+}
+
 // The window title names the document, with an asterisk while it has unsaved changes, as editors do
 void Application::UpdateWindowTitle() {
     const GeneratorSession &session = m_WindowManager.GetSession();
@@ -236,12 +242,6 @@ void Application::UpdateWindowTitle() {
         SDL_SetWindowTitle(m_SDLWindow, title.c_str());
         m_WindowTitle = title;
     }
-}
-
-void Application::NewFrame() {
-    ImGui_ImplSDLGPU3_NewFrame();
-    ImGui_ImplSDL3_NewFrame();
-    ImGui::NewFrame();
 }
 
 void Application::EndFrame() {

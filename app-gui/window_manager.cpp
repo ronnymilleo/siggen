@@ -90,25 +90,6 @@ const GeneratorSession &WindowManager::GetSession() const {
     return m_Session;
 }
 
-// ImGuiMod_Shortcut is Ctrl everywhere but macOS, where it is Cmd, matching the menu labels
-void WindowManager::HandleShortcuts() {
-    if (ImGui::GetIO().WantTextInput) {
-        return;
-    }
-    if (ImGui::IsKeyChordPressed(ImGuiMod_Shortcut | ImGuiKey_O)) {
-        std::snprintf(m_DialogPath, sizeof m_DialogPath, "%s", m_Session.GetDocumentPath().c_str());
-        m_OpenDialogOpen = true;
-    }
-    if (ImGui::IsKeyChordPressed(ImGuiMod_Shortcut | ImGuiMod_Shift | ImGuiKey_S)) {
-        OpenSaveDialog();
-    } else if (ImGui::IsKeyChordPressed(ImGuiMod_Shortcut | ImGuiKey_S)) {
-        SavePreset();
-    }
-    if (ImGui::IsKeyChordPressed(ImGuiMod_Shortcut | ImGuiKey_Q)) {
-        RequestQuit();
-    }
-}
-
 void WindowManager::DrawMainMenuBar() {
     if (!ImGui::BeginMainMenuBar()) {
         return;
@@ -181,23 +162,23 @@ void WindowManager::DrawViewMenu() {
     ImGui::EndMenu();
 }
 
-// Without a path yet, saving asks for a destination first
-void WindowManager::SavePreset() {
-    const auto &path = m_Session.GetDocumentPath();
-    if (path.empty()) {
-        OpenSaveDialog();
+// ImGuiMod_Shortcut is Ctrl everywhere but macOS, where it is Cmd, matching the menu labels
+void WindowManager::HandleShortcuts() {
+    if (ImGui::GetIO().WantTextInput) {
         return;
     }
-    if (m_Session.SavePreset(path) && m_QuitAfterSave) {
-        m_QuitConfirmed = true;
-        m_QuitAfterSave = false;
+    if (ImGui::IsKeyChordPressed(ImGuiMod_Shortcut | ImGuiKey_O)) {
+        std::snprintf(m_DialogPath, sizeof m_DialogPath, "%s", m_Session.GetDocumentPath().c_str());
+        m_OpenDialogOpen = true;
     }
-}
-
-void WindowManager::OpenSaveDialog() {
-    const auto &path = m_Session.GetDocumentPath();
-    std::snprintf(m_DialogPath, sizeof m_DialogPath, "%s", path.empty() ? "custom.preset" : path.c_str());
-    m_SaveDialogOpen = true;
+    if (ImGui::IsKeyChordPressed(ImGuiMod_Shortcut | ImGuiMod_Shift | ImGuiKey_S)) {
+        OpenSaveDialog();
+    } else if (ImGui::IsKeyChordPressed(ImGuiMod_Shortcut | ImGuiKey_S)) {
+        SavePreset();
+    }
+    if (ImGui::IsKeyChordPressed(ImGuiMod_Shortcut | ImGuiKey_Q)) {
+        RequestQuit();
+    }
 }
 
 void WindowManager::DrawQuitConfirmation() {
@@ -287,6 +268,25 @@ void WindowManager::DrawSaveDialog() {
         }
         ImGui::EndPopup();
     }
+}
+
+// Without a path yet, saving asks for a destination first
+void WindowManager::SavePreset() {
+    const auto &path = m_Session.GetDocumentPath();
+    if (path.empty()) {
+        OpenSaveDialog();
+        return;
+    }
+    if (m_Session.SavePreset(path) && m_QuitAfterSave) {
+        m_QuitConfirmed = true;
+        m_QuitAfterSave = false;
+    }
+}
+
+void WindowManager::OpenSaveDialog() {
+    const auto &path = m_Session.GetDocumentPath();
+    std::snprintf(m_DialogPath, sizeof m_DialogPath, "%s", path.empty() ? "custom.preset" : path.c_str());
+    m_SaveDialogOpen = true;
 }
 
 // Signal Setup on the left, Signal Summary above Signal Views on the right. Must run before the windows are drawn.

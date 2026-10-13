@@ -166,15 +166,6 @@ std::size_t GeneratorSession::GetSettingsVersion() const {
     return m_SettingsVersion;
 }
 
-void GeneratorSession::MarkClean() {
-    try {
-        m_CleanSettings = Core::SerializePreset(m_Config);
-    } catch (const std::exception &) {
-        m_CleanSettings.clear();
-    }
-    m_Modified = false;
-}
-
 /**
  * @brief   Starts generating a copy of the current settings in the background and clears the last error.
  * @note    Does nothing while a generation is pending. A failure to start is logged and kept for GetError().
@@ -438,6 +429,15 @@ void GeneratorSession::UpdateSpectrum() {
     std::transform(m_Spectrum.PowerDensity.begin(), m_Spectrum.PowerDensity.end(), m_SpectrumDb.begin(),
                    [](double power) { return 10 * std::log10(std::max(power, 1e-20)); });
     ++m_SpectrumVersion;
+}
+
+void GeneratorSession::MarkClean() {
+    try {
+        m_CleanSettings = Core::SerializePreset(m_Config);
+    } catch (const std::exception &) {
+        m_CleanSettings.clear();
+    }
+    m_Modified = false;
 }
 
 } // namespace GUI
