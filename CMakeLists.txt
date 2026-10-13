@@ -29,15 +29,22 @@ option(SIGGEN_BUILD_PYTHON "Build the shared library used by the Python package"
 
 set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 # Executables and libraries go to out/<build-type>/ of the source tree, like imcsim, independent of the
-# build directory that holds the CMake cache and the object files. Build trees that share a build type
-# also share the output folder.
+# build directory that holds the CMake cache and the object files. A tree whose folder is not the documented
+# plain "build" writes to out/<build-type>-<tree>/ instead, so trees that share a build type (sanitizers,
+# headless) do not overwrite each other's archives and binaries.
 if(NOT CMAKE_BUILD_TYPE)
     set(CMAKE_BUILD_TYPE Debug)
 endif()
 string(TOLOWER "${CMAKE_BUILD_TYPE}" SIGGEN_BUILD_TYPE_LOWER)
-set(CMAKE_RUNTIME_OUTPUT_DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}/out/${SIGGEN_BUILD_TYPE_LOWER}/bin")
-set(CMAKE_LIBRARY_OUTPUT_DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}/out/${SIGGEN_BUILD_TYPE_LOWER}/lib")
-set(CMAKE_ARCHIVE_OUTPUT_DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}/out/${SIGGEN_BUILD_TYPE_LOWER}/lib")
+get_filename_component(SIGGEN_BUILD_TREE "${CMAKE_BINARY_DIR}" NAME)
+set(SIGGEN_OUT_DIR "${CMAKE_CURRENT_SOURCE_DIR}/out/${SIGGEN_BUILD_TYPE_LOWER}")
+if(NOT SIGGEN_BUILD_TREE STREQUAL "build")
+    string(REGEX REPLACE "^(cmake-)?build-?" "" SIGGEN_TREE_SUFFIX "${SIGGEN_BUILD_TREE}")
+    set(SIGGEN_OUT_DIR "${SIGGEN_OUT_DIR}-${SIGGEN_TREE_SUFFIX}")
+endif()
+set(CMAKE_RUNTIME_OUTPUT_DIRECTORY "${SIGGEN_OUT_DIR}/bin")
+set(CMAKE_LIBRARY_OUTPUT_DIRECTORY "${SIGGEN_OUT_DIR}/lib")
+set(CMAKE_ARCHIVE_OUTPUT_DIRECTORY "${SIGGEN_OUT_DIR}/lib")
 
 # C++23, sanitizers and warnings, applied per target through siggen_target_options()
 include(cmake/ProjectOptions.cmake)
