@@ -1,5 +1,9 @@
 # Siggen
 
+[![Release](https://img.shields.io/github/v/release/ronnymilleo/siggen)](https://github.com/ronnymilleo/siggen/releases)
+[![Release Date](https://img.shields.io/github/release-date/ronnymilleo/siggen)](https://github.com/ronnymilleo/siggen/releases)
+[![Coverage](https://codecov.io/gh/ronnymilleo/siggen/branch/main/graph/badge.svg)](https://codecov.io/gh/ronnymilleo/siggen)
+[![CodeFactor](https://www.codefactor.io/repository/github/ronnymilleo/siggen/badge)](https://www.codefactor.io/repository/github/ronnymilleo/siggen)
 [![CI](https://github.com/ronnymilleo/siggen/actions/workflows/ci.yml/badge.svg)](https://github.com/ronnymilleo/siggen/actions/workflows/ci.yml)
 
 A C++23 signal generator with a Dear ImGui/ImPlot desktop application (the
