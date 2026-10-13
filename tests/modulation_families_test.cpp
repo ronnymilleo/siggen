@@ -10,6 +10,7 @@
 #include "measurements.h"
 #include "preset.h"
 #include "signal_analysis.h"
+#include "test_support.h"
 #include <algorithm>
 #include <bit>
 #include <cmath>
@@ -45,7 +46,7 @@ std::vector<Sym> Constellation(Modulation modulation) {
     const int bits_per_symbol = BitsPerSymbol(modulation);
     std::vector<Sym> points;
     for (unsigned v = 0; v < (1u << bits_per_symbol); ++v) {
-        points.push_back(MapSymbols(modulation, Label(v, bits_per_symbol))[0]);
+        points.push_back(Unwrap(MapSymbols(modulation, Label(v, bits_per_symbol)))[0]);
     }
     return points;
 }
@@ -106,7 +107,7 @@ TEST(Qam256, FullConstellationIsGrayAndUnitEnergy) {
     // First four bits select I: 0000 is the most negative level, 1000 the most positive.
     ExpectNear(points[0b00000000], {-15 * static_cast<float>(unit / 2), -15 * static_cast<float>(unit / 2)});
     ExpectNear(points[0b10001000], {15 * static_cast<float>(unit / 2), 15 * static_cast<float>(unit / 2)});
-    EXPECT_THROW(MapSymbols(Modulation::QAM256, "1010101"), std::invalid_argument);
+    EXPECT_FALSE(MapSymbols(Modulation::QAM256, "1010101").has_value());
 }
 
 TEST(Qam256, MaximumExplicitInputAndEvm) {
@@ -116,13 +117,13 @@ TEST(Qam256, MaximumExplicitInputAndEvm) {
     config.SymbolCount = 65536;
     config.Bits.assign(65536 * 8, '0');
     EXPECT_EQ(config.Bits.size(), MaxExplicitBits);
-    EXPECT_NO_THROW(Validate(config));
+    EXPECT_TRUE(Validate(config).has_value());
     config.Bits += '0';
-    EXPECT_THROW(Validate(config), std::invalid_argument);
+    EXPECT_FALSE(Validate(config).has_value());
     GenerationConfig clean;
     clean.Modulation = Modulation::QAM256;
     clean.SymbolCount = 256;
-    const auto accuracy = MeasureSymbolAccuracy(Generate(clean));
+    const auto accuracy = Unwrap(MeasureSymbolAccuracy(Unwrap(Generate(clean))));
     ASSERT_TRUE(accuracy);
     EXPECT_LT(accuracy->EvmRms, 0.01);
 }
@@ -136,11 +137,11 @@ TEST(Differential, DbpskAccumulatesPhaseFlips) {
 TEST(Differential, DqpskGrayIncrementsAndRotationInvariance) {
     const float a = 1 / std::sqrt(2.f);
     // Reference phase 45 degrees; increments 00 -> 0, 01 -> +90, 11 -> +180, 10 -> +270.
-    const auto mapped = MapSymbols(Modulation::DQPSK, "00"
-                                                      "01"
-                                                      "11"
-                                                      "10"
-                                                      "10");
+    const auto mapped = Unwrap(MapSymbols(Modulation::DQPSK, "00"
+                                                             "01"
+                                                             "11"
+                                                             "10"
+                                                             "10"));
     ExpectNear(mapped[0], {a, a});
     ExpectNear(mapped[1], {-a, a});
     ExpectNear(mapped[2], {a, -a});
@@ -151,7 +152,7 @@ TEST(Differential, DqpskGrayIncrementsAndRotationInvariance) {
     GenerationConfig config;
     config.Modulation = Modulation::DQPSK;
     config.SymbolCount = 200;
-    const auto symbols = Generate(config).Symbols;
+    const auto symbols = Unwrap(Generate(config)).Symbols;
     const auto rotation = std::polar(1.f, 0.7f);
     const char *label_by_turn[4] = {"00", "01", "11", "10"}; // Quarter turns 0..3.
     std::string decoded, decoded_rotated;
@@ -180,13 +181,13 @@ TEST(Differential, NewLinearModulationsShapeAndMeasure) {
         GenerationConfig config;
         config.Modulation = modulation;
         config.SymbolCount = 128;
-        const auto result = Generate(config);
+        const auto result = Unwrap(Generate(config));
         EXPECT_EQ(result.Samples.size(), 127u * 8 + 81) << ModulationName(modulation);
         EXPECT_EQ(result.Symbols.size(), 128u);
-        const auto accuracy = MeasureSymbolAccuracy(result);
+        const auto accuracy = Unwrap(MeasureSymbolAccuracy(result));
         ASSERT_TRUE(accuracy) << ModulationName(modulation);
         EXPECT_LT(accuracy->EvmRms, 0.02) << ModulationName(modulation);
-        EXPECT_NO_THROW(BuildEyeDiagram(result));
+        EXPECT_TRUE(BuildEyeDiagram(result).has_value());
     }
 }
 
@@ -198,34 +199,34 @@ TEST(Fsk, DescriptorsAndValidation) {
     GenerationConfig config;
     config.Modulation = Modulation::FSK2;
     config.Pulse = Pulse::Rectangular;
-    EXPECT_NO_THROW(Validate(config));
+    EXPECT_TRUE(Validate(config).has_value());
     config.SamplesPerSymbol = 1; // Tones at +/-500 Hz against Nyquist 500 Hz.
-    EXPECT_THROW(Validate(config), std::invalid_argument);
+    EXPECT_FALSE(Validate(config).has_value());
     config.SamplesPerSymbol = 2; // 500 Hz < 1000 Hz.
-    EXPECT_NO_THROW(Validate(config));
+    EXPECT_TRUE(Validate(config).has_value());
     config.Modulation = Modulation::FSK4; // Outer tones at +/-1500 Hz, Nyquist 1000 Hz.
-    EXPECT_THROW(Validate(config), std::invalid_argument);
+    EXPECT_FALSE(Validate(config).has_value());
     config.SamplesPerSymbol = 4;
-    EXPECT_NO_THROW(Validate(config));
+    EXPECT_TRUE(Validate(config).has_value());
     config.ToneSpacingHz = 0;
-    EXPECT_THROW(Validate(config), std::invalid_argument);
+    EXPECT_FALSE(Validate(config).has_value());
     config.ToneSpacingHz = std::nan("");
-    EXPECT_THROW(Validate(config), std::invalid_argument);
+    EXPECT_FALSE(Validate(config).has_value());
     // RRC settings are dormant for FSK: SPS 1 is fine for MSK even with the default pulse.
     GenerationConfig msk;
     msk.Modulation = Modulation::MSK;
     msk.SamplesPerSymbol = 1;
-    EXPECT_NO_THROW(Validate(msk));
+    EXPECT_TRUE(Validate(msk).has_value());
     // Explicit input is exact length, bits per symbol follow the modulation.
     GenerationConfig explicit_bits;
     explicit_bits.Modulation = Modulation::FSK4;
     explicit_bits.DataSource = DataSource::Explicit;
     explicit_bits.SymbolCount = 3;
     explicit_bits.Bits = "000111";
-    EXPECT_NO_THROW(Validate(explicit_bits));
+    EXPECT_TRUE(Validate(explicit_bits).has_value());
     explicit_bits.Bits = "00011";
-    EXPECT_THROW(Validate(explicit_bits), std::invalid_argument);
-    EXPECT_THROW(MapSymbols(Modulation::FSK2, "0"), std::invalid_argument);
+    EXPECT_FALSE(Validate(explicit_bits).has_value());
+    EXPECT_FALSE(MapSymbols(Modulation::FSK2, "0").has_value());
     // Selecting FSK from a linear family resets dormant linear settings but keeps gain and seeds.
     GenerationConfig linear;
     linear.AmplitudeGain = 3;
@@ -249,7 +250,7 @@ TEST(Fsk, WaveformMatchesIndependentPhaseFixture) {
     config.SamplesPerSymbol = 16;
     config.ToneSpacingHz = 600;
     config.AmplitudeGain = 2;
-    const auto result = Generate(config);
+    const auto result = Unwrap(Generate(config));
     EXPECT_EQ(result.Family, Family::Fsk);
     EXPECT_TRUE(result.Symbols.empty());
     EXPECT_EQ(result.FilterDelaySamples, 0u);
@@ -264,7 +265,7 @@ TEST(Fsk, WaveformMatchesIndependentPhaseFixture) {
         phase += 2 * std::numbers::pi * result.SymbolFrequenciesHz[n / 16] / 16000;
     }
     // The frequency estimate recovers each tone in the interior of every symbol.
-    const auto estimate = InstantaneousFrequency(result.Samples, result.SampleRateHz);
+    const auto estimate = Unwrap(InstantaneousFrequency(result.Samples, result.SampleRateHz));
     ASSERT_EQ(estimate.size(), result.Samples.size() - 1);
     for (std::size_t n = 0; n + 1 < result.Samples.size(); ++n) {
         EXPECT_NEAR(estimate[n], result.SymbolFrequenciesHz[n / 16], 0.5) << n;
@@ -276,16 +277,16 @@ TEST(Fsk, ContinuousPhaseAtSymbolBoundaries) {
     config.Modulation = Modulation::FSK2;
     config.SymbolCount = 64;
     config.SamplesPerSymbol = 8;
-    const auto result = Generate(config);
+    const auto result = Unwrap(Generate(config));
     ASSERT_EQ(result.Samples.size(), 512u);
     // With continuous phase, the step across a boundary is a tone step too (never a jump).
-    const auto estimate = InstantaneousFrequency(result.Samples, result.SampleRateHz);
+    const auto estimate = Unwrap(InstantaneousFrequency(result.Samples, result.SampleRateHz));
     for (double f : estimate) {
         EXPECT_NEAR(std::abs(f), 500, 0.5);
     }
     EXPECT_NEAR(std::abs(result.Samples[0]), 1, 1e-6);
     EXPECT_EQ(result.Samples[0], Sym(1, 0)); // Zero initial phase.
-    EXPECT_NEAR(MeasurePowerStatistics(result.Samples).PaprDb, 0, 1e-4);
+    EXPECT_NEAR(Unwrap(MeasurePowerStatistics(result.Samples)).PaprDb, 0, 1e-4);
 }
 
 TEST(Fsk, MskIsBinaryFskWithHalfModulationIndex) {
@@ -299,7 +300,7 @@ TEST(Fsk, MskIsBinaryFskWithHalfModulationIndex) {
     config.Bits = "0110";
     EXPECT_DOUBLE_EQ(FskModulationIndex(config), 0.5);
     EXPECT_DOUBLE_EQ(FskToneSpacingHz(config), 1000);
-    const auto result = Generate(config);
+    const auto result = Unwrap(Generate(config));
     EXPECT_EQ(result.SymbolFrequenciesHz, (std::vector<double>{-500, 500, 500, -500})); // +/- baud/4.
     // Over one symbol the phase moves by +/- pi/2, as in the MSK definition.
     const auto &samples = result.Samples;
@@ -309,18 +310,18 @@ TEST(Fsk, MskIsBinaryFskWithHalfModulationIndex) {
     GenerationConfig fsk = config;
     fsk.Modulation = Modulation::FSK2;
     fsk.ToneSpacingHz = 1000;
-    EXPECT_EQ(Generate(fsk).Samples, result.Samples);
+    EXPECT_EQ(Unwrap(Generate(fsk)).Samples, result.Samples);
     EXPECT_DOUBLE_EQ(FskModulationIndex(fsk), 0.5);
 }
 
 TEST(Fsk, AnalysisViewsDoNotApplyToFsk) {
     GenerationConfig config;
     config.Modulation = Modulation::FSK2;
-    const auto result = Generate(config);
-    EXPECT_FALSE(MeasureSymbolAccuracy(result));
-    EXPECT_THROW(MatchedSymbols(result), std::invalid_argument);
-    EXPECT_THROW(BuildEyeDiagram(result), std::invalid_argument);
-    EXPECT_NO_THROW(WelchPsd(result.Samples, result.SampleRateHz));
+    const auto result = Unwrap(Generate(config));
+    EXPECT_FALSE(Unwrap(MeasureSymbolAccuracy(result)));
+    EXPECT_FALSE(MatchedSymbols(result).has_value());
+    EXPECT_FALSE(BuildEyeDiagram(result).has_value());
+    EXPECT_TRUE(WelchPsd(result.Samples, result.SampleRateHz).has_value());
 }
 
 TEST(Fsk, SpectrumConcentratesAtTheTones) {
@@ -328,8 +329,8 @@ TEST(Fsk, SpectrumConcentratesAtTheTones) {
     config.Modulation = Modulation::FSK2;
     config.SymbolCount = 1024;
     config.SamplesPerSymbol = 8;
-    const auto result = Generate(config);
-    const auto psd = WelchPsd(result.Samples, result.SampleRateHz, 1024, Window::Hann);
+    const auto result = Unwrap(Generate(config));
+    const auto psd = Unwrap(WelchPsd(result.Samples, result.SampleRateHz, 1024, Window::Hann));
     std::size_t peak = 0;
     for (std::size_t k = 0; k < psd.PowerDensity.size(); ++k) {
         if (psd.PowerDensity[k] > psd.PowerDensity[peak]) {
@@ -343,18 +344,18 @@ TEST(Fsk, AwgnImpairmentsAndSeeds) {
     GenerationConfig config;
     config.Modulation = Modulation::FSK2;
     config.SymbolCount = 128;
-    const auto clean = Generate(config);
+    const auto clean = Unwrap(Generate(config));
     config.Awgn.Enabled = true;
     config.Awgn.SnrDb = 10;
     config.Impairments.CfoHz = 25;
-    const auto noisy = Generate(config);
+    const auto noisy = Unwrap(Generate(config));
     EXPECT_TRUE(noisy.Noise.AwgnApplied);
     EXPECT_TRUE(noisy.ImpairmentsApplied);
     EXPECT_EQ(noisy.Noise.ReferenceBegin, 0u);
     EXPECT_EQ(noisy.Noise.ReferenceEnd, noisy.Samples.size());
     EXPECT_NEAR(noisy.Noise.ReferencePower, 1, 1e-5);
     EXPECT_NE(noisy.Samples, clean.Samples);
-    EXPECT_EQ(Generate(config).Samples, noisy.Samples);
+    EXPECT_EQ(Unwrap(Generate(config)).Samples, noisy.Samples);
     // Noise and impairments never change the transmitted tones.
     EXPECT_EQ(noisy.SymbolFrequenciesHz, clean.SymbolFrequenciesHz);
 }
@@ -365,43 +366,43 @@ TEST(Fsk, PresetRoundTripUsesVersionFour) {
     config.ToneSpacingHz = 750;
     config.SamplesPerSymbol = 8;
     config.Impairments.CfoHz = 3;
-    const auto text = SerializePreset(config);
+    const auto text = Unwrap(SerializePreset(config));
     EXPECT_NE(text.find("Version=4"), std::string::npos);
     EXPECT_NE(text.find("ToneSpacingHz=750"), std::string::npos);
     EXPECT_EQ(ParsePreset(text), config);
     config.Impairments = {};
-    EXPECT_EQ(ParsePreset(SerializePreset(config)), config);
+    EXPECT_EQ(ParsePreset(Unwrap(SerializePreset(config))), config);
     // FSK needs the v4 format; linear and noise presets keep their older versions.
     auto bad = text;
     bad.replace(bad.find("Version=4"), 9, "Version=3");
-    EXPECT_THROW(ParsePreset(bad), std::invalid_argument);
+    EXPECT_FALSE(ParsePreset(bad).has_value());
     GenerationConfig linear;
     linear.Modulation = Modulation::DQPSK;
-    EXPECT_NE(SerializePreset(linear).find("Version=2"), std::string::npos);
-    EXPECT_EQ(ParsePreset(SerializePreset(linear)), linear);
+    EXPECT_NE(Unwrap(SerializePreset(linear)).find("Version=2"), std::string::npos);
+    EXPECT_EQ(ParsePreset(Unwrap(SerializePreset(linear))), linear);
     // Version 1 presets still cannot carry newer waveforms.
-    auto v1 = SerializePreset(GenerationConfig{});
+    auto v1 = Unwrap(SerializePreset(GenerationConfig{}));
     v1.replace(v1.find("Version=2"), 9, "Version=1");
     v1.replace(v1.find("Modulation=BPSK"), 15, "Modulation=OOK");
-    EXPECT_THROW(ParsePreset(v1), std::invalid_argument);
+    EXPECT_FALSE(ParsePreset(v1).has_value());
 }
 
 TEST(Fsk, ExportMetadataAndFrames) {
     GenerationConfig config;
     config.Modulation = Modulation::FSK2;
     config.SymbolCount = 16;
-    const auto result = Generate(config);
-    const auto metadata = ExportMetadata(result, ExportFormat::CSV);
+    const auto result = Unwrap(Generate(config));
+    const auto metadata = Unwrap(ExportMetadata(result, ExportFormat::CSV));
     EXPECT_NE(metadata.find("\"family\": \"fsk\""), std::string::npos);
     EXPECT_NE(metadata.find("\"tone_spacing_hz\": 1000"), std::string::npos);
     EXPECT_NE(metadata.find("\"modulation_index\": 1"), std::string::npos);
     EXPECT_EQ(metadata.find("\"pulse\""), std::string::npos);
     auto broken = result;
     broken.SymbolFrequenciesHz.pop_back();
-    EXPECT_THROW(ExportMetadata(broken, ExportFormat::CSV), std::invalid_argument);
+    EXPECT_FALSE(ExportMetadata(broken, ExportFormat::CSV).has_value());
     // Batch frames are exact-length, unguarded slices of the continuous-phase signal.
     config.SymbolCount = 256;
-    const auto frame = GenerateFrame(config, 100, 0, std::nullopt);
+    const auto frame = Unwrap(GenerateFrame(config, 100, 0, std::nullopt));
     EXPECT_EQ(frame.Samples.size(), 100u);
     EXPECT_EQ(frame.CropOffset, 0u);
     EXPECT_EQ(frame.FilterDelaySamples, 0u);
@@ -409,8 +410,8 @@ TEST(Fsk, ExportMetadataAndFrames) {
     for (auto sample : frame.Samples) {
         EXPECT_NEAR(std::abs(sample), 1, 1e-6);
     }
-    EXPECT_NO_THROW(ValidateFrameRequest(config, Modulation::MSK, 4096));
-    EXPECT_NO_THROW(ValidateFrameRequest(config, Modulation::QAM256, 4096));
+    EXPECT_TRUE(ValidateFrameRequest(config, Modulation::MSK, 4096).has_value());
+    EXPECT_TRUE(ValidateFrameRequest(config, Modulation::QAM256, 4096).has_value());
 }
 
 } // namespace Core

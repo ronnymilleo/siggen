@@ -5,6 +5,7 @@
 
 #include "cli_config.h"
 #include "preset.h"
+#include "test_support.h"
 #include <chrono>
 #include <filesystem>
 #include <gtest/gtest.h>
@@ -32,12 +33,12 @@ TEST(CliConfig, RootOptionsCannotBeSilentlyDiscardedByBatch) {
                                                                    {"siggen", "--gain", "2", "batch", "--gain", "3"}}) {
         CommandLine cli("test");
         cli.App.parse(static_cast<int>(args.size()), args.data());
-        EXPECT_THROW(ResolveBatch(cli), std::invalid_argument);
+        EXPECT_FALSE((ResolveBatch(cli)).has_value());
     }
     CommandLine cli("test");
     const char *args[] = {"siggen", "--log-level", "off", "batch", "--gain", "2"};
     cli.App.parse(std::size(args), args);
-    EXPECT_EQ(ResolveBatch(cli).Base.AmplitudeGain, 2);
+    EXPECT_EQ(Unwrap(ResolveBatch(cli)).Base.AmplitudeGain, 2);
 }
 
 TEST(CliConfig, MixedBatchAcceptsApplicableOverridesForBothFamilies) {
@@ -45,7 +46,7 @@ TEST(CliConfig, MixedBatchAcceptsApplicableOverridesForBothFamilies) {
     const char *args[] = {"siggen",        "batch", "--modulations", "QPSK", "WGN", "--sps", "4",
                           "--noise-power", "2",     "--sample-rate", "16000"};
     cli.App.parse(std::size(args), args);
-    const auto r = ResolveBatch(cli);
+    const auto r = Unwrap(ResolveBatch(cli));
     EXPECT_EQ(r.Base.SamplesPerSymbol, 4);
     EXPECT_EQ(r.Base.NoiseSource.NoisePower, 2);
     EXPECT_EQ(r.Base.NoiseSource.SampleRateHz, 16000);
@@ -67,21 +68,21 @@ TEST(CliConfig, MixedBatchDoesNotActivateDormantPresetSettings) {
     preset.SamplesPerSymbol = 4; // Dormant linear setting must not become active.
     preset.NoiseSource.NoisePower = 3;
     preset.AmplitudeGain = 2;
-    Core::SavePreset(path, preset);
+    ASSERT_TRUE(Core::SavePreset(path, preset).has_value());
     const auto name = path.string();
     CommandLine cli("test");
     const char *args[] = {"siggen", "batch", "--preset", name.c_str(), "--modulations", "QPSK", "WGN"};
     cli.App.parse(std::size(args), args);
-    const auto request = ResolveBatch(cli);
+    const auto request = Unwrap(ResolveBatch(cli));
     EXPECT_EQ(request.Base.SamplesPerSymbol, Core::GenerationConfig{}.SamplesPerSymbol);
     EXPECT_EQ(request.Base.NoiseSource.NoisePower, 3);
     EXPECT_EQ(request.Base.AmplitudeGain, 2);
     preset = {};
     preset.NoiseSource.NoisePower = 9; // Dormant noise setting must reset too.
-    Core::SavePreset(path, preset);
+    ASSERT_TRUE(Core::SavePreset(path, preset).has_value());
     CommandLine linear("test");
     linear.App.parse(std::size(args), args);
-    EXPECT_EQ(ResolveBatch(linear).Base.NoiseSource.NoisePower, 1);
+    EXPECT_EQ(Unwrap(ResolveBatch(linear)).Base.NoiseSource.NoisePower, 1);
     std::filesystem::remove(path);
 }
 
@@ -92,7 +93,7 @@ TEST(CliConfig, PrecedenceDefaultsPresetThenExplicitOptions) {
     preset_config.SymbolCount = 100;
     preset_config.AmplitudeGain = 3;
     preset_config.Seed = 77;
-    Core::SavePreset(path, preset_config);
+    ASSERT_TRUE(Core::SavePreset(path, preset_config).has_value());
     const auto path_str = path.string();
 
     {
@@ -106,7 +107,7 @@ TEST(CliConfig, PrecedenceDefaultsPresetThenExplicitOptions) {
         CommandLine cli("test");
         const char *argv[] = {"siggen", "--preset", path_str.c_str(), "--gain", "5"};
         cli.App.parse(std::size(argv), argv);
-        auto resolved = ResolveConfig(cli);
+        const auto resolved = Unwrap(ResolveConfig(cli));
         EXPECT_DOUBLE_EQ(resolved.AmplitudeGain, 5);
         EXPECT_EQ(resolved.Modulation, Core::Modulation::QPSK);
         EXPECT_EQ(resolved.SymbolCount, 100);
@@ -116,7 +117,7 @@ TEST(CliConfig, PrecedenceDefaultsPresetThenExplicitOptions) {
         CommandLine cli("test");
         const char *argv[] = {"siggen", "--preset", path_str.c_str(), "--symbols", "32", "--sps", "4", "--span", "4"};
         cli.App.parse(std::size(argv), argv);
-        auto resolved = ResolveConfig(cli);
+        const auto resolved = Unwrap(ResolveConfig(cli));
         EXPECT_EQ(resolved.SymbolCount, 32);
         EXPECT_EQ(resolved.SamplesPerSymbol, 4);
         EXPECT_EQ(resolved.SpanSymbols, 4);
@@ -131,12 +132,12 @@ TEST(CliConfig, FamilySwitchStartsFromFamilyDefaultsRetainingGainAndSeeds) {
     preset_config.AmplitudeGain = 3;
     preset_config.Seed = 77;
     preset_config.NoiseSeed = 88;
-    Core::SavePreset(path, preset_config);
+    ASSERT_TRUE(Core::SavePreset(path, preset_config).has_value());
     const auto path_str = path.string();
     CommandLine cli("test");
     const char *argv[] = {"siggen", "--preset", path_str.c_str(), "--modulation", "wgn"};
     cli.App.parse(std::size(argv), argv);
-    const auto resolved = ResolveConfig(cli);
+    const auto resolved = Unwrap(ResolveConfig(cli));
     EXPECT_EQ(resolved.Modulation, Core::Modulation::WGN);
     EXPECT_DOUBLE_EQ(resolved.AmplitudeGain, 3);
     EXPECT_EQ(resolved.Seed, 77u);
@@ -151,12 +152,12 @@ TEST(CliConfig, FamilySwitchStartsFromFamilyDefaultsRetainingGainAndSeeds) {
     wgn.Modulation = Core::Modulation::WGN;
     wgn.NoiseSource.SampleCount = 512;
     wgn.AmplitudeGain = 2;
-    Core::SavePreset(wgn_path, wgn);
+    ASSERT_TRUE(Core::SavePreset(wgn_path, wgn).has_value());
     const auto wgn_path_str = wgn_path.string();
     CommandLine back("test");
     const char *back_argv[] = {"siggen", "--preset", wgn_path_str.c_str(), "--modulation", "64-QAM"};
     back.App.parse(std::size(back_argv), back_argv);
-    const auto linear = ResolveConfig(back);
+    const auto linear = Unwrap(ResolveConfig(back));
     EXPECT_EQ(linear.Modulation, Core::Modulation::QAM64);
     EXPECT_DOUBLE_EQ(linear.AmplitudeGain, 2);
     EXPECT_EQ(linear.SymbolCount, 256);
@@ -169,38 +170,38 @@ TEST(CliConfig, WaveformAndPulseNamesAreCaseInsensitive) {
     CommandLine cli("test");
     const char *argv[] = {"siggen", "--modulation", "8-psk", "--pulse", "rrc"};
     cli.App.parse(std::size(argv), argv);
-    const auto resolved = ResolveConfig(cli);
+    const auto resolved = Unwrap(ResolveConfig(cli));
     EXPECT_EQ(resolved.Modulation, Core::Modulation::PSK8);
     EXPECT_EQ(resolved.Pulse, Core::Pulse::RRC);
     CommandLine bad("test");
     const char *bad_argv[] = {"siggen", "--modulation", "GFSK"};
     bad.App.parse(std::size(bad_argv), bad_argv);
-    EXPECT_THROW(ResolveConfig(bad), std::invalid_argument);
+    EXPECT_FALSE((ResolveConfig(bad)).has_value());
 }
 
 TEST(CliConfig, BitsSelectExplicitInputUnlessConflicting) {
     CommandLine cli("test");
     const char *argv[] = {"siggen", "--symbols", "4", "--bits", "0101"};
     cli.App.parse(std::size(argv), argv);
-    const auto resolved = ResolveConfig(cli);
+    const auto resolved = Unwrap(ResolveConfig(cli));
     EXPECT_EQ(resolved.DataSource, Core::DataSource::Explicit);
     EXPECT_EQ(resolved.Bits, "0101");
 
     CommandLine explicit_source("test");
     const char *explicit_argv[] = {"siggen", "--symbols", "4", "--data-source", "explicit", "--bits", "0101"};
     explicit_source.App.parse(std::size(explicit_argv), explicit_argv);
-    EXPECT_EQ(ResolveConfig(explicit_source).DataSource, Core::DataSource::Explicit);
+    EXPECT_EQ(Unwrap(ResolveConfig(explicit_source)).DataSource, Core::DataSource::Explicit);
 
     CommandLine conflict("test");
     const char *conflict_argv[] = {"siggen", "--symbols", "4", "--data-source", "random", "--bits", "0101"};
     conflict.App.parse(std::size(conflict_argv), conflict_argv);
-    EXPECT_THROW(ResolveConfig(conflict), std::invalid_argument);
+    EXPECT_FALSE((ResolveConfig(conflict)).has_value());
 
     // Exact bit-count validation is preserved through the CLI.
     CommandLine wrong_count("test");
     const char *wrong_argv[] = {"siggen", "--symbols", "4", "--bits", "010"};
     wrong_count.App.parse(std::size(wrong_argv), wrong_argv);
-    EXPECT_THROW(ResolveConfig(wrong_count), std::invalid_argument);
+    EXPECT_FALSE((ResolveConfig(wrong_count)).has_value());
 }
 
 TEST(CliConfig, IncompatibleOptionsAreRejected) {
@@ -218,7 +219,7 @@ TEST(CliConfig, IncompatibleOptionsAreRejected) {
     for (const auto &test_case : cases) {
         CommandLine cli("test");
         cli.App.parse(static_cast<int>(test_case.Args.size()), test_case.Args.data());
-        EXPECT_THROW(ResolveConfig(cli), std::invalid_argument) << test_case.Description;
+        EXPECT_FALSE((ResolveConfig(cli)).has_value()) << test_case.Description;
     }
 }
 
@@ -226,7 +227,7 @@ TEST(CliConfig, SnrControl) {
     CommandLine enabled("test");
     const char *enabled_argv[] = {"siggen", "--snr-db", "7.5"};
     enabled.App.parse(std::size(enabled_argv), enabled_argv);
-    const auto on = ResolveConfig(enabled);
+    const auto on = Unwrap(ResolveConfig(enabled));
     EXPECT_TRUE(on.Awgn.Enabled);
     EXPECT_DOUBLE_EQ(on.Awgn.SnrDb, 7.5);
 
@@ -235,16 +236,16 @@ TEST(CliConfig, SnrControl) {
     Core::GenerationConfig preset_config;
     preset_config.Awgn.Enabled = true;
     preset_config.Awgn.SnrDb = 3;
-    Core::SavePreset(path, preset_config);
+    ASSERT_TRUE(Core::SavePreset(path, preset_config).has_value());
     const auto path_str = path.string();
     CommandLine off("test");
     const char *off_argv[] = {"siggen", "--preset", path_str.c_str(), "--snr-db", "off"};
     off.App.parse(std::size(off_argv), off_argv);
-    EXPECT_FALSE(ResolveConfig(off).Awgn.Enabled);
+    EXPECT_FALSE(Unwrap(ResolveConfig(off)).Awgn.Enabled);
     CommandLine invalid("test");
     const char *invalid_argv[] = {"siggen", "--snr-db", "loud"};
     invalid.App.parse(std::size(invalid_argv), invalid_argv);
-    EXPECT_THROW(ResolveConfig(invalid), std::invalid_argument);
+    EXPECT_FALSE((ResolveConfig(invalid)).has_value());
     std::filesystem::remove(path);
 }
 
@@ -254,7 +255,7 @@ TEST(CliConfig, WgnSourceOptions) {
                           "16000",  "--noise-power", "2",    "--noise-seed", "21",  "--gain",
                           "1.5",    "--format",      "sigmf"};
     cli.App.parse(std::size(argv), argv);
-    const auto resolved = ResolveConfig(cli);
+    const auto resolved = Unwrap(ResolveConfig(cli));
     EXPECT_EQ(resolved.Modulation, Core::Modulation::WGN);
     EXPECT_EQ(resolved.NoiseSource.SampleCount, 512);
     EXPECT_DOUBLE_EQ(resolved.NoiseSource.SampleRateHz, 16000);
@@ -297,7 +298,7 @@ TEST(CliConfig, BatchResolutionSharesOverridesAndRejectsExplicitInput) {
                           "--snr-db",
                           "5"};
     cli.App.parse(std::size(argv), argv);
-    const auto request = ResolveBatch(cli);
+    const auto request = Unwrap(ResolveBatch(cli));
     EXPECT_EQ(request.Waveforms, (std::vector<Core::Modulation>{Core::Modulation::BPSK, Core::Modulation::WGN}));
     EXPECT_EQ(request.Seeds, (std::vector<std::uint32_t>{1, 2}));
     EXPECT_EQ(request.SnrsDb, (std::vector<double>{0, 10}));
@@ -318,23 +319,23 @@ TEST(CliConfig, BatchResolutionSharesOverridesAndRejectsExplicitInput) {
                                                 {"siggen", "batch", "--data-source", "random"}}) {
         CommandLine rejected("test");
         rejected.App.parse(static_cast<int>(rejected_case.size()), rejected_case.data());
-        EXPECT_THROW(ResolveBatch(rejected), std::invalid_argument) << rejected_case[2];
+        EXPECT_FALSE((ResolveBatch(rejected)).has_value()) << rejected_case[2];
     }
     CommandLine overwrite("test");
     const char *overwrite_argv[] = {"siggen", "batch", "--overwrite"};
     overwrite.App.parse(std::size(overwrite_argv), overwrite_argv);
-    EXPECT_THROW(ResolveBatch(overwrite), std::invalid_argument);
+    EXPECT_FALSE((ResolveBatch(overwrite)).has_value());
     CommandLine unknown("test");
     const char *unknown_argv[] = {"siggen", "batch", "--modulations", "GFSK"};
     unknown.App.parse(std::size(unknown_argv), unknown_argv);
-    EXPECT_THROW(ResolveBatch(unknown), std::invalid_argument);
+    EXPECT_FALSE((ResolveBatch(unknown)).has_value());
 }
 
 TEST(CliConfig, BatchDefaultsUseResolvedWaveformAndSeed) {
     CommandLine cli("test");
     const char *argv[] = {"siggen", "batch", "--modulation", "8-PSK", "--seed", "123"};
     cli.App.parse(std::size(argv), argv);
-    const auto request = ResolveBatch(cli);
+    const auto request = Unwrap(ResolveBatch(cli));
     EXPECT_TRUE(request.Waveforms.empty());
     EXPECT_TRUE(request.Seeds.empty());
     EXPECT_TRUE(request.SnrsDb.empty());
@@ -352,7 +353,7 @@ TEST(CliConfig, ImpairmentOptionsResolveAndRejectWgn) {
                           "0.1",    "--dc-q",       "-0.1", "--adc-bits",     "5",    "--impairment-seed",
                           "77"};
     cli.App.parse(std::size(args), args);
-    const auto c = ResolveConfig(cli);
+    const auto c = Unwrap(ResolveConfig(cli));
     EXPECT_EQ(c.Impairments.CfoHz, 12.5);
     EXPECT_EQ(c.Impairments.PhaseNoiseLinewidthHz, 2);
     EXPECT_EQ(c.Impairments.IqGainDb, 1);
@@ -364,11 +365,11 @@ TEST(CliConfig, ImpairmentOptionsResolveAndRejectWgn) {
     CommandLine wgn("test");
     const char *bad[] = {"siggen", "--modulation", "WGN", "--cfo-hz", "5"};
     wgn.App.parse(std::size(bad), bad);
-    EXPECT_THROW(ResolveConfig(wgn), std::invalid_argument);
+    EXPECT_FALSE((ResolveConfig(wgn)).has_value());
     CommandLine batch("test");
     const char *b[] = {"siggen", "batch", "--cfo-hz", "5", "--adc-bits", "8"};
     batch.App.parse(std::size(b), b);
-    const auto r = ResolveBatch(batch);
+    const auto r = Unwrap(ResolveBatch(batch));
     EXPECT_EQ(r.Base.Impairments.CfoHz, 5);
     EXPECT_EQ(r.Base.Impairments.AdcBits, 8);
 }
@@ -378,7 +379,7 @@ TEST(CliConfig, FskOptionsResolveAndRejectInapplicableOnes) {
     const char *args[] = {"siggen", "--modulation", "4-fsk", "--tone-spacing-hz", "600", "--symbol-rate",
                           "1000",   "--sps",        "8"};
     cli.App.parse(std::size(args), args);
-    const auto c = ResolveConfig(cli);
+    const auto c = Unwrap(ResolveConfig(cli));
     EXPECT_EQ(c.Modulation, Core::Modulation::FSK4);
     EXPECT_EQ(c.ToneSpacingHz, 600);
     for (const auto &bad :
@@ -389,19 +390,19 @@ TEST(CliConfig, FskOptionsResolveAndRejectInapplicableOnes) {
                                                 {"siggen", "--modulation", "4-FSK", "--sps", "1"}}) {
         CommandLine rejected("test");
         rejected.App.parse(static_cast<int>(bad.size()), bad.data());
-        EXPECT_THROW(ResolveConfig(rejected), std::invalid_argument);
+        EXPECT_FALSE((ResolveConfig(rejected)).has_value());
     }
     CommandLine msk("test");
     const char *ok[] = {"siggen", "--modulation", "msk", "--snr-db", "12", "--cfo-hz", "3"};
     msk.App.parse(std::size(ok), ok);
-    const auto m = ResolveConfig(msk);
+    const auto m = Unwrap(ResolveConfig(msk));
     EXPECT_EQ(m.Modulation, Core::Modulation::MSK);
     EXPECT_TRUE(m.Awgn.Enabled);
     CommandLine batch("test");
     const char *mixed[] = {"siggen", "batch", "--modulations", "QPSK", "2-FSK", "--tone-spacing-hz", "800",
                            "--sps",  "8"};
     batch.App.parse(std::size(mixed), mixed);
-    EXPECT_EQ(ResolveBatch(batch).Base.ToneSpacingHz, 800);
+    EXPECT_EQ(Unwrap(ResolveBatch(batch)).Base.ToneSpacingHz, 800);
 }
 
 TEST(CliConfig, BerResolvesPointsAndStoppingRules) {
@@ -410,7 +411,7 @@ TEST(CliConfig, BerResolvesPointsAndStoppingRules) {
                           "--min-errors", "50",  "--max-bits",   "5000",   "--block-symbols", "256"};
     cli.App.parse(static_cast<int>(std::size(args)), args);
     ASSERT_TRUE(cli.BerSelected());
-    const auto request = ResolveBer(cli);
+    const auto request = Unwrap(ResolveBer(cli));
     EXPECT_EQ(request.Config.Modulation, Core::Modulation::QAM16);
     EXPECT_EQ(request.Config.SamplesPerSymbol, 4);
     EXPECT_FALSE(request.Config.Awgn.Enabled);
@@ -425,7 +426,7 @@ TEST(CliConfig, BerDefaultsAndRejections) {
         CommandLine cli("test");
         const char *args[] = {"siggen", "ber"};
         cli.App.parse(static_cast<int>(std::size(args)), args);
-        EXPECT_EQ(ResolveBer(cli).Settings.EbN0Db.size(), 6u);
+        EXPECT_EQ(Unwrap(ResolveBer(cli)).Settings.EbN0Db.size(), 6u);
     }
     for (const auto &args : std::vector<std::vector<const char *>>{{"siggen", "ber", "--modulation", "WGN"},
                                                                    {"siggen", "ber", "--modulation", "MSK"},
@@ -437,7 +438,7 @@ TEST(CliConfig, BerDefaultsAndRejections) {
                                                                    {"siggen", "--gain", "2", "ber"}}) {
         CommandLine cli("test");
         cli.App.parse(static_cast<int>(args.size()), args.data());
-        EXPECT_THROW(ResolveBer(cli), std::invalid_argument);
+        EXPECT_FALSE((ResolveBer(cli)).has_value());
     }
 }
 

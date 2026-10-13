@@ -6,6 +6,7 @@
 #include "signal_analysis.h"
 
 #include "plot_data.h"
+#include "test_support.h"
 #include <algorithm>
 #include <gtest/gtest.h>
 #include <numbers>
@@ -19,28 +20,28 @@ TEST(Analysis, MatchedTimingAndRecovery) {
         config.Modulation = modulation;
         config.RollOff = .35;
         config.SpanSymbols = 12;
-        const auto result = Generate(config);
-        const auto observed = MatchedSymbols(result);
+        const auto result = Unwrap(Generate(config));
+        const auto observed = Unwrap(MatchedSymbols(result));
         ASSERT_EQ(observed.Values.size(), 232u);
         EXPECT_EQ(observed.SymbolIndices.front(), 12u);
         for (std::size_t i = 0; i < observed.Values.size(); ++i) {
             EXPECT_LT(std::abs(observed.Values[i] - result.Symbols[observed.SymbolIndices[i]]), .02);
         }
         config.SymbolCount = 1;
-        EXPECT_TRUE(MatchedSymbols(Generate(config)).Values.empty());
+        EXPECT_TRUE(Unwrap(MatchedSymbols(Unwrap(Generate(config)))).Values.empty());
         config.Pulse = Pulse::Rectangular;
         config.AmplitudeGain = 2;
-        const auto rect = Generate(config);
-        EXPECT_EQ(MatchedSymbols(rect).Values[0], rect.Symbols[0] * 2.f);
+        const auto rect = Unwrap(Generate(config));
+        EXPECT_EQ(Unwrap(MatchedSymbols(rect)).Values[0], rect.Symbols[0] * 2.f);
     }
 }
 
 TEST(Plots, BoundedExtremaAndPhysicalTime) {
     GenerationConfig config;
     config.SymbolCount = 4096;
-    auto result = Generate(config);
+    auto result = Unwrap(Generate(config));
     result.Samples[99] = {100, -200};
-    auto plot = MakePlotData(result, 256);
+    auto plot = Unwrap(MakePlotData(result, 256));
     EXPECT_LE(plot.Time.size(), 256u);
     EXPECT_TRUE(std::is_sorted(plot.Time.begin(), plot.Time.end()));
     EXPECT_EQ(*std::max_element(plot.I.begin(), plot.I.end()), 100);
@@ -54,8 +55,8 @@ TEST(Analysis, QAM16MatchedRecovery) {
     config.Modulation = Modulation::QAM16;
     config.SpanSymbols = 12;
     config.RollOff = .35;
-    const auto result = Generate(config);
-    const auto observed = MatchedSymbols(result);
+    const auto result = Unwrap(Generate(config));
+    const auto observed = Unwrap(MatchedSymbols(result));
     ASSERT_FALSE(observed.Values.empty());
     for (std::size_t i = 0; i < observed.Values.size(); ++i) {
         EXPECT_LT(std::abs(observed.Values[i] - result.Symbols[observed.SymbolIndices[i]]), .03);
@@ -70,8 +71,8 @@ TEST(Analysis, QAM64MatchedRecoveryAndRectangularGain) {
     for (auto pulse : {Pulse::RRC, Pulse::Rectangular}) {
         config.Pulse = pulse;
         config.AmplitudeGain = 2;
-        const auto result = Generate(config);
-        const auto observed = MatchedSymbols(result);
+        const auto result = Unwrap(Generate(config));
+        const auto observed = Unwrap(MatchedSymbols(result));
         ASSERT_FALSE(observed.Values.empty());
         for (std::size_t k = 0; k < observed.Values.size(); ++k) {
             EXPECT_LT(std::abs(observed.Values[k] - result.Symbols[observed.SymbolIndices[k]] * 2.f),
@@ -87,7 +88,7 @@ TEST(Spectrum, ToneLocationSignAndIntegratedPower) {
         for (std::size_t k = 0; k < tone.size(); ++k) {
             tone[k] = std::polar(2.f, static_cast<float>(2 * std::numbers::pi * frequency * k / Fs));
         }
-        auto psd = WelchPsd(tone, Fs);
+        auto psd = Unwrap(WelchPsd(tone, Fs));
         auto peak = static_cast<std::size_t>(std::max_element(psd.PowerDensity.begin(), psd.PowerDensity.end()) -
                                              psd.PowerDensity.begin());
         EXPECT_DOUBLE_EQ(psd.FrequencyHz[peak], frequency);
@@ -100,13 +101,13 @@ TEST(Spectrum, ToneLocationSignAndIntegratedPower) {
 TEST(Spectrum, IndependentParsevalAndInputValidation) {
     // One four-sample segment: periodic Hann {0,.5,1,.5}; weighted energy = 0+1+9+4=14.
     std::vector<std::complex<float>> data{{1, 0}, {2, 0}, {3, 0}, {4, 0}};
-    auto psd = WelchPsd(data, 8, 4);
+    auto psd = Unwrap(WelchPsd(data, 8, 4));
     EXPECT_NEAR(std::accumulate(psd.PowerDensity.begin(), psd.PowerDensity.end(), 0.) * 2, 14 / 1.5, 1e-12);
     EXPECT_EQ(psd.FrequencyHz, (std::vector<double>{-4, -2, 0, 2}));
-    EXPECT_TRUE(WelchPsd({}, 8).PowerDensity.empty());
-    EXPECT_THROW(WelchPsd(data, 0), std::invalid_argument);
-    EXPECT_THROW(WelchPsd(data, 8, 3), std::invalid_argument);
-    EXPECT_THROW(WelchPsd({{NAN, 0}}, 8), std::invalid_argument);
+    EXPECT_TRUE(Unwrap(WelchPsd({}, 8)).PowerDensity.empty());
+    EXPECT_FALSE(WelchPsd(data, 0).has_value());
+    EXPECT_FALSE(WelchPsd(data, 8, 3).has_value());
+    EXPECT_FALSE(WelchPsd({{NAN, 0}}, 8).has_value());
 }
 
 } // namespace Core

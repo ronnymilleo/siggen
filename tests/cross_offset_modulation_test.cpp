@@ -9,6 +9,7 @@
 #include "measurements.h"
 #include "preset.h"
 #include "signal_analysis.h"
+#include "test_support.h"
 #include <bit>
 #include <cmath>
 #include <complex>
@@ -38,7 +39,7 @@ std::vector<Sym> Constellation(Modulation modulation) {
     const int bits_per_symbol = BitsPerSymbol(modulation);
     std::vector<Sym> points;
     for (unsigned v = 0; v < (1u << bits_per_symbol); ++v) {
-        points.push_back(MapSymbols(modulation, Label(v, bits_per_symbol))[0]);
+        points.push_back(Unwrap(MapSymbols(modulation, Label(v, bits_per_symbol)))[0]);
     }
     return points;
 }
@@ -99,7 +100,7 @@ TEST(Qam32, NearestNeighboursAreMostlyOneBitApart) {
 }
 
 TEST(Qam32, ExplicitInputAndLimits) {
-    EXPECT_THROW(MapSymbols(Modulation::QAM32, "0000"), std::invalid_argument);
+    EXPECT_FALSE(MapSymbols(Modulation::QAM32, "0000").has_value());
     GenerationConfig config;
     config.Modulation = Modulation::QAM32;
     config.SymbolCount = 4;
@@ -108,7 +109,7 @@ TEST(Qam32, ExplicitInputAndLimits) {
                   "00001"
                   "00010"
                   "10000";
-    const auto result = Generate(config);
+    const auto result = Unwrap(Generate(config));
     ASSERT_EQ(result.Symbols.size(), 4u);
     const float scale = 1 / std::sqrt(20.f);
     EXPECT_NEAR(result.Symbols[0].real(), 1 * scale, 1e-6);
@@ -118,14 +119,14 @@ TEST(Qam32, ExplicitInputAndLimits) {
     EXPECT_NEAR(result.Symbols[3].real(), 1 * scale, 1e-6); // Quadrant 10 mirrors Q: (1,-1).
     EXPECT_NEAR(result.Symbols[3].imag(), -1 * scale, 1e-6);
     config.Bits.pop_back();
-    EXPECT_THROW(Generate(config), std::invalid_argument);
+    EXPECT_FALSE(Generate(config).has_value());
 }
 
 TEST(PiFourDqpsk, PhaseIncrementsAndEnvelope) {
-    const auto mapped = MapSymbols(Modulation::PI4DQPSK, "00"
-                                                         "01"
-                                                         "11"
-                                                         "10");
+    const auto mapped = Unwrap(MapSymbols(Modulation::PI4DQPSK, "00"
+                                                                "01"
+                                                                "11"
+                                                                "10"));
     const float pi4 = std::numbers::pi_v<float> / 4;
     // Reference phase 0: +45, +135, -135, -45 degrees accumulate to 45, 180, 45, 0.
     const float expected_angle[4] = {pi4, 4 * pi4, pi4, 0};
@@ -136,7 +137,7 @@ TEST(PiFourDqpsk, PhaseIncrementsAndEnvelope) {
     GenerationConfig config;
     config.Modulation = Modulation::PI4DQPSK;
     config.SymbolCount = 300;
-    const auto symbols = Generate(config).Symbols;
+    const auto symbols = Unwrap(Generate(config)).Symbols;
     // Decoded increments are odd multiples of pi/4, and the symbol phase alternates between two QPSK sets.
     Sym previous{1, 0};
     for (std::size_t k = 0; k < symbols.size(); ++k) {
@@ -150,7 +151,7 @@ TEST(PiFourDqpsk, PhaseIncrementsAndEnvelope) {
     }
     // The envelope never passes through the origin because no transition is 180 degrees.
     config.SymbolCount = 400;
-    const auto samples = Generate(config).Samples;
+    const auto samples = Unwrap(Generate(config)).Samples;
     double minimum = 1e9;
     for (auto x : samples) {
         minimum = std::min<double>(minimum, std::abs(x));
@@ -166,7 +167,7 @@ TEST(Oqpsk, QuadratureLagsHalfASymbol) {
         qpsk.SymbolCount = 64;
         auto oqpsk = qpsk;
         oqpsk.Modulation = Modulation::OQPSK;
-        const auto base = Generate(qpsk), offset = Generate(oqpsk);
+        const auto base = Unwrap(Generate(qpsk)), offset = Unwrap(Generate(oqpsk));
         const auto delay = static_cast<std::size_t>(qpsk.SamplesPerSymbol) / 2;
         EXPECT_EQ(QuadratureDelaySamples(oqpsk), delay);
         EXPECT_EQ(QuadratureDelaySamples(qpsk), 0u);
@@ -188,11 +189,11 @@ TEST(Oqpsk, ValidationAndRecovery) {
     config.Modulation = Modulation::OQPSK;
     config.Pulse = Pulse::Rectangular;
     config.SamplesPerSymbol = 3;
-    EXPECT_THROW(Validate(config), std::invalid_argument);
+    EXPECT_FALSE(Validate(config).has_value());
     config.SamplesPerSymbol = 1;
-    EXPECT_THROW(Validate(config), std::invalid_argument);
+    EXPECT_FALSE(Validate(config).has_value());
     config.SamplesPerSymbol = 4;
-    EXPECT_NO_THROW(Validate(config));
+    EXPECT_TRUE(Validate(config).has_value());
     // Matched filtering samples I and Q half a symbol apart and recovers the symbols.
     for (auto pulse : {Pulse::RRC, Pulse::Rectangular}) {
         GenerationConfig oqpsk;
@@ -201,16 +202,16 @@ TEST(Oqpsk, ValidationAndRecovery) {
         oqpsk.SymbolCount = 128;
         oqpsk.SpanSymbols = 12;
         oqpsk.RollOff = .35;
-        const auto result = Generate(oqpsk);
-        const auto observed = MatchedSymbols(result);
+        const auto result = Unwrap(Generate(oqpsk));
+        const auto observed = Unwrap(MatchedSymbols(result));
         ASSERT_FALSE(observed.Values.empty());
         for (std::size_t i = 0; i < observed.Values.size(); ++i) {
             EXPECT_LT(std::abs(observed.Values[i] - result.Symbols[observed.SymbolIndices[i]]), .03f);
         }
-        const auto accuracy = MeasureSymbolAccuracy(result);
+        const auto accuracy = Unwrap(MeasureSymbolAccuracy(result));
         ASSERT_TRUE(accuracy);
         EXPECT_LT(accuracy->EvmRms, .03);
-        const auto eye = BuildEyeDiagram(result, 20);
+        const auto eye = Unwrap(BuildEyeDiagram(result, 20));
         ASSERT_FALSE(eye.InPhase.empty());
         for (std::size_t t = 0; t < eye.InPhase.size(); ++t) {
             EXPECT_NEAR(std::abs(eye.InPhase[t][eye.TimeSymbols.size() / 2]), 1 / std::sqrt(2.), .03);
@@ -225,8 +226,8 @@ TEST(Oqpsk, LowerEnvelopeVariationThanQpsk) {
     qpsk.SymbolCount = 2048;
     auto oqpsk = qpsk;
     oqpsk.Modulation = Modulation::OQPSK;
-    EXPECT_LT(MeasurePowerStatistics(Generate(oqpsk).Samples).PaprDb,
-              MeasurePowerStatistics(Generate(qpsk).Samples).PaprDb - 0.5);
+    EXPECT_LT(Unwrap(MeasurePowerStatistics(Unwrap(Generate(oqpsk)).Samples)).PaprDb,
+              Unwrap(MeasurePowerStatistics(Unwrap(Generate(qpsk)).Samples)).PaprDb - 0.5);
 }
 
 TEST(Oqpsk, NoiseExportAndBatchFrames) {
@@ -234,29 +235,29 @@ TEST(Oqpsk, NoiseExportAndBatchFrames) {
     config.Modulation = Modulation::OQPSK;
     config.Awgn.Enabled = true;
     config.Awgn.SnrDb = 12;
-    const auto result = Generate(config);
+    const auto result = Unwrap(Generate(config));
     EXPECT_TRUE(result.Noise.AwgnApplied);
     const auto path = std::filesystem::temp_directory_path() / "siggen-oqpsk-export-test.csv";
     std::filesystem::remove(path);
     std::filesystem::remove(MetadataPath(path));
-    EXPECT_NO_THROW(ExportSignal(path, result, ExportFormat::CSV));
+    EXPECT_TRUE(ExportSignal(path, result, ExportFormat::CSV).has_value());
     std::filesystem::remove(path);
     std::filesystem::remove(MetadataPath(path));
     for (auto pulse : {Pulse::RRC, Pulse::Rectangular}) {
         GenerationConfig frame_config;
         frame_config.Modulation = Modulation::OQPSK;
         frame_config.Pulse = pulse;
-        const auto frame = GenerateFrame(frame_config, 1024, 0, std::nullopt);
+        const auto frame = Unwrap(GenerateFrame(frame_config, 1024, 0, std::nullopt));
         EXPECT_EQ(frame.Samples.size(), 1024u);
     }
 }
 
 TEST(Dpsk8, GrayPhaseIncrements) {
-    const auto mapped = MapSymbols(Modulation::DPSK8, "000"
-                                                      "001"
-                                                      "011"
-                                                      "010"
-                                                      "100");
+    const auto mapped = Unwrap(MapSymbols(Modulation::DPSK8, "000"
+                                                             "001"
+                                                             "011"
+                                                             "010"
+                                                             "100"));
     // Steps 0, 1, 2, 3, 7 of pi/4 accumulate to phases 0, 1, 3, 6, 5 (units of pi/4).
     const int expected_phase[5] = {0, 1, 3, 6, 5};
     for (std::size_t k = 0; k < 5; ++k) {
@@ -267,7 +268,7 @@ TEST(Dpsk8, GrayPhaseIncrements) {
     GenerationConfig config;
     config.Modulation = Modulation::DPSK8;
     config.SymbolCount = 200;
-    const auto symbols = Generate(config).Symbols;
+    const auto symbols = Unwrap(Generate(config)).Symbols;
     const auto rotation = std::polar(1.f, 0.3f); // Less than half a step: a constant rotation must not change the data.
     std::set<int> seen;
     for (std::size_t k = 1; k < symbols.size(); ++k) {
@@ -301,8 +302,8 @@ TEST(Ask4, UnipolarGrayLevels) {
     GenerationConfig config;
     config.Modulation = Modulation::ASK4;
     config.SymbolCount = 256;
-    const auto result = Generate(config);
-    const auto accuracy = MeasureSymbolAccuracy(result);
+    const auto result = Unwrap(Generate(config));
+    const auto accuracy = Unwrap(MeasureSymbolAccuracy(result));
     ASSERT_TRUE(accuracy);
     EXPECT_LT(accuracy->EvmRms, .02);
 }
@@ -337,7 +338,7 @@ TEST(NewModulations, NamesPresetsAndIdentifiers) {
         config.DataSource = DataSource::Explicit;
         config.Bits = std::string(
             static_cast<std::size_t>(config.SymbolCount) * static_cast<std::size_t>(BitsPerSymbol(modulation)), '1');
-        EXPECT_EQ(ParsePreset(SerializePreset(config)), config);
+        EXPECT_EQ(ParsePreset(Unwrap(SerializePreset(config))), config);
     }
 }
 

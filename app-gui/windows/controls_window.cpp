@@ -21,7 +21,8 @@ namespace {
 
 Core::EnergyRatios ComputeEnergyRatios(const Core::GenerationConfig &config) {
     return Core::SnrToEnergyRatios(config.Awgn.SnrDb, std::max(config.SamplesPerSymbol, 1),
-                                   std::max(Core::BitsPerSymbol(config.Modulation), 1));
+                                   std::max(Core::BitsPerSymbol(config.Modulation), 1))
+        .value_or(Core::EnergyRatios{});
 }
 
 /**
@@ -30,12 +31,8 @@ Core::EnergyRatios ComputeEnergyRatios(const Core::GenerationConfig &config) {
  * @return  The validation error, or an empty string when the settings are valid.
  */
 std::string ValidationError(const Core::GenerationConfig &config) {
-    try {
-        Core::Validate(config);
-    } catch (const std::exception &error) {
-        return error.what();
-    }
-    return {};
+    const auto validated = Core::Validate(config);
+    return validated.has_value() ? std::string{} : validated.error();
 }
 
 } // namespace
@@ -335,15 +332,14 @@ void ControlsWindow::DrawExportDialog() {
     ImGui::TextWrapped("Metadata is written beside the samples as <destination>.json (SigMF: use a .sigmf-data "
                        "destination; <name>.sigmf-meta is written beside it).");
     if (ImGui::Button("Export")) {
-        try {
-            m_ConfirmOverwrite =
-                std::filesystem::exists(m_ExportPath) || std::filesystem::exists(Core::MetadataPath(m_ExportPath));
-            if (!m_ConfirmOverwrite) {
-                Export(false);
-            }
-        } catch (const std::exception &error) {
-            spdlog::error("Unable to inspect export destination {}: {}", m_ExportPath, error.what());
-            m_ExportStatus = error.what();
+        std::error_code ec;
+        m_ConfirmOverwrite =
+            std::filesystem::exists(m_ExportPath, ec) || std::filesystem::exists(Core::MetadataPath(m_ExportPath), ec);
+        if (ec) {
+            spdlog::error("Unable to inspect export destination {}: {}", m_ExportPath, ec.message());
+            m_ExportStatus = ec.message();
+        } else if (!m_ConfirmOverwrite) {
+            Export(false);
         }
     }
     if (m_ConfirmOverwrite) {
@@ -371,16 +367,17 @@ void ControlsWindow::DrawExportDialog() {
  * @param[in] overwrite  True to replace existing files.
  */
 void ControlsWindow::Export(bool overwrite) {
-    try {
+    const auto exported =
         Core::ExportSignal(m_ExportPath, *m_ExportResult,
                            m_ExportFormat == 0 ? Core::ExportFormat::CSV : Core::ExportFormat::SigMF, overwrite);
-        spdlog::info("Exported {} complex samples to {}", m_ExportResult->Samples.size(), m_ExportPath);
-        m_ExportStatus = "Exported samples and JSON metadata.";
-        m_ConfirmOverwrite = false;
-    } catch (const std::exception &error) {
-        spdlog::error("Export to {} failed: {}", m_ExportPath, error.what());
-        m_ExportStatus = std::string("Export failed: ") + error.what();
+    if (!exported.has_value()) {
+        spdlog::error("Export to {} failed: {}", m_ExportPath, exported.error());
+        m_ExportStatus = "Export failed: " + exported.error();
+        return;
     }
+    spdlog::info("Exported {} complex samples to {}", m_ExportResult->Samples.size(), m_ExportPath);
+    m_ExportStatus = "Exported samples and JSON metadata.";
+    m_ConfirmOverwrite = false;
 }
 
 } // namespace GUI

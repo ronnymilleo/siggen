@@ -8,7 +8,7 @@
 #include <algorithm>
 #include <array>
 #include <cmath>
-#include <stdexcept>
+#include <string>
 
 namespace Core {
 
@@ -58,8 +58,13 @@ void AppendDecimatedSamples(PlotData &plot, const Core::GeneratedSignal &signal,
     AppendSample(plot, signal, samples.size() - 1);
 }
 
-void AppendFrequencyTrack(PlotData &plot, const Core::GeneratedSignal &signal, const std::size_t limit) {
-    const auto estimate = Core::InstantaneousFrequency(signal.Samples, signal.SampleRateHz);
+std::expected<void, std::string> AppendFrequencyTrack(PlotData &plot, const Core::GeneratedSignal &signal,
+                                                      const std::size_t limit) {
+    const auto frequency = Core::InstantaneousFrequency(signal.Samples, signal.SampleRateHz);
+    if (!frequency.has_value()) {
+        return std::unexpected(frequency.error());
+    }
+    const auto &estimate = *frequency;
     const auto samples_per_symbol = static_cast<std::size_t>(signal.Config.SamplesPerSymbol);
     const auto stride = std::max<std::size_t>(1, estimate.size() / limit);
     for (std::size_t n = 0; n < estimate.size(); n += stride) {
@@ -68,6 +73,7 @@ void AppendFrequencyTrack(PlotData &plot, const Core::GeneratedSignal &signal, c
         plot.FreqNominal.push_back(
             signal.SymbolFrequenciesHz[std::min(n / samples_per_symbol, signal.SymbolFrequenciesHz.size() - 1)]);
     }
+    return {};
 }
 
 } // namespace
@@ -78,15 +84,15 @@ void AppendFrequencyTrack(PlotData &plot, const Core::GeneratedSignal &signal, c
  * @param[in] limit     Maximum number of time-domain points (and frequency estimates); at least six. Longer
  *                      signals are decimated to the per-bucket extremes of I and Q.
  * @return  Time series, mapped symbols scaled by the amplitude gain, matched-filter observations (linear family
- *          only; empty for noise sources) and the frequency track (FSK family only).
- * @note    Throws std::invalid_argument when the sample rate or the limit is invalid.
+ *          only; empty for noise sources) and the frequency track (FSK family only); an error when the sample
+ *          rate or the limit is invalid.
  */
-PlotData MakePlotData(const Core::GeneratedSignal &signal, const std::size_t limit) {
+std::expected<PlotData, std::string> MakePlotData(const Core::GeneratedSignal &signal, const std::size_t limit) {
     if (!std::isfinite(signal.SampleRateHz) || signal.SampleRateHz <= 0) {
-        throw std::invalid_argument("Plot sample rate must be positive and finite");
+        return std::unexpected(std::string("Plot sample rate must be positive and finite"));
     }
     if (limit < 6) {
-        throw std::invalid_argument("Plot limit must be at least six");
+        return std::unexpected(std::string("Plot limit must be at least six"));
     }
     PlotData plot;
     if (signal.Samples.size() <= limit) {
@@ -101,10 +107,16 @@ PlotData MakePlotData(const Core::GeneratedSignal &signal, const std::size_t lim
         plot.Mapped.Y.push_back(symbol.imag() * signal.Config.AmplitudeGain);
     }
     if (signal.Family == Core::Family::Fsk) {
-        AppendFrequencyTrack(plot, signal, limit);
+        if (const auto appended = AppendFrequencyTrack(plot, signal, limit); !appended.has_value()) {
+            return std::unexpected(appended.error());
+        }
     }
     if (signal.Family == Core::Family::Linear) {
-        for (const auto observation : Core::MatchedSymbols(signal).Values) {
+        const auto matched = Core::MatchedSymbols(signal);
+        if (!matched.has_value()) {
+            return std::unexpected(matched.error());
+        }
+        for (const auto observation : matched->Values) {
             plot.Matched.X.push_back(observation.real());
             plot.Matched.Y.push_back(observation.imag());
         }

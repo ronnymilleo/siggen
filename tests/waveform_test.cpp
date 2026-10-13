@@ -30,22 +30,23 @@ TEST(Waveform, DescriptorCapabilities) {
     std::set<int> ids;
     std::set<std::string> names;
     for (const auto &entry : expected) {
-        const auto &info = GetWaveformDescriptor(entry.Waveform);
-        EXPECT_EQ(info.BitsPerSymbol, entry.BitCount);
-        EXPECT_EQ(info.Family, entry.ExpectedFamily);
-        EXPECT_EQ(info.Shaped, entry.Shaped);
-        EXPECT_EQ(info.ExplicitInput, entry.ExplicitInput);
-        EXPECT_EQ(info.AwgnSupported, entry.Awgn);
+        const auto *info = FindWaveform(entry.Waveform);
+        ASSERT_NE(info, nullptr);
+        EXPECT_EQ(info->BitsPerSymbol, entry.BitCount);
+        EXPECT_EQ(info->Family, entry.ExpectedFamily);
+        EXPECT_EQ(info->Shaped, entry.Shaped);
+        EXPECT_EQ(info->ExplicitInput, entry.ExplicitInput);
+        EXPECT_EQ(info->AwgnSupported, entry.Awgn);
         EXPECT_EQ(BitsPerSymbol(entry.Waveform), entry.BitCount);
         EXPECT_EQ(WaveformFamily(entry.Waveform), entry.ExpectedFamily);
-        EXPECT_EQ(std::string(ModulationName(entry.Waveform)), std::string(info.CanonicalName));
+        EXPECT_EQ(std::string(ModulationName(entry.Waveform)), std::string(info->CanonicalName));
         EXPECT_TRUE(ids.insert(WaveformId(entry.Waveform)).second);
-        EXPECT_TRUE(names.insert(std::string(info.CanonicalName)).second);
+        EXPECT_TRUE(names.insert(std::string(info->CanonicalName)).second);
     }
     EXPECT_EQ(WaveformId(Modulation::BPSK), 0);
     EXPECT_EQ(WaveformId(Modulation::WGN), 5);
     EXPECT_FALSE(IsValid(static_cast<Modulation>(99)));
-    EXPECT_THROW(GetWaveformDescriptor(static_cast<Modulation>(99)), std::invalid_argument);
+    EXPECT_EQ(FindWaveform(static_cast<Modulation>(99)), nullptr);
 }
 
 TEST(Waveform, CaseInsensitiveNameParsing) {

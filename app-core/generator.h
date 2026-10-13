@@ -10,6 +10,7 @@
 #include "waveform.h"
 #include <complex>
 #include <cstdint>
+#include <expected>
 #include <string>
 #include <vector>
 
@@ -111,11 +112,11 @@ double FskModulationIndex(const GenerationConfig &config);
 
 // Settings
 void SelectWaveform(GenerationConfig &config, Modulation modulation);
-void Validate(const GenerationConfig &config);
+std::expected<void, std::string> Validate(const GenerationConfig &config);
 
 // Generation
-std::vector<std::complex<float>> MapSymbols(Modulation modulation, const std::string &bits);
-GeneratedSignal Generate(const GenerationConfig &config);
+std::expected<std::vector<std::complex<float>>, std::string> MapSymbols(Modulation modulation, const std::string &bits);
+std::expected<GeneratedSignal, std::string> Generate(const GenerationConfig &config);
 
 } // namespace Core
 

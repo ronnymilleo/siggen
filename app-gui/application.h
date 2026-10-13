@@ -10,41 +10,50 @@
 #include <SDL3/SDL_gpu.h>
 #include <SDL3/SDL_video.h>
 #include <string>
+#include <vector>
 
 namespace GUI {
 
 /**
  * @class   Application
  * @brief   Owns the SDL window, the SDL GPU device and the ImGui layer, and runs the main loop.
- * @details Call Init() once, then Run() if it succeeded, and always finish with Shutdown(). Init() throws when SDL,
- *          the GPU device or the ImGui layer cannot be set up; errors raised while drawing a frame are logged and
- *          the loop continues. Dear ImGui renders through the SDL GPU API: Direct3D 12 on Windows, Vulkan on Linux.
+ * @details Call Init() once, then Run() if it succeeded, and always finish with Shutdown(). Init() returns
+ *          Core::ExitFailure when SDL, the window, the GPU device or the ImGui layer cannot be set up, and keeps
+ *          the reason for Shutdown() to report on stderr and in a message box. Dear ImGui renders through the
+ *          SDL GPU API: Direct3D 12 on Windows, Vulkan on Linux.
  */
 class Application {
 public:
     Application() = default;
     ~Application();
 
-    void Init();
+    int Init();
     int Run();
     void Shutdown();
 
 private:
-    void InitializeSDL();
-    void CreateWindow();
-    void CreateGPUDevice();
-    void InitImGui();
+    // Errors
+    void AddError(const std::string &message);
+    void DumpErrors();
+
+    // Initialization
+    int InitializeSDL();
+    int CreateWindow();
+    int CreateGPUDevice();
     void LoadAndSetIcon();
+    int InitImGui();
+
+    // Frame
     void PollEvents();
     void NewFrame();
     void UpdateWindowTitle();
     void EndFrame();
-    void ShowErrorMessage(const std::string &title, const std::string &message);
 
     SDL_Window *m_SDLWindow = nullptr;
     SDL_GPUDevice *m_GPUDevice = nullptr;
     float m_WindowScale = 1.0f;
     bool m_IsOpen = true;
+    std::vector<std::string> m_Errors;
 
     // imgui.ini in the user's data folder; ImGui keeps only the pointer, so the path lives here
     std::string m_SettingsPath;

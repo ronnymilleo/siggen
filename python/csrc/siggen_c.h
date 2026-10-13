@@ -1,6 +1,8 @@
 // Plain C interface to the siggen library, loaded from Python with ctypes.
-// Every function catches C++ exceptions: failures return NULL or a negative
-// value, and the message is copied into the caller-supplied `error` buffer.
+// Failures return NULL or a negative value, and the message is copied into
+// the caller-supplied `error` buffer. No C++ exception crosses the ABI: the
+// library reports errors as values, and a catch-all only guards against
+// stray standard-library throws such as std::bad_alloc.
 #pragma once
 #include <stddef.h>
 #ifdef __cplusplus

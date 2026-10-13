@@ -9,7 +9,7 @@
 #include <charconv>
 #include <cmath>
 #include <cstdlib>
-#include <stdexcept>
+#include <string>
 
 namespace Console {
 
@@ -30,22 +30,28 @@ bool Supplied(const CLI::App &source, const char *name) {
  * @brief   Parses the whole text as a number.
  * @param[in] text  The option value.
  * @param[in] what  Option name used in the error message.
- * @return  The number.
- * @note    Throws std::invalid_argument when the text is not entirely a number.
+ * @return  The number, or an error when the text is not entirely a number.
  */
-double ParseDouble(const std::string &text, const char *what) {
+std::expected<double, std::string> ParseDouble(const std::string &text, const char *what) {
     double value = 0;
     auto [end, error] = std::from_chars(text.data(), text.data() + text.size(), value);
     if (error != std::errc{} || end != text.data() + text.size()) {
-        throw std::invalid_argument(std::string(what) + " must be a number: " + text);
+        return std::unexpected(std::string(what) + " must be a number: " + text);
     }
     return value;
 }
 
-void Reject(bool condition, const char *message) {
+/**
+ * @brief   Turns a rejected condition into an error.
+ * @param[in] condition  True when the option combination is not allowed.
+ * @param[in] message    User-facing explanation.
+ * @return  Nothing when the condition is false; the message as an error otherwise.
+ */
+std::expected<void, std::string> Reject(bool condition, const char *message) {
     if (condition) {
-        throw std::invalid_argument(message);
+        return std::unexpected(std::string(message));
     }
+    return {};
 }
 
 /**
@@ -63,18 +69,24 @@ struct RequestedFamilies {
  * @brief   Starts from the defaults, then the preset, then the waveform chosen with --modulation.
  * @param[in] source  The parsed context (root App or batch subcommand).
  * @param[in] cli     Parsed option values.
- * @return  The base configuration before the other explicit options.
+ * @return  The base configuration before the other explicit options; an error for an unreadable preset or an
+ *          unknown --modulation.
  */
-Core::GenerationConfig LoadPresetAndModulation(const CLI::App &source, const CommandLine &cli) {
+std::expected<Core::GenerationConfig, std::string> LoadPresetAndModulation(const CLI::App &source,
+                                                                           const CommandLine &cli) {
     Core::GenerationConfig config;
     if (Supplied(source, "--preset")) {
-        config = Core::LoadPreset(cli.Preset);
+        const auto loaded = Core::LoadPreset(cli.Preset);
+        if (!loaded.has_value()) {
+            return std::unexpected(loaded.error());
+        }
+        config = std::move(*loaded);
     }
 
     if (Supplied(source, "--modulation")) {
         Core::Modulation modulation;
         if (!Core::ParseModulation(cli.Modulation, modulation)) {
-            throw std::invalid_argument("Unknown --modulation: " + cli.Modulation);
+            return std::unexpected("Unknown --modulation: " + cli.Modulation);
         }
         Core::SelectWaveform(config, modulation);
     }
@@ -87,27 +99,28 @@ Core::GenerationConfig LoadPresetAndModulation(const CLI::App &source, const Com
  * @param[in] config     Configuration after the preset and --modulation.
  * @param[in] cli        Parsed option values.
  * @param[in] for_batch  True when resolving the batch subcommand.
- * @return  The option groups that apply.
- * @note    Throws std::invalid_argument on an unknown --modulations entry.
+ * @return  The option groups that apply; an error on an unknown --modulations entry.
  */
-RequestedFamilies FamiliesCovered(const Core::GenerationConfig &config, const CommandLine &cli, bool for_batch) {
+std::expected<RequestedFamilies, std::string> FamiliesCovered(const Core::GenerationConfig &config,
+                                                              const CommandLine &cli, bool for_batch) {
     RequestedFamilies families;
     families.Noise = Core::WaveformFamily(config.Modulation) == Core::Family::Noise;
     families.Linear = !families.Noise;
     families.Tones = config.Modulation == Core::Modulation::FSK2 || config.Modulation == Core::Modulation::FSK4;
-    families.Pulse = Core::GetWaveformDescriptor(config.Modulation).Shaped;
+    const auto *info = Core::FindWaveform(config.Modulation);
+    families.Pulse = info != nullptr && info->Shaped;
     if (for_batch && !cli.BatchModulations.empty()) {
         families = {};
         for (const auto &name : cli.BatchModulations) {
             Core::Modulation waveform;
             if (!Core::ParseModulation(name, waveform)) {
-                throw std::invalid_argument("Unknown --modulations entry: " + name);
+                return std::unexpected("Unknown --modulations entry: " + name);
             }
-            const auto &info = Core::GetWaveformDescriptor(waveform);
-            families.Noise |= info.Family == Core::Family::Noise;
-            families.Linear |= info.Family != Core::Family::Noise;
-            families.Tones |= info.Family == Core::Family::Fsk && waveform != Core::Modulation::MSK;
-            families.Pulse |= info.Shaped;
+            const auto *swept = Core::FindWaveform(waveform);
+            families.Noise |= swept->Family == Core::Family::Noise;
+            families.Linear |= swept->Family != Core::Family::Noise;
+            families.Tones |= swept->Family == Core::Family::Fsk && waveform != Core::Modulation::MSK;
+            families.Pulse |= swept->Shaped;
         }
     }
     return families;
@@ -138,30 +151,49 @@ void ResetInactiveBatchFamily(Core::GenerationConfig &config, bool has_linear) {
  * @param[in] source     The parsed context (root App or batch subcommand).
  * @param[in] families   The option groups that apply.
  * @param[in] for_batch  True when resolving the batch subcommand.
- * @note    Throws std::invalid_argument on the first rule broken, in the order they are checked.
+ * @return  Nothing on success; the first rule broken, in the order they are checked.
  */
-void RejectInapplicableOptions(const CLI::App &source, const RequestedFamilies &families, bool for_batch) {
-    Reject(!families.Noise && (Supplied(source, "--samples") || Supplied(source, "--sample-rate") ||
-                               Supplied(source, "--noise-power")),
-           "Noise source options (--samples/--sample-rate/--noise-power) require --modulation WGN");
-    Reject(!families.Linear &&
-               (Supplied(source, "--symbols") || Supplied(source, "--symbol-rate") || Supplied(source, "--sps") ||
-                Supplied(source, "--pulse") || Supplied(source, "--roll-off") || Supplied(source, "--span") ||
-                Supplied(source, "--bits") || Supplied(source, "--data-source") || Supplied(source, "--snr-db") ||
-                Supplied(source, "--cfo-hz") || Supplied(source, "--phase-noise-hz") ||
-                Supplied(source, "--iq-gain-db") || Supplied(source, "--iq-phase-deg") || Supplied(source, "--dc-i") ||
-                Supplied(source, "--dc-q") || Supplied(source, "--adc-bits")),
-           "Linear options do not apply to --modulation WGN");
-    Reject(!families.Pulse &&
-               (Supplied(source, "--pulse") || Supplied(source, "--roll-off") || Supplied(source, "--span")),
-           "Pulse options (--pulse/--roll-off/--span) do not apply to FSK and MSK, which are not pulse shaped");
-    Reject(!families.Tones && Supplied(source, "--tone-spacing-hz"),
-           "--tone-spacing-hz requires --modulation 2-FSK or 4-FSK (MSK fixes the spacing at symbol rate / 2)");
-    if (for_batch) {
-        Reject(Supplied(source, "--symbols") || Supplied(source, "--samples") || Supplied(source, "--bits") ||
-                   Supplied(source, "--data-source"),
-               "Batch generation rejects --symbols/--samples/--bits/--data-source; frame size fixes length");
+std::expected<void, std::string> RejectInapplicableOptions(const CLI::App &source, const RequestedFamilies &families,
+                                                           bool for_batch) {
+    if (const auto rejected =
+            Reject(!families.Noise && (Supplied(source, "--samples") || Supplied(source, "--sample-rate") ||
+                                       Supplied(source, "--noise-power")),
+                   "Noise source options (--samples/--sample-rate/--noise-power) require "
+                   "--modulation WGN");
+        !rejected.has_value()) {
+        return rejected;
     }
+    if (const auto rejected = Reject(
+            !families.Linear &&
+                (Supplied(source, "--symbols") || Supplied(source, "--symbol-rate") || Supplied(source, "--sps") ||
+                 Supplied(source, "--pulse") || Supplied(source, "--roll-off") || Supplied(source, "--span") ||
+                 Supplied(source, "--bits") || Supplied(source, "--data-source") || Supplied(source, "--snr-db") ||
+                 Supplied(source, "--cfo-hz") || Supplied(source, "--phase-noise-hz") ||
+                 Supplied(source, "--iq-gain-db") || Supplied(source, "--iq-phase-deg") || Supplied(source, "--dc-i") ||
+                 Supplied(source, "--dc-q") || Supplied(source, "--adc-bits")),
+            "Linear options do not apply to --modulation WGN");
+        !rejected.has_value()) {
+        return rejected;
+    }
+    if (const auto rejected =
+            Reject(!families.Pulse &&
+                       (Supplied(source, "--pulse") || Supplied(source, "--roll-off") || Supplied(source, "--span")),
+                   "Pulse options (--pulse/--roll-off/--span) do not apply to FSK and MSK, which are not pulse shaped");
+        !rejected.has_value()) {
+        return rejected;
+    }
+    if (const auto rejected = Reject(!families.Tones && Supplied(source, "--tone-spacing-hz"),
+                                     "--tone-spacing-hz requires --modulation 2-FSK or 4-FSK (MSK fixes the spacing "
+                                     "at symbol rate / 2)");
+        !rejected.has_value()) {
+        return rejected;
+    }
+    if (for_batch) {
+        return Reject(Supplied(source, "--symbols") || Supplied(source, "--samples") || Supplied(source, "--bits") ||
+                          Supplied(source, "--data-source"),
+                      "Batch generation rejects --symbols/--samples/--bits/--data-source; frame size fixes length");
+    }
+    return {};
 }
 
 /**
@@ -169,9 +201,10 @@ void RejectInapplicableOptions(const CLI::App &source, const RequestedFamilies &
  * @param[in] source      The parsed context (root App or batch subcommand).
  * @param[in] cli         Parsed option values.
  * @param[in,out] config  Configuration to update.
- * @note    Throws std::invalid_argument on an unknown --pulse.
+ * @return  Nothing on success; an error on an unknown --pulse.
  */
-void ApplySignalOptions(const CLI::App &source, const CommandLine &cli, Core::GenerationConfig &config) {
+std::expected<void, std::string> ApplySignalOptions(const CLI::App &source, const CommandLine &cli,
+                                                    Core::GenerationConfig &config) {
     if (Supplied(source, "--symbols")) {
         config.SymbolCount = cli.Symbols;
     }
@@ -184,7 +217,7 @@ void ApplySignalOptions(const CLI::App &source, const CommandLine &cli, Core::Ge
     if (Supplied(source, "--pulse")) {
         Core::Pulse pulse;
         if (!Core::ParsePulse(cli.Pulse, pulse)) {
-            throw std::invalid_argument("Unknown --pulse: " + cli.Pulse);
+            return std::unexpected("Unknown --pulse: " + cli.Pulse);
         }
         config.Pulse = pulse;
     }
@@ -215,6 +248,7 @@ void ApplySignalOptions(const CLI::App &source, const CommandLine &cli, Core::Ge
     if (Supplied(source, "--noise-power")) {
         config.NoiseSource.NoisePower = cli.NoisePower;
     }
+    return {};
 }
 
 /**
@@ -222,13 +256,15 @@ void ApplySignalOptions(const CLI::App &source, const CommandLine &cli, Core::Ge
  * @param[in] source      The parsed context (root App or batch subcommand).
  * @param[in] cli         Parsed option values.
  * @param[in,out] config  Configuration to update.
- * @note    Throws std::invalid_argument when --bits comes with --data-source random.
+ * @return  Nothing on success; an error when --bits comes with --data-source random.
  */
-void ApplyDataSource(const CLI::App &source, const CommandLine &cli, Core::GenerationConfig &config) {
+std::expected<void, std::string> ApplyDataSource(const CLI::App &source, const CommandLine &cli,
+                                                 Core::GenerationConfig &config) {
     const bool bits_supplied = Supplied(source, "--bits");
     const bool source_random = Supplied(source, "--data-source") && cli.DataSource == "random";
-    if (bits_supplied && source_random) {
-        throw std::invalid_argument("--bits conflicts with --data-source random");
+    if (const auto rejected = Reject(bits_supplied && source_random, "--bits conflicts with --data-source random");
+        !rejected.has_value()) {
+        return rejected;
     }
     if (Supplied(source, "--data-source")) {
         config.DataSource = cli.DataSource == "explicit" ? Core::DataSource::Explicit : Core::DataSource::Random;
@@ -237,6 +273,7 @@ void ApplyDataSource(const CLI::App &source, const CommandLine &cli, Core::Gener
         config.Bits = cli.Bits;
         config.DataSource = Core::DataSource::Explicit;
     }
+    return {};
 }
 
 /**
@@ -244,17 +281,23 @@ void ApplyDataSource(const CLI::App &source, const CommandLine &cli, Core::Gener
  * @param[in] source      The parsed context (root App or batch subcommand).
  * @param[in] cli         Parsed option values.
  * @param[in,out] config  Configuration to update.
- * @note    Throws std::invalid_argument when the value is neither "off" nor a number.
+ * @return  Nothing on success; an error when the value is neither "off" nor a number.
  */
-void ApplyAwgn(const CLI::App &source, const CommandLine &cli, Core::GenerationConfig &config) {
+std::expected<void, std::string> ApplyAwgn(const CLI::App &source, const CommandLine &cli,
+                                           Core::GenerationConfig &config) {
     if (Supplied(source, "--snr-db")) {
         if (cli.SnrDb == "off") {
             config.Awgn.Enabled = false;
         } else {
+            const auto snr = ParseDouble(cli.SnrDb, "--snr-db");
+            if (!snr.has_value()) {
+                return std::unexpected(snr.error());
+            }
             config.Awgn.Enabled = true;
-            config.Awgn.SnrDb = ParseDouble(cli.SnrDb, "--snr-db");
+            config.Awgn.SnrDb = *snr;
         }
     }
+    return {};
 }
 
 void ApplyImpairments(const CLI::App &source, const CommandLine &cli, Core::GenerationConfig &config) {
@@ -289,20 +332,38 @@ void ApplyImpairments(const CLI::App &source, const CommandLine &cli, Core::Gene
  * @param[in] source     The root App for single generation, or the batch subcommand.
  * @param[in] cli        Parsed option values.
  * @param[in] for_batch  True when resolving the batch subcommand.
- * @return  The validated configuration.
+ * @return  The validated configuration, or the first resolution or validation error.
  */
-Core::GenerationConfig ResolveBase(const CLI::App &source, const CommandLine &cli, bool for_batch) {
-    Core::GenerationConfig config = LoadPresetAndModulation(source, cli);
-    const RequestedFamilies families = FamiliesCovered(config, cli, for_batch);
-    if (for_batch) {
-        ResetInactiveBatchFamily(config, families.Linear);
+std::expected<Core::GenerationConfig, std::string> ResolveBase(const CLI::App &source, const CommandLine &cli,
+                                                               bool for_batch) {
+    const auto base = LoadPresetAndModulation(source, cli);
+    if (!base.has_value()) {
+        return std::unexpected(base.error());
     }
-    RejectInapplicableOptions(source, families, for_batch);
-    ApplySignalOptions(source, cli, config);
-    ApplyDataSource(source, cli, config);
-    ApplyAwgn(source, cli, config);
+    Core::GenerationConfig config = std::move(*base);
+    const auto families = FamiliesCovered(config, cli, for_batch);
+    if (!families.has_value()) {
+        return std::unexpected(families.error());
+    }
+    if (for_batch) {
+        ResetInactiveBatchFamily(config, families->Linear);
+    }
+    if (const auto rejected = RejectInapplicableOptions(source, *families, for_batch); !rejected.has_value()) {
+        return std::unexpected(rejected.error());
+    }
+    if (const auto applied = ApplySignalOptions(source, cli, config); !applied.has_value()) {
+        return std::unexpected(applied.error());
+    }
+    if (const auto applied = ApplyDataSource(source, cli, config); !applied.has_value()) {
+        return std::unexpected(applied.error());
+    }
+    if (const auto applied = ApplyAwgn(source, cli, config); !applied.has_value()) {
+        return std::unexpected(applied.error());
+    }
     ApplyImpairments(source, cli, config);
-    Core::Validate(config);
+    if (const auto validated = Core::Validate(config); !validated.has_value()) {
+        return std::unexpected(validated.error());
+    }
     return config;
 }
 
@@ -312,65 +373,74 @@ Core::GenerationConfig ResolveBase(const CLI::App &source, const CommandLine &cl
  * @brief   Resolves the single-generation configuration as defaults -> loaded preset -> explicitly supplied options,
  *          then validates it through the shared library.
  * @param[in] cli  Parsed command line.
- * @return  The validated configuration.
- * @note    Options that were not supplied never replace preset values. Throws std::invalid_argument on unknown
- *          names or options incompatible with the selected waveform family.
+ * @return  The validated configuration; an error on unknown names or options incompatible with the selected
+ *          waveform family.
+ * @note    Options that were not supplied never replace preset values.
  */
-Core::GenerationConfig ResolveConfig(const CommandLine &cli) {
+std::expected<Core::GenerationConfig, std::string> ResolveConfig(const CommandLine &cli) {
     return ResolveBase(cli.App, cli, false);
 }
 
 /**
  * @brief   Maps a --format value to an export format.
  * @param[in] format  "csv" or "sigmf".
- * @return  The export format.
- * @note    Throws std::invalid_argument on any other value.
+ * @return  The export format; an error on any other value.
  */
-Core::ExportFormat ResolveFormat(const std::string &format) {
+std::expected<Core::ExportFormat, std::string> ResolveFormat(const std::string &format) {
     if (format == "csv") {
         return Core::ExportFormat::CSV;
     }
     if (format == "sigmf") {
         return Core::ExportFormat::SigMF;
     }
-    throw std::invalid_argument("Unknown --format: " + format);
+    return std::unexpected("Unknown --format: " + format);
 }
 
 /**
  * @brief   Chooses the sample destination of a single generation.
  * @param[in] cli  Parsed command line.
- * @return  The explicit --output, else signal.csv or signal.sigmf-data by format.
+ * @return  The explicit --output, else signal.csv or signal.sigmf-data by format; an error on an unknown format.
  */
-std::string ResolveOutput(const CommandLine &cli) {
+std::expected<std::string, std::string> ResolveOutput(const CommandLine &cli) {
     if (!cli.Output.empty()) {
         return cli.Output;
     }
-    return ResolveFormat(cli.Format) == Core::ExportFormat::CSV ? "signal.csv" : "signal.sigmf-data";
+    const auto format = ResolveFormat(cli.Format);
+    if (!format.has_value()) {
+        return std::unexpected(format.error());
+    }
+    return *format == Core::ExportFormat::CSV ? "signal.csv" : "signal.sigmf-data";
 }
 
 /**
  * @brief   Resolves a batch request: the shared preset and overrides given after "batch", plus the sweep axes.
  * @param[in] cli  Parsed command line with the batch subcommand selected.
- * @return  The request, with a validated base configuration.
- * @note    Throws std::invalid_argument on root options other than --log-level, on batch --overwrite, on unknown
- *          names and on options incompatible with the swept waveforms.
+ * @return  The request, with a validated base configuration; an error on root options other than --log-level, on
+ *          batch --overwrite, on unknown names and on options incompatible with the swept waveforms.
  */
-Core::BatchRequest ResolveBatch(const CommandLine &cli) {
+std::expected<Core::BatchRequest, std::string> ResolveBatch(const CommandLine &cli) {
     // Root signal/export options belong to single generation. Accepting them here would silently discard values
     // because only subcommand counts are resolved
     for (const auto *option : cli.App.get_options()) {
         if (option->count() && option->get_name() != "--log-level") {
-            throw std::invalid_argument("With batch, put signal and format options after 'batch'; root option: " +
-                                        option->get_name());
+            return std::unexpected("With batch, put signal and format options after 'batch'; root option: " +
+                                   option->get_name());
         }
     }
-    Reject(cli.BatchOverwrite, "batch --overwrite is rejected; choose a new --output-dir");
+    if (const auto rejected = Reject(cli.BatchOverwrite, "batch --overwrite is rejected; choose a new --output-dir");
+        !rejected.has_value()) {
+        return std::unexpected(rejected.error());
+    }
     Core::BatchRequest request;
-    request.Base = ResolveBase(*cli.Batch, cli, true);
+    const auto base = ResolveBase(*cli.Batch, cli, true);
+    if (!base.has_value()) {
+        return std::unexpected(base.error());
+    }
+    request.Base = std::move(*base);
     for (const auto &name : cli.BatchModulations) {
         Core::Modulation modulation;
         if (!Core::ParseModulation(name, modulation)) {
-            throw std::invalid_argument("Unknown --modulations entry: " + name);
+            return std::unexpected("Unknown --modulations entry: " + name);
         }
         request.Waveforms.push_back(modulation);
     }
@@ -378,7 +448,11 @@ Core::BatchRequest ResolveBatch(const CommandLine &cli) {
     request.SnrsDb = cli.BatchSnrsDb;
     request.FrameSize = cli.FrameSize;
     request.FramesPerPoint = cli.FramesPerPoint;
-    request.Format = ResolveFormat(cli.BatchFormat);
+    const auto format = ResolveFormat(cli.BatchFormat);
+    if (!format.has_value()) {
+        return std::unexpected(format.error());
+    }
+    request.Format = *format;
     request.OutputDir = cli.OutputDir;
     return request;
 }
@@ -387,28 +461,36 @@ Core::BatchRequest ResolveBatch(const CommandLine &cli) {
  * @brief   Resolves a BER sweep: the preset and signal options given after "ber", plus the Eb/N0 points and
  *          stopping rules.
  * @param[in] cli  Parsed command line with the ber subcommand selected.
- * @return  The request. The sweep sets the noise and draws random data itself, so AWGN is off, the data source is
- *          random and explicit bits are cleared. Without --eb-n0-db the points are 0 to 10 dB in steps of 2.
- * @note    Throws std::invalid_argument on root options other than --log-level, on --symbols, --bits,
- *          --data-source or --snr-db, on waveforms without a reference receiver and on out-of-range settings.
+ * @return  The request, or an error on root options other than --log-level, on --symbols, --bits, --data-source or
+ *          --snr-db, on waveforms without a reference receiver and on out-of-range settings. The sweep sets the
+ *          noise and draws random data itself, so AWGN is off, the data source is random and explicit bits are
+ *          cleared. Without --eb-n0-db the points are 0 to 10 dB in steps of 2.
  */
-BerRequest ResolveBer(const CommandLine &cli) {
+std::expected<BerRequest, std::string> ResolveBer(const CommandLine &cli) {
     for (const auto *option : cli.App.get_options()) {
         if (option->count() && option->get_name() != "--log-level") {
-            throw std::invalid_argument("With ber, put signal options after 'ber'; root option: " + option->get_name());
+            return std::unexpected("With ber, put signal options after 'ber'; root option: " + option->get_name());
         }
     }
-    Reject(Supplied(*cli.Ber, "--symbols") || Supplied(*cli.Ber, "--bits") || Supplied(*cli.Ber, "--data-source") ||
-               Supplied(*cli.Ber, "--snr-db"),
-           "ber rejects --symbols/--bits/--data-source/--snr-db; use --block-symbols and --eb-n0-db");
+    if (const auto rejected =
+            Reject(Supplied(*cli.Ber, "--symbols") || Supplied(*cli.Ber, "--bits") ||
+                       Supplied(*cli.Ber, "--data-source") || Supplied(*cli.Ber, "--snr-db"),
+                   "ber rejects --symbols/--bits/--data-source/--snr-db; use --block-symbols and --eb-n0-db");
+        !rejected.has_value()) {
+        return std::unexpected(rejected.error());
+    }
     BerRequest request;
-    request.Config = ResolveBase(*cli.Ber, cli, false);
+    const auto config = ResolveBase(*cli.Ber, cli, false);
+    if (!config.has_value()) {
+        return std::unexpected(config.error());
+    }
+    request.Config = std::move(*config);
     request.Config.Awgn.Enabled = false; // The sweep sets the noise itself
     request.Config.DataSource = Core::DataSource::Random;
     request.Config.Bits.clear();
     if (!Core::HasReferenceDemodulator(request.Config.Modulation)) {
-        throw std::invalid_argument(std::string("ber needs a linear waveform; ") +
-                                    Core::ModulationName(request.Config.Modulation) + " has no reference receiver");
+        return std::unexpected(std::string("ber needs a linear waveform; ") +
+                               Core::ModulationName(request.Config.Modulation) + " has no reference receiver");
     }
     request.Settings.EbN0Db = cli.BerEbN0Db;
     if (request.Settings.EbN0Db.empty()) {
@@ -417,11 +499,25 @@ BerRequest ResolveBer(const CommandLine &cli) {
         }
     }
     for (double db : request.Settings.EbN0Db) {
-        Reject(!std::isfinite(db) || std::abs(db) > 60, "--eb-n0-db values must be finite and within 60 dB");
+        if (const auto rejected =
+                Reject(!std::isfinite(db) || std::abs(db) > 60, "--eb-n0-db values must be finite and within 60 dB");
+            !rejected.has_value()) {
+            return std::unexpected(rejected.error());
+        }
     }
-    Reject(cli.BerMinErrors == 0, "--min-errors must be positive");
-    Reject(cli.BerMaxBits == 0 || cli.BerMaxBits > 1000000000ULL, "--max-bits must be 1 to 1000000000");
-    Reject(cli.BerBlockSymbols < 64 || cli.BerBlockSymbols > 65536, "--block-symbols must be 64 to 65536");
+    if (const auto rejected = Reject(cli.BerMinErrors == 0, "--min-errors must be positive"); !rejected.has_value()) {
+        return std::unexpected(rejected.error());
+    }
+    if (const auto rejected =
+            Reject(cli.BerMaxBits == 0 || cli.BerMaxBits > 1000000000ULL, "--max-bits must be 1 to 1000000000");
+        !rejected.has_value()) {
+        return std::unexpected(rejected.error());
+    }
+    if (const auto rejected =
+            Reject(cli.BerBlockSymbols < 64 || cli.BerBlockSymbols > 65536, "--block-symbols must be 64 to 65536");
+        !rejected.has_value()) {
+        return std::unexpected(rejected.error());
+    }
     request.Settings.MinErrors = cli.BerMinErrors;
     request.Settings.MaxBits = cli.BerMaxBits;
     request.Settings.BlockSymbols = cli.BerBlockSymbols;
@@ -431,10 +527,9 @@ BerRequest ResolveBer(const CommandLine &cli) {
 /**
  * @brief   Maps a --window value to a Welch window.
  * @param[in] name  "hann", "hamming", "blackman" or "rectangular".
- * @return  The window.
- * @note    Throws std::invalid_argument on any other value.
+ * @return  The window; an error on any other value.
  */
-Core::Window ResolveWindow(const std::string &name) {
+std::expected<Core::Window, std::string> ResolveWindow(const std::string &name) {
     if (name == "hann") {
         return Core::Window::Hann;
     }
@@ -447,7 +542,7 @@ Core::Window ResolveWindow(const std::string &name) {
     if (name == "rectangular") {
         return Core::Window::Rectangular;
     }
-    throw std::invalid_argument("Unknown --window: " + name);
+    return std::unexpected("Unknown --window: " + name);
 }
 
 } // namespace Console

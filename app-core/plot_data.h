@@ -8,6 +8,8 @@
 
 #include "signal_analysis.h"
 #include <cstddef>
+#include <expected>
+#include <string>
 #include <vector>
 
 namespace Core {
@@ -31,7 +33,7 @@ struct PlotData {
     std::vector<double> FreqTime, FreqEstimate, FreqNominal;
 };
 
-PlotData MakePlotData(const Core::GeneratedSignal &signal, std::size_t limit = 4096);
+std::expected<PlotData, std::string> MakePlotData(const Core::GeneratedSignal &signal, std::size_t limit = 4096);
 
 } // namespace Core
 

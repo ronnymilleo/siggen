@@ -13,7 +13,7 @@
 #include <locale>
 #include <numbers>
 #include <sstream>
-#include <stdexcept>
+#include <string>
 
 namespace Core {
 
@@ -87,29 +87,30 @@ bool ImpairmentSettings::Active() const {
 /**
  * @brief   Checks impairment settings.
  * @param[in] settings  Settings to check.
- * @note    Throws std::invalid_argument for non-finite or out-of-range settings.
+ * @return  Nothing on success, or the first non-finite or out-of-range setting found.
  */
-void Validate(const ImpairmentSettings &settings) {
+std::expected<void, std::string> Validate(const ImpairmentSettings &settings) {
     const auto finite = [](double value) { return std::isfinite(value); };
     if (!finite(settings.CfoHz) || !finite(settings.PhaseNoiseLinewidthHz) || !finite(settings.IqGainDb) ||
         !finite(settings.IqPhaseDeg) || !finite(settings.DcOffsetI) || !finite(settings.DcOffsetQ)) {
-        throw std::invalid_argument("Impairment settings must be finite");
+        return std::unexpected(std::string("Impairment settings must be finite"));
     }
     if (settings.PhaseNoiseLinewidthHz < 0) {
-        throw std::invalid_argument("Phase noise linewidth must be non-negative");
+        return std::unexpected(std::string("Phase noise linewidth must be non-negative"));
     }
     if (std::abs(settings.IqGainDb) > 40) {
-        throw std::invalid_argument("IQ gain imbalance must be within +/-40 dB");
+        return std::unexpected(std::string("IQ gain imbalance must be within +/-40 dB"));
     }
     if (std::abs(settings.IqPhaseDeg) > 45) {
-        throw std::invalid_argument("IQ phase imbalance must be within +/-45 degrees");
+        return std::unexpected(std::string("IQ phase imbalance must be within +/-45 degrees"));
     }
     if (std::abs(settings.DcOffsetI) > 10 || std::abs(settings.DcOffsetQ) > 10) {
-        throw std::invalid_argument("DC offset must be within +/-10 times the RMS amplitude");
+        return std::unexpected(std::string("DC offset must be within +/-10 times the RMS amplitude"));
     }
     if (settings.AdcBits < 0 || settings.AdcBits == 1 || settings.AdcBits > MaxAdcBits) {
-        throw std::invalid_argument("ADC bits must be 0 (off) or 2-24");
+        return std::unexpected(std::string("ADC bits must be 0 (off) or 2-24"));
     }
+    return {};
 }
 
 /**
@@ -119,20 +120,21 @@ void Validate(const ImpairmentSettings &settings) {
  * @param[in]     sample_rate_hz  Sample rate of the signal.
  * @param[in]     settings        Impairments to apply; validated first.
  * @param[in]     seed            Seed of the phase noise.
+ * @return  Nothing on success, or an error for invalid settings or sample rate, or when a sample overflows.
  * @note    Phase noise is a Wiener process with per-sample variance 2*pi*linewidth/fs, drawn from
  *          GaussianSource(seed). The quantizer is a mid-rise ADC whose full scale is the largest I or Q magnitude
- *          of the buffer (auto-ranging). DC offsets scale with the RMS amplitude of the input. Throws
- *          std::invalid_argument for invalid settings or sample rate and std::overflow_error when a sample
- *          overflows.
+ *          of the buffer (auto-ranging). DC offsets scale with the RMS amplitude of the input.
  */
-void ApplyImpairments(std::span<std::complex<float>> samples, double sample_rate_hz, const ImpairmentSettings &settings,
-                      std::uint32_t seed) {
-    Validate(settings);
+std::expected<void, std::string> ApplyImpairments(std::span<std::complex<float>> samples, double sample_rate_hz,
+                                                  const ImpairmentSettings &settings, std::uint32_t seed) {
+    if (const auto validated = Validate(settings); !validated.has_value()) {
+        return std::unexpected(validated.error());
+    }
     if (!settings.Active() || samples.empty()) {
-        return;
+        return {};
     }
     if (!std::isfinite(sample_rate_hz) || sample_rate_hz <= 0) {
-        throw std::invalid_argument("Sample rate must be positive and finite");
+        return std::unexpected(std::string("Sample rate must be positive and finite"));
     }
     double power = 0;
     for (const auto &sample : samples) {
@@ -153,9 +155,10 @@ void ApplyImpairments(std::span<std::complex<float>> samples, double sample_rate
     }
     for (const auto &sample : samples) {
         if (!std::isfinite(sample.real()) || !std::isfinite(sample.imag())) {
-            throw std::overflow_error("Impairment sample overflow");
+            return std::unexpected(std::string("Impairment sample overflow"));
         }
     }
+    return {};
 }
 
 /**

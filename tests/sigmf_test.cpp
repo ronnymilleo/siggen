@@ -8,6 +8,7 @@
 #include "measurements.h"
 #include "preset.h"
 #include "recording.h"
+#include "test_support.h"
 #include <cmath>
 #include <filesystem>
 #include <fstream>
@@ -49,69 +50,69 @@ TEST(SigMF, MetadataPathPairsDataAndMetaFiles) {
 }
 
 TEST(SigMF, MetadataIsValidJsonWithCoreFields) {
-    const auto signal = Generate(QamConfig());
-    const auto root = nlohmann::json::parse(ExportMetadata(signal, ExportFormat::SigMF));
+    const auto signal = Unwrap(Generate(QamConfig()));
+    const auto root = nlohmann::json::parse(Unwrap(ExportMetadata(signal, ExportFormat::SigMF)));
     const auto &global = root.at("global");
     EXPECT_EQ(global.at("core:datatype"), "cf32_le");
     EXPECT_DOUBLE_EQ(global.at("core:sample_rate").get<double>(), signal.SampleRateHz);
     EXPECT_EQ(global.at("core:version"), "1.0.0");
     EXPECT_EQ(global.at("siggen:metadata").at("sample_count").get<std::size_t>(), signal.Samples.size());
-    EXPECT_EQ(global.at("siggen:preset"), SerializePreset(signal.Config));
+    EXPECT_EQ(global.at("siggen:preset"), Unwrap(SerializePreset(signal.Config)));
     EXPECT_EQ(root.at("captures").size(), 1u);
 }
 
 TEST(SigMF, ExportThenReadRoundTripsSamplesAndConfiguration) {
     const auto dir = ScratchDir("roundtrip");
-    const auto signal = Generate(QamConfig());
-    ExportSignal(dir / "tx.sigmf-data", signal, ExportFormat::SigMF);
+    const auto signal = Unwrap(Generate(QamConfig()));
+    ASSERT_TRUE(ExportSignal(dir / "tx.sigmf-data", signal, ExportFormat::SigMF).has_value());
     ASSERT_TRUE(std::filesystem::exists(dir / "tx.sigmf-meta"));
     EXPECT_EQ(std::filesystem::file_size(dir / "tx.sigmf-data"), signal.Samples.size() * 8);
     for (const auto &path : {dir / "tx.sigmf-meta", dir / "tx.sigmf-data"}) {
-        const auto recording = ReadRecording(path);
+        const auto recording = Unwrap(ReadRecording(path));
         ASSERT_EQ(recording.Samples.size(), signal.Samples.size());
         for (std::size_t k = 0; k < signal.Samples.size(); ++k) {
             ASSERT_EQ(recording.Samples[k], signal.Samples[k]);
         }
         EXPECT_DOUBLE_EQ(recording.SampleRateHz, signal.SampleRateHz);
         ASSERT_TRUE(recording.Config.has_value());
-        EXPECT_EQ(SerializePreset(*recording.Config), SerializePreset(signal.Config));
+        EXPECT_EQ(Unwrap(SerializePreset(*recording.Config)), Unwrap(SerializePreset(signal.Config)));
     }
 }
 
 TEST(SigMF, ExportRefusesToReplaceWithoutOverwrite) {
     const auto dir = ScratchDir("overwrite");
-    const auto signal = Generate(QamConfig());
-    ExportSignal(dir / "tx.sigmf-data", signal, ExportFormat::SigMF);
-    EXPECT_THROW(ExportSignal(dir / "tx.sigmf-data", signal, ExportFormat::SigMF), std::runtime_error);
-    EXPECT_NO_THROW(ExportSignal(dir / "tx.sigmf-data", signal, ExportFormat::SigMF, true));
+    const auto signal = Unwrap(Generate(QamConfig()));
+    ASSERT_TRUE(ExportSignal(dir / "tx.sigmf-data", signal, ExportFormat::SigMF).has_value());
+    EXPECT_FALSE(ExportSignal(dir / "tx.sigmf-data", signal, ExportFormat::SigMF).has_value());
+    EXPECT_TRUE(ExportSignal(dir / "tx.sigmf-data", signal, ExportFormat::SigMF, true).has_value());
 }
 
 TEST(SigMF, NoiseSourcesRoundTrip) {
     const auto dir = ScratchDir("wgn");
     GenerationConfig c;
     c.Modulation = Modulation::WGN;
-    const auto signal = Generate(c);
-    ExportSignal(dir / "n.sigmf-data", signal, ExportFormat::SigMF);
-    const auto recording = ReadRecording(dir / "n.sigmf-meta");
+    const auto signal = Unwrap(Generate(c));
+    ASSERT_TRUE(ExportSignal(dir / "n.sigmf-data", signal, ExportFormat::SigMF).has_value());
+    const auto recording = Unwrap(ReadRecording(dir / "n.sigmf-meta"));
     EXPECT_EQ(recording.Samples.size(), signal.Samples.size());
-    const auto report = AnalyzeRecording(recording);
+    const auto report = Unwrap(AnalyzeRecording(recording));
     EXPECT_FALSE(report.Accuracy.has_value());
     EXPECT_FALSE(report.Note.empty());
 }
 
 TEST(Analyze, EvmFromFileMatchesTheGeneratorsOwnMeasurement) {
     const auto dir = ScratchDir("evm");
-    const auto signal = Generate(QamConfig());
-    ExportSignal(dir / "tx.sigmf-data", signal, ExportFormat::SigMF);
-    const auto report = AnalyzeRecording(ReadRecording(dir / "tx.sigmf-meta"));
-    const auto expected = MeasureSymbolAccuracy(signal);
+    const auto signal = Unwrap(Generate(QamConfig()));
+    ASSERT_TRUE(ExportSignal(dir / "tx.sigmf-data", signal, ExportFormat::SigMF).has_value());
+    const auto report = Unwrap(AnalyzeRecording(Unwrap(ReadRecording(dir / "tx.sigmf-meta"))));
+    const auto expected = Unwrap(MeasureSymbolAccuracy(signal));
     ASSERT_TRUE(report.Accuracy.has_value());
     ASSERT_TRUE(expected.has_value());
     EXPECT_DOUBLE_EQ(report.Accuracy->EvmRms, expected->EvmRms);
     EXPECT_EQ(report.Waveform, std::string("16-QAM"));
     // Post-filter SNR = sample SNR + 10 log10(SPS); the measurement tracks the requested 20 dB.
     EXPECT_NEAR(report.SampleSnrDb, 20.0, 1.0);
-    const auto stats = MeasurePowerStatistics(signal.Samples);
+    const auto stats = Unwrap(MeasurePowerStatistics(signal.Samples));
     EXPECT_DOUBLE_EQ(report.Power.PaprDb, stats.PaprDb);
     EXPECT_DOUBLE_EQ(report.SampleRateHz, signal.SampleRateHz);
 }
@@ -120,16 +121,16 @@ TEST(Analyze, EvmReflectsSamplesChangedAfterExport) {
     const auto dir = ScratchDir("edited");
     auto config = QamConfig();
     config.Awgn.Enabled = false;
-    auto signal = Generate(config);
-    ExportSignal(dir / "tx.sigmf-data", signal, ExportFormat::SigMF);
-    auto recording = ReadRecording(dir / "tx.sigmf-meta");
-    const auto clean = AnalyzeRecording(recording);
+    auto signal = Unwrap(Generate(config));
+    ASSERT_TRUE(ExportSignal(dir / "tx.sigmf-data", signal, ExportFormat::SigMF).has_value());
+    auto recording = Unwrap(ReadRecording(dir / "tx.sigmf-meta"));
+    const auto clean = Unwrap(AnalyzeRecording(recording));
     std::mt19937 rng(1);
     std::normal_distribution<float> gauss(0.0f, 0.1f);
     for (auto &s : recording.Samples) {
         s += std::complex<float>(gauss(rng), gauss(rng));
     }
-    const auto noisy = AnalyzeRecording(recording);
+    const auto noisy = Unwrap(AnalyzeRecording(recording));
     ASSERT_TRUE(clean.Accuracy && noisy.Accuracy);
     EXPECT_LT(clean.Accuracy->EvmRms, 0.02);
     EXPECT_GT(noisy.Accuracy->EvmRms, 5 * clean.Accuracy->EvmRms);
@@ -142,7 +143,7 @@ TEST(Analyze, SpectrumFindsToneAndBandwidth) {
         const double phase = 2 * std::numbers::pi * 1000.0 * k / 8000;
         recording.Samples.emplace_back(static_cast<float>(std::cos(phase)), static_cast<float>(std::sin(phase)));
     }
-    const auto report = AnalyzeRecording(recording);
+    const auto report = Unwrap(AnalyzeRecording(recording));
     EXPECT_NEAR(report.PeakFrequencyHz, 1000, 8000.0 / 1024);
     EXPECT_NEAR(report.Power.MeanPower, 1, 1e-6);
     EXPECT_NEAR(report.Power.PaprDb, 0, 1e-6);
@@ -160,7 +161,7 @@ TEST(Recording, ReadsSigmfCi16WithScaling) {
         R"({"global": {"core:datatype": "ci16_le", "core:sample_rate": 1000.0, "core:version": "1.0.0"}, "captures": [], "annotations": []})");
     // (16384, -32768) and (-1, 0) little-endian.
     WriteFile(dir / "r.sigmf-data", std::string("\x00\x40\x00\x80\xff\xff\x00\x00", 8));
-    const auto recording = ReadRecording(dir / "r.sigmf-meta");
+    const auto recording = Unwrap(ReadRecording(dir / "r.sigmf-meta"));
     ASSERT_EQ(recording.Samples.size(), 2u);
     EXPECT_FLOAT_EQ(recording.Samples[0].real(), 0.5f);
     EXPECT_FLOAT_EQ(recording.Samples[0].imag(), -1.0f);
@@ -171,20 +172,20 @@ TEST(Recording, RejectsBadInputs) {
     const auto dir = ScratchDir("bad");
     WriteFile(dir / "u.sigmf-meta", R"({"global": {"core:datatype": "cu8", "core:sample_rate": 1000}})");
     WriteFile(dir / "u.sigmf-data", "abcd");
-    EXPECT_THROW(ReadRecording(dir / "u.sigmf-meta"), std::runtime_error);
+    EXPECT_FALSE((ReadRecording(dir / "u.sigmf-meta")).has_value());
     WriteFile(dir / "t.sigmf-meta", R"({"global": {"core:datatype": "cf32_le", "core:sample_rate": 1000}})");
     WriteFile(dir / "t.sigmf-data", std::string(10, 'x'));
-    EXPECT_THROW(ReadRecording(dir / "t.sigmf-meta"), std::runtime_error);
+    EXPECT_FALSE((ReadRecording(dir / "t.sigmf-meta")).has_value());
     WriteFile(dir / "r.sigmf-meta", R"({"global": {"core:datatype": "cf32_le"}})");
-    EXPECT_THROW(ReadRecording(dir / "r.sigmf-meta"), std::runtime_error);
+    EXPECT_FALSE((ReadRecording(dir / "r.sigmf-meta")).has_value());
     WriteFile(dir / "m.sigmf-meta", "not json");
-    EXPECT_THROW(ReadRecording(dir / "m.sigmf-meta"), std::invalid_argument);
-    EXPECT_THROW(ReadRecording(dir / "missing.sigmf-meta"), std::runtime_error);
-    EXPECT_THROW(ReadRecording(dir / "tx.iq"), std::runtime_error);
+    EXPECT_FALSE((ReadRecording(dir / "m.sigmf-meta")).has_value());
+    EXPECT_FALSE((ReadRecording(dir / "missing.sigmf-meta")).has_value());
+    EXPECT_FALSE((ReadRecording(dir / "tx.iq")).has_value());
     WriteFile(dir / "nan.sigmf-meta", R"({"global": {"core:datatype": "cf32_le", "core:sample_rate": 1000}})");
     WriteFile(dir / "nan.sigmf-data", std::string("\x00\x00\xc0\x7f\x00\x00\x00\x00", 8));
-    EXPECT_THROW(ReadRecording(dir / "nan.sigmf-meta"), std::runtime_error);
-    EXPECT_THROW(AnalyzeRecording(Recording{}), std::invalid_argument);
+    EXPECT_FALSE((ReadRecording(dir / "nan.sigmf-meta")).has_value());
+    EXPECT_FALSE(AnalyzeRecording(Recording{}).has_value());
 }
 
 } // namespace Core

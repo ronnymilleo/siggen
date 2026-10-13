@@ -87,9 +87,10 @@ struct WaveformDescriptor {
 // Fixed modulation index of MSK (tone spacing / symbol rate)
 inline constexpr double MskModulationIndex = 0.5;
 
-// Capability table
+// Capability table; the convenience lookups require a supported waveform (see IsValid) and return a neutral
+// fallback for unsupported values, which validated code paths never produce
 std::span<const WaveformDescriptor> Waveforms();
-const WaveformDescriptor &GetWaveformDescriptor(Modulation modulation);
+const WaveformDescriptor *FindWaveform(Modulation modulation);
 Family WaveformFamily(Modulation modulation);
 const char *FamilyName(Family family);
 int BitsPerSymbol(Modulation modulation);

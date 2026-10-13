@@ -4,13 +4,15 @@
  */
 
 #include "application.h"
+#include "error_codes.h"
 #include <spdlog/cfg/env.h>
 #include <spdlog/sinks/stdout_color_sinks.h>
 #include <spdlog/spdlog.h>
 
 /**
  * @brief   Opens the desktop interface and runs it until the user closes the window.
- * @return  0 when the window closes normally; 1 when the window or the graphics context cannot be created.
+ * @return  Core::ExitSuccess when the window closes normally; Core::ExitFailure when the window or the graphics
+ *          context cannot be created, which Shutdown() reports on stderr and in a message box.
  * @note    The executable takes no arguments: the generator starts with default settings and presets load from the
  *          Signal Setup window. The log level comes from SPDLOG_LEVEL; logs go to stderr.
  */
@@ -20,18 +22,12 @@ int main(int, char **) {
     spdlog::cfg::load_env_levels();
     spdlog::flush_on(spdlog::level::warn);
 
-    try {
-        GUI::Application application;
-        spdlog::info("Starting Siggen GUI");
-        application.Init();
-        const int result = application.Run();
-        application.Shutdown();
-        return result;
-    } catch (const std::exception &error) {
-        spdlog::error("Operation failed: {}", error.what());
-        return 1;
-    } catch (...) {
-        spdlog::critical("Unknown error occurred");
-        return 1;
+    GUI::Application application;
+    spdlog::info("Starting Siggen GUI");
+    int result = application.Init();
+    if (result == Core::ExitSuccess) {
+        result = application.Run();
     }
+    application.Shutdown();
+    return result;
 }

@@ -11,7 +11,7 @@
 #include <iomanip>
 #include <limits>
 #include <sstream>
-#include <stdexcept>
+#include <string>
 
 namespace Core {
 
@@ -42,8 +42,13 @@ double OccupiedBandwidth(const Spectrum &psd, double total_power) {
     return high >= low ? psd.FrequencyHz[high] - psd.FrequencyHz[low] + bin_width : 0;
 }
 
-void MeasureSpectrum(const Recording &recording, Window window, std::size_t segment_length, AnalysisReport &report) {
-    const auto psd = WelchPsd(recording.Samples, recording.SampleRateHz, segment_length, window);
+std::expected<void, std::string> MeasureSpectrum(const Recording &recording, Window window, std::size_t segment_length,
+                                                 AnalysisReport &report) {
+    const auto spectrum = WelchPsd(recording.Samples, recording.SampleRateHz, segment_length, window);
+    if (!spectrum.has_value()) {
+        return std::unexpected(spectrum.error());
+    }
+    const auto &psd = *spectrum;
     report.Window = psd.Window;
     report.SegmentLength = psd.SegmentLength;
     report.SegmentCount = psd.SegmentCount;
@@ -62,46 +67,70 @@ void MeasureSpectrum(const Recording &recording, Window window, std::size_t segm
     if (total_power > 0) {
         report.OccupiedBandwidthHz = OccupiedBandwidth(psd, total_power);
     }
+    return {};
 }
 
 // Derives the per-sample SNR, the measured Eb/N0 and the textbook BER from a measured symbol accuracy
-void FinishAccuracy(AnalysisReport &report, int samples_per_symbol, Modulation modulation) {
+std::expected<void, std::string> FinishAccuracy(AnalysisReport &report, int samples_per_symbol, Modulation modulation) {
     report.SampleSnrDb = report.Accuracy->SnrAfterMatchedDb - report.Accuracy->ExpectedOffsetDb;
-    report.MeasuredEbN0Db = SnrToEnergyRatios(report.SampleSnrDb, samples_per_symbol, BitsPerSymbol(modulation)).EbN0Db;
+    const auto ratios = SnrToEnergyRatios(report.SampleSnrDb, samples_per_symbol, BitsPerSymbol(modulation));
+    if (!ratios.has_value()) {
+        return std::unexpected(ratios.error());
+    }
+    report.MeasuredEbN0Db = ratios->EbN0Db;
     report.TheoreticalBer = TheoreticalBer(modulation, report.MeasuredEbN0Db);
+    return {};
 }
 
 // Scores only the symbols of a batch frame whose matched-filter windows lie inside the frame
-void MeasureFrameAccuracy(const Recording &recording, AnalysisReport &report) {
+std::expected<void, std::string> MeasureFrameAccuracy(const Recording &recording, AnalysisReport &report) {
     if (const auto scoring = ScoreFrame(recording)) {
-        report.Accuracy = MeasureSymbolAccuracy(scoring->Signal, scoring->FirstSymbol, scoring->EndSymbol);
+        const auto accuracy = MeasureSymbolAccuracy(scoring->Signal, scoring->FirstSymbol, scoring->EndSymbol);
+        if (!accuracy.has_value()) {
+            return std::unexpected(accuracy.error());
+        }
+        report.Accuracy = *accuracy;
         if (report.Accuracy) {
-            report.Errors = CountBitErrors(scoring->Signal, scoring->FirstSymbol, scoring->EndSymbol);
+            const auto errors = CountBitErrors(scoring->Signal, scoring->FirstSymbol, scoring->EndSymbol);
+            if (!errors.has_value()) {
+                return std::unexpected(errors.error());
+            }
+            report.Errors = *errors;
         }
     }
     if (!report.Accuracy) {
         report.Note =
             "No symbol of this batch frame has its matched-filter window fully inside the frame: EVM skipped.";
     } else {
-        FinishAccuracy(report, recording.Config->SamplesPerSymbol, recording.Config->Modulation);
+        return FinishAccuracy(report, recording.Config->SamplesPerSymbol, recording.Config->Modulation);
     }
+    return {};
 }
 
-void MeasureSignalAccuracy(const Recording &recording, AnalysisReport &report) {
+std::expected<void, std::string> MeasureSignalAccuracy(const Recording &recording, AnalysisReport &report) {
     const auto signal = SignalFromRecording(recording);
     if (!signal) {
         report.Note = "The sample count does not match the embedded configuration: EVM skipped.";
-        return;
+        return {};
     }
-    report.Accuracy = MeasureSymbolAccuracy(*signal);
+    const auto accuracy = MeasureSymbolAccuracy(*signal);
+    if (!accuracy.has_value()) {
+        return std::unexpected(accuracy.error());
+    }
+    report.Accuracy = *accuracy;
     if (report.Accuracy) {
-        report.Errors = CountBitErrors(*signal);
+        const auto errors = CountBitErrors(*signal);
+        if (!errors.has_value()) {
+            return std::unexpected(errors.error());
+        }
+        report.Errors = *errors;
     }
     if (!report.Accuracy) {
         report.Note = "This waveform has no symbol constellation: EVM does not apply.";
     } else {
-        FinishAccuracy(report, recording.Config->SamplesPerSymbol, recording.Config->Modulation);
+        return FinishAccuracy(report, recording.Config->SamplesPerSymbol, recording.Config->Modulation);
     }
+    return {};
 }
 
 } // namespace
@@ -112,28 +141,35 @@ void MeasureSignalAccuracy(const Recording &recording, AnalysisReport &report) {
  * @param[in] window          Window of the Welch spectrum.
  * @param[in] segment_length  Welch segment length, in samples.
  * @return  Power and spectrum figures for any recording; symbol accuracy and bit errors when the file carries
- *          siggen's configuration, otherwise a note saying why they are absent.
- * @note    Throws std::invalid_argument for a recording without samples.
+ *          siggen's configuration, otherwise a note saying why they are absent. An error for a recording without
+ *          samples or with invalid data.
  */
-AnalysisReport AnalyzeRecording(const Recording &recording, Window window, std::size_t segment_length) {
+std::expected<AnalysisReport, std::string> AnalyzeRecording(const Recording &recording, Window window,
+                                                            std::size_t segment_length) {
     if (recording.Samples.empty()) {
-        throw std::invalid_argument("Recording has no samples");
+        return std::unexpected(std::string("Recording has no samples"));
     }
     AnalysisReport report;
     report.SampleCount = recording.Samples.size();
     report.SampleRateHz = recording.SampleRateHz;
     report.DurationS = static_cast<double>(report.SampleCount) / recording.SampleRateHz;
-    report.Power = MeasurePowerStatistics(recording.Samples);
-    MeasureSpectrum(recording, window, segment_length, report);
+    const auto power = MeasurePowerStatistics(recording.Samples);
+    if (!power.has_value()) {
+        return std::unexpected(power.error());
+    }
+    report.Power = *power;
+    if (const auto measured = MeasureSpectrum(recording, window, segment_length, report); !measured.has_value()) {
+        return std::unexpected(measured.error());
+    }
     if (!recording.Config) {
         report.Note = "No siggen configuration in the file: EVM needs a recording produced by siggen (SigMF).";
         return report;
     }
     report.Waveform = ModulationName(recording.Config->Modulation);
-    if (recording.Frame) {
-        MeasureFrameAccuracy(recording, report);
-    } else {
-        MeasureSignalAccuracy(recording, report);
+    const auto accuracy =
+        recording.Frame ? MeasureFrameAccuracy(recording, report) : MeasureSignalAccuracy(recording, report);
+    if (!accuracy.has_value()) {
+        return std::unexpected(accuracy.error());
     }
     return report;
 }

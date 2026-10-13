@@ -12,7 +12,7 @@
 #include <limits>
 #include <numbers>
 #include <span>
-#include <stdexcept>
+#include <string>
 #include <vector>
 
 namespace Core {
@@ -52,16 +52,16 @@ double GaussianSource::UniformOpen() {
  * @param[in] count        Number of samples, at most 4194304.
  * @param[in] total_power  Expected complex power; each of I and Q has variance total_power / 2.
  * @param[in] seed         Seed of the GaussianSource; I is drawn before Q for each sample.
- * @return  The noise samples.
- * @note    Throws std::invalid_argument for a negative or non-finite power, std::length_error above the sample
- *          limit and std::overflow_error when a value does not fit in a float.
+ * @return  The noise samples, or an error for a negative or non-finite power, above the sample limit, or when a
+ *          value does not fit in a float.
  */
-std::vector<std::complex<float>> GaussianNoise(std::size_t count, double total_power, std::uint32_t seed) {
+std::expected<std::vector<std::complex<float>>, std::string> GaussianNoise(std::size_t count, double total_power,
+                                                                           std::uint32_t seed) {
     if (!std::isfinite(total_power) || total_power < 0) {
-        throw std::invalid_argument("Noise power must be finite and non-negative");
+        return std::unexpected(std::string("Noise power must be finite and non-negative"));
     }
     if (count > 4 * 1024 * 1024) {
-        throw std::length_error("Noise generation exceeds sample limit");
+        return std::unexpected(std::string("Noise generation exceeds sample limit"));
     }
     const auto sigma = std::sqrt(total_power / 2);
     GaussianSource source(seed);
@@ -73,7 +73,7 @@ std::vector<std::complex<float>> GaussianNoise(std::size_t count, double total_p
         if (!std::isfinite(in_phase) || !std::isfinite(quadrature) ||
             std::abs(in_phase) > std::numeric_limits<float>::max() ||
             std::abs(quadrature) > std::numeric_limits<float>::max()) {
-            throw std::overflow_error("Gaussian noise overflow");
+            return std::unexpected(std::string("Gaussian noise overflow"));
         }
         samples.emplace_back(static_cast<float>(in_phase), static_cast<float>(quadrature));
     }
@@ -83,14 +83,13 @@ std::vector<std::complex<float>> GaussianNoise(std::size_t count, double total_p
 /**
  * @brief   Converts an SNR in dB to a power ratio.
  * @param[in] snr_db  Signal-to-noise ratio in dB.
- * @return  10^(snr_db / 10).
- * @note    Validates the conversion independently of the sample-dependent reference power: throws
- *          std::invalid_argument when the SNR or the ratio is not finite or the ratio underflows to zero.
+ * @return  10^(snr_db / 10), or an error when the SNR or the ratio is not finite or the ratio underflows to zero.
+ * @note    Validates the conversion independently of the sample-dependent reference power.
  */
-double SnrPowerRatio(double snr_db) {
+std::expected<double, std::string> SnrPowerRatio(double snr_db) {
     const auto ratio = std::pow(10., snr_db / 10);
     if (!std::isfinite(snr_db) || !std::isfinite(ratio) || ratio <= 0) {
-        throw std::invalid_argument("AWGN SNR out of range");
+        return std::unexpected(std::string("AWGN SNR out of range"));
     }
     return ratio;
 }
@@ -102,15 +101,17 @@ double SnrPowerRatio(double snr_db) {
  * @param[in]     end      One past the last sample of that interval.
  * @param[in]     snr_db   Reference power divided by the added complex noise power, in dB.
  * @param[in]     seed     Noise seed.
- * @return  The provenance of the added noise.
- * @note    Throws std::invalid_argument for an empty or out-of-bounds interval or a non-positive reference
- *          power, and std::overflow_error when a sample overflows.
+ * @return  The provenance of the added noise, or an error for an empty or out-of-bounds interval, a non-positive
+ *          reference power, or a sample overflow.
  */
-NoiseRecord AddAwgn(std::span<std::complex<float>> samples, std::size_t begin, std::size_t end, double snr_db,
-                    std::uint32_t seed) {
+std::expected<NoiseRecord, std::string> AddAwgn(std::span<std::complex<float>> samples, std::size_t begin,
+                                                std::size_t end, double snr_db, std::uint32_t seed) {
     const auto ratio = SnrPowerRatio(snr_db);
+    if (!ratio.has_value()) {
+        return std::unexpected(ratio.error());
+    }
     if (begin >= end || end > samples.size()) {
-        throw std::invalid_argument("AWGN reference interval is empty or out of bounds");
+        return std::unexpected(std::string("AWGN reference interval is empty or out of bounds"));
     }
     double total = 0;
     for (auto k = begin; k < end; ++k) {
@@ -118,17 +119,20 @@ NoiseRecord AddAwgn(std::span<std::complex<float>> samples, std::size_t begin, s
     }
     const auto reference = total / static_cast<double>(end - begin);
     if (!std::isfinite(reference) || reference <= 0) {
-        throw std::invalid_argument("AWGN reference power must be positive");
+        return std::unexpected(std::string("AWGN reference power must be positive"));
     }
-    const auto power = reference / ratio;
+    const auto power = reference / *ratio;
     if (!std::isfinite(power) || power <= 0) {
-        throw std::invalid_argument("AWGN noise power out of range");
+        return std::unexpected(std::string("AWGN noise power out of range"));
     }
     const auto noise = GaussianNoise(samples.size(), power, seed);
+    if (!noise.has_value()) {
+        return std::unexpected(noise.error());
+    }
     for (std::size_t k = 0; k < samples.size(); ++k) {
-        samples[k] += noise[k];
+        samples[k] += (*noise)[k];
         if (!std::isfinite(samples[k].real()) || !std::isfinite(samples[k].imag())) {
-            throw std::overflow_error("AWGN sample overflow");
+            return std::unexpected(std::string("AWGN sample overflow"));
         }
     }
     return NoiseRecord{true, snr_db, reference, begin, end, power, seed};

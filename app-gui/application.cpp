@@ -5,6 +5,7 @@
 
 #include "application.h"
 
+#include "error_codes.h"
 #include "imgui_impl_sdl3.h"
 #include "imgui_impl_sdlgpu3.h"
 #include "implot.h"
@@ -12,7 +13,6 @@
 #include <SDL3/SDL.h>
 #include <format>
 #include <spdlog/spdlog.h>
-#include <stdexcept>
 #define STB_IMAGE_IMPLEMENTATION
 #include "stb_image.h"
 
@@ -38,21 +38,28 @@ Application::~Application() {
 
 /**
  * @brief   Initializes SDL, the window, the GPU device, the window icon and the ImGui layer, in that order.
- * @note    Throws std::runtime_error when SDL, the window or the GPU device cannot be set up.
+ * @return  Core::ExitSuccess on success, Core::ExitFailure if any step fails; Shutdown() reports the reason.
  */
-void Application::Init() {
-    InitializeSDL();
-    CreateWindow();
-    CreateGPUDevice();
+int Application::Init() {
+    if (InitializeSDL() != Core::ExitSuccess) {
+        return Core::ExitFailure;
+    }
+    if (CreateWindow() != Core::ExitSuccess) {
+        return Core::ExitFailure;
+    }
+    if (CreateGPUDevice() != Core::ExitSuccess) {
+        return Core::ExitFailure;
+    }
     LoadAndSetIcon();
-    InitImGui();
+    if (InitImGui() != Core::ExitSuccess) {
+        return Core::ExitFailure;
+    }
+    return Core::ExitSuccess;
 }
 
 /**
  * @brief   Runs the frame loop until the user closes the window.
- * @return  0 when the window is closed normally.
- * @note    Errors raised while drawing a frame are logged and the loop continues; initialization errors propagate
- *          from Init().
+ * @return  Core::ExitSuccess when the window is closed normally.
  */
 int Application::Run() {
     spdlog::debug("Entering main loop");
@@ -64,27 +71,23 @@ int Application::Run() {
             continue;
         }
 
-        try {
-            NewFrame();
-            m_WindowManager.Render();
-            ImGui::Render();
-            UpdateWindowTitle();
-            EndFrame();
-        } catch (const std::exception &error) {
-            // Keep running so the user can see the error and carry on
-            ShowErrorMessage("Runtime Error", error.what());
-        }
+        NewFrame();
+        m_WindowManager.Render();
+        ImGui::Render();
+        UpdateWindowTitle();
+        EndFrame();
+
         if (m_WindowManager.IsQuitConfirmed()) {
             m_IsOpen = false;
         }
     }
     spdlog::info("Application closing");
-    return 0;
+    return Core::ExitSuccess;
 }
 
 /**
- * @brief   Releases every resource created by Init(), tolerating a partial Init().
- * @note    Safe to call more than once.
+ * @brief   Releases every resource created by Init() and reports the collected errors.
+ * @note    Safe to call more than once, and after a partial Init().
  */
 void Application::Shutdown() {
     if (m_GPUDevice != nullptr) {
@@ -107,15 +110,36 @@ void Application::Shutdown() {
     }
     SDL_Quit();
     spdlog::debug("Application resources released");
+    DumpErrors();
 }
 
-void Application::InitializeSDL() {
-    if (!SDL_Init(SDL_INIT_VIDEO | SDL_INIT_GAMEPAD)) {
-        throw std::runtime_error(std::string("SDL_Init(): ") + SDL_GetError());
+void Application::AddError(const std::string &message) {
+    m_Errors.push_back(message);
+}
+
+void Application::DumpErrors() {
+    if (m_Errors.empty()) {
+        return;
     }
+    std::string message;
+    for (const std::string &error : m_Errors) {
+        spdlog::error("{}", error);
+        message += error + "\n";
+    }
+    // A program started from a file manager or the Windows release build has no console to show stderr
+    SDL_ShowSimpleMessageBox(SDL_MESSAGEBOX_ERROR, "siggen", message.c_str(), nullptr);
+    m_Errors.clear();
 }
 
-void Application::CreateWindow() {
+int Application::InitializeSDL() {
+    if (!SDL_Init(SDL_INIT_VIDEO | SDL_INIT_GAMEPAD)) {
+        AddError(std::string("SDL_Init(): ") + SDL_GetError());
+        return Core::ExitFailure;
+    }
+    return Core::ExitSuccess;
+}
+
+int Application::CreateWindow() {
     m_WindowScale = SDL_GetDisplayContentScale(SDL_GetPrimaryDisplay());
     constexpr int BaseWidth = 1280;
     constexpr int BaseHeight = 800;
@@ -123,35 +147,65 @@ void Application::CreateWindow() {
     m_SDLWindow = SDL_CreateWindow("Siggen", static_cast<int>(BaseWidth * m_WindowScale),
                                    static_cast<int>(BaseHeight * m_WindowScale), flags);
     if (m_SDLWindow == nullptr) {
-        throw std::runtime_error(std::string("SDL_CreateWindow(): ") + SDL_GetError());
+        AddError(std::string("SDL_CreateWindow(): ") + SDL_GetError());
+        return Core::ExitFailure;
     }
+    return Core::ExitSuccess;
 }
 
 // SDL picks the native API of the system (Direct3D 12 on Windows, Vulkan on Linux) among the shader formats the
 // Dear ImGui backend ships
-void Application::CreateGPUDevice() {
+int Application::CreateGPUDevice() {
     m_GPUDevice = SDL_CreateGPUDevice(SDL_GPU_SHADERFORMAT_SPIRV | SDL_GPU_SHADERFORMAT_DXIL |
                                           SDL_GPU_SHADERFORMAT_MSL | SDL_GPU_SHADERFORMAT_METALLIB,
                                       GPUDebugMode, nullptr);
     if (m_GPUDevice == nullptr) {
-        throw std::runtime_error(std::string("SDL_CreateGPUDevice(): ") + SDL_GetError());
+        AddError(std::string("SDL_CreateGPUDevice(): ") + SDL_GetError());
+        return Core::ExitFailure;
     }
     if (!SDL_ClaimWindowForGPUDevice(m_GPUDevice, m_SDLWindow)) {
-        throw std::runtime_error(std::string("SDL_ClaimWindowForGPUDevice(): ") + SDL_GetError());
+        AddError(std::string("SDL_ClaimWindowForGPUDevice(): ") + SDL_GetError());
+        return Core::ExitFailure;
     }
     SDL_SetGPUSwapchainParameters(m_GPUDevice, m_SDLWindow, SDL_GPU_SWAPCHAINCOMPOSITION_SDR,
                                   SDL_GPU_PRESENTMODE_VSYNC);
 
     SDL_SetWindowPosition(m_SDLWindow, SDL_WINDOWPOS_CENTERED, SDL_WINDOWPOS_CENTERED);
     SDL_ShowWindow(m_SDLWindow);
+    return Core::ExitSuccess;
+}
+
+/**
+ * @brief   Sets the window icon from assets/icon.png, relative to the working directory.
+ * @note    A missing icon only logs a warning.
+ */
+void Application::LoadAndSetIcon() {
+    const std::string icon_path = "assets/icon.png";
+    int width = 0;
+    int height = 0;
+    int channels = 0;
+    constexpr int RGBAChannels = 4;
+    unsigned char *pixels = stbi_load(icon_path.c_str(), &width, &height, &channels, RGBAChannels);
+    if (pixels == nullptr) {
+        spdlog::warn("Unable to load window icon: {}", icon_path);
+        return;
+    }
+
+    SDL_Surface *icon = SDL_CreateSurfaceFrom(width, height, SDL_PIXELFORMAT_RGBA32, pixels, width * RGBAChannels);
+    if (icon != nullptr) {
+        SDL_SetWindowIcon(m_SDLWindow, icon);
+        SDL_DestroySurface(icon);
+    }
+    stbi_image_free(pixels);
 }
 
 /**
  * @brief   Creates the ImGui and ImPlot contexts, applies the theme and the bundled font, and binds the SDL3 and
  *          SDL GPU backends.
+ * @return  Core::ExitSuccess; no step fails on its own, and the shape matches the other initialization steps.
  * @note    The theme choice is kept in imgui.ini by its settings handler, read on the first frame.
  */
-void Application::InitImGui() {
+int Application::InitImGui() {
     IMGUI_CHECKVERSION();
     ImGui::CreateContext();
     ImPlot::CreateContext();
@@ -183,30 +237,7 @@ void Application::InitImGui() {
     init_info.Device = m_GPUDevice;
     init_info.ColorTargetFormat = SDL_GetGPUSwapchainTextureFormat(m_GPUDevice, m_SDLWindow);
     ImGui_ImplSDLGPU3_Init(&init_info);
-}
-
-/**
- * @brief   Sets the window icon from assets/icon.png, relative to the working directory.
- * @note    A missing icon only logs a warning.
- */
-void Application::LoadAndSetIcon() {
-    const std::string icon_path = "assets/icon.png";
-    int width = 0;
-    int height = 0;
-    int channels = 0;
-    constexpr int RGBAChannels = 4;
-    unsigned char *pixels = stbi_load(icon_path.c_str(), &width, &height, &channels, RGBAChannels);
-    if (pixels == nullptr) {
-        spdlog::warn("Unable to load window icon: {}", icon_path);
-        return;
-    }
-
-    SDL_Surface *icon = SDL_CreateSurfaceFrom(width, height, SDL_PIXELFORMAT_RGBA32, pixels, width * RGBAChannels);
-    if (icon != nullptr) {
-        SDL_SetWindowIcon(m_SDLWindow, icon);
-        SDL_DestroySurface(icon);
-    }
-    stbi_image_free(pixels);
+    return Core::ExitSuccess;
 }
 
 void Application::PollEvents() {
@@ -271,17 +302,6 @@ void Application::EndFrame() {
     }
 
     SDL_SubmitGPUCommandBuffer(command_buffer);
-}
-
-/**
- * @brief   Reports an error raised while running a frame.
- * @param[in] title    Short context, such as "Runtime Error".
- * @param[in] message  The error text.
- */
-void Application::ShowErrorMessage(const std::string &title, const std::string &message) {
-    spdlog::error("{}: {}", title, message);
-    // A program started from a file manager or the Windows release build has no console to show stderr
-    SDL_ShowSimpleMessageBox(SDL_MESSAGEBOX_ERROR, "siggen", message.c_str(), m_SDLWindow);
 }
 
 } // namespace GUI

@@ -5,23 +5,24 @@
 
 #include "generation_job.h"
 
+#include "test_support.h"
 #include <atomic>
 #include <chrono>
 #include <future>
 #include <gtest/gtest.h>
-#include <stdexcept>
 #include <thread>
 
 namespace Core {
 
 namespace {
 
-// Polls the job until it is idle; a failed generation rethrows its exception here
+// Polls the job until it is idle; a failed generation keeps its message for Error()
 void Finish(GenerationJob &job) {
     const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(10);
     while (job.Busy()) {
         if (std::chrono::steady_clock::now() > deadline) {
-            throw std::runtime_error("Job timeout");
+            ADD_FAILURE() << "Job timeout";
+            return;
         }
         job.Poll();
         std::this_thread::yield();
@@ -37,10 +38,11 @@ TEST(GenerationJob, SnapshotRepeatedGenerationAndFailure) {
     config.Seed = 7;
     ASSERT_FALSE(job.Start(config));
     Finish(job);
+    EXPECT_TRUE(job.Error().empty());
     auto previous = job.Result();
     ASSERT_TRUE(previous);
     EXPECT_EQ(previous->Config.Seed, 5489u);
-    EXPECT_EQ(previous->Samples, Generate({}).Samples);
+    EXPECT_EQ(previous->Samples, Unwrap(Generate({})).Samples);
     ASSERT_TRUE(job.Start(config));
     EXPECT_EQ(job.Result(), previous);
     Finish(job);
@@ -48,7 +50,8 @@ TEST(GenerationJob, SnapshotRepeatedGenerationAndFailure) {
     previous = job.Result();
     config.SymbolCount = 0;
     ASSERT_TRUE(job.Start(config));
-    EXPECT_THROW(Finish(job), std::invalid_argument);
+    Finish(job);
+    EXPECT_FALSE(job.Error().empty());
     EXPECT_FALSE(job.Busy());
     EXPECT_EQ(job.Result(), previous);
 }

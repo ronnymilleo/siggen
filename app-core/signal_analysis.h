@@ -9,6 +9,8 @@
 #include "generator.h"
 #include <complex>
 #include <cstddef>
+#include <expected>
+#include <string>
 #include <vector>
 
 namespace Core {
@@ -46,14 +48,16 @@ struct Spectrum {
 };
 
 // Symbol observations and frequency estimate
-SymbolObservations MatchedSymbols(const GeneratedSignal &signal);
-std::vector<double> InstantaneousFrequency(const std::vector<std::complex<float>> &samples, double sample_rate_hz);
+std::expected<SymbolObservations, std::string> MatchedSymbols(const GeneratedSignal &signal);
+std::expected<std::vector<double>, std::string> InstantaneousFrequency(const std::vector<std::complex<float>> &samples,
+                                                                       double sample_rate_hz);
 
 // Spectrum
 const char *WindowName(Window window);
+bool IsValidWindow(Window window);
 double WindowValue(Window window, std::size_t k, std::size_t length);
-Spectrum WelchPsd(const std::vector<std::complex<float>> &samples, double sample_rate_hz,
-                  std::size_t segment_length = 1024, Window window = Window::Hann);
+std::expected<Spectrum, std::string> WelchPsd(const std::vector<std::complex<float>> &samples, double sample_rate_hz,
+                                              std::size_t segment_length = 1024, Window window = Window::Hann);
 
 } // namespace Core
 

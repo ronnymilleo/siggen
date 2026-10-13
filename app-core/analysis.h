@@ -11,6 +11,7 @@
 #include "recording.h"
 #include "signal_analysis.h"
 #include <cstddef>
+#include <expected>
 #include <optional>
 #include <string>
 
@@ -42,8 +43,8 @@ struct AnalysisReport {
     std::string Note;                     // Why EVM is absent, when it is
 };
 
-AnalysisReport AnalyzeRecording(const Recording &recording, Window window = Window::Hann,
-                                std::size_t segment_length = 1024);
+std::expected<AnalysisReport, std::string> AnalyzeRecording(const Recording &recording, Window window = Window::Hann,
+                                                            std::size_t segment_length = 1024);
 
 std::string ReportText(const AnalysisReport &report);
 std::string ReportJson(const AnalysisReport &report);

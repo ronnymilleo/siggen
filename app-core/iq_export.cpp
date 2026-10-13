@@ -16,7 +16,7 @@
 #include <iomanip>
 #include <limits>
 #include <sstream>
-#include <stdexcept>
+#include <system_error>
 
 namespace Core {
 
@@ -26,7 +26,7 @@ bool IsSupported(const ExportFormat format) {
     return format == ExportFormat::CSV || format == ExportFormat::SigMF;
 }
 
-void ValidateLinear(const GeneratedSignal &signal) {
+std::expected<void, std::string> ValidateLinear(const GeneratedSignal &signal) {
     const auto &config = signal.Config;
     const auto samples_per_symbol = static_cast<std::size_t>(config.SamplesPerSymbol);
     const auto taps =
@@ -36,57 +36,65 @@ void ValidateLinear(const GeneratedSignal &signal) {
         signal.Symbols.size() != static_cast<std::size_t>(config.SymbolCount) ||
         signal.SampleRateHz != config.SymbolRateBaud * samples_per_symbol ||
         signal.FilterDelaySamples != (UsesRrc(config) ? (taps - 1) / 2 : 0)) {
-        throw std::invalid_argument("Result metadata does not match configuration");
+        return std::unexpected(std::string("Result metadata does not match configuration"));
     }
+    return {};
 }
 
-void ValidateFsk(const GeneratedSignal &signal) {
+std::expected<void, std::string> ValidateFsk(const GeneratedSignal &signal) {
     const auto &config = signal.Config;
     const auto samples_per_symbol = static_cast<std::size_t>(config.SamplesPerSymbol);
     if (signal.Samples.size() != static_cast<std::size_t>(config.SymbolCount) * samples_per_symbol ||
         !signal.Symbols.empty() || signal.SymbolFrequenciesHz.size() != static_cast<std::size_t>(config.SymbolCount) ||
         signal.SampleRateHz != config.SymbolRateBaud * samples_per_symbol || signal.FilterDelaySamples != 0) {
-        throw std::invalid_argument("FSK result metadata does not match configuration");
+        return std::unexpected(std::string("FSK result metadata does not match configuration"));
     }
+    return {};
 }
 
-void ValidateNoise(const GeneratedSignal &signal) {
+std::expected<void, std::string> ValidateNoise(const GeneratedSignal &signal) {
     const auto &source = signal.Config.NoiseSource;
     if (signal.Samples.size() != static_cast<std::size_t>(source.SampleCount) || !signal.Symbols.empty() ||
         signal.SampleRateHz != source.SampleRateHz || signal.FilterDelaySamples != 0) {
-        throw std::invalid_argument("Noise result metadata does not match configuration");
+        return std::unexpected(std::string("Noise result metadata does not match configuration"));
     }
+    return {};
 }
 
 /**
  * @brief   Checks that a signal is consistent with its own configuration and can be exported.
- * @note    Throws std::invalid_argument; the configuration is validated first, then the format, the family, the
+ * @return  Nothing on success; the configuration is validated first, then the format, the family, the
  *          family-specific sizes and finally the sample values.
  */
-void ValidateResult(const GeneratedSignal &signal, const ExportFormat format) {
-    Validate(signal.Config);
+std::expected<void, std::string> ValidateResult(const GeneratedSignal &signal, const ExportFormat format) {
+    if (const auto validated = Validate(signal.Config); !validated.has_value()) {
+        return validated;
+    }
     if (!IsSupported(format)) {
-        throw std::invalid_argument("Unsupported export format");
+        return std::unexpected(std::string("Unsupported export format"));
     }
     if (signal.Family != WaveformFamily(signal.Config.Modulation)) {
-        throw std::invalid_argument("Result family does not match configuration");
+        return std::unexpected(std::string("Result family does not match configuration"));
     }
-    switch (signal.Family) {
-    case Family::Noise:
-        ValidateNoise(signal);
-        break;
-    case Family::Fsk:
-        ValidateFsk(signal);
-        break;
-    default:
-        ValidateLinear(signal);
-        break;
+    const auto family_check = [&] {
+        switch (signal.Family) {
+        case Family::Noise:
+            return ValidateNoise(signal);
+        case Family::Fsk:
+            return ValidateFsk(signal);
+        default:
+            return ValidateLinear(signal);
+        }
+    }();
+    if (!family_check.has_value()) {
+        return family_check;
     }
     for (const auto sample : signal.Samples) {
         if (!std::isfinite(sample.real()) || !std::isfinite(sample.imag())) {
-            throw std::invalid_argument("Cannot export non-finite samples");
+            return std::unexpected(std::string("Cannot export non-finite samples"));
         }
     }
+    return {};
 }
 
 const char *DataSourceName(const DataSource source) {
@@ -152,8 +160,10 @@ void WriteLittleEndianFloat(std::ostream &out, const float value) {
 }
 
 // siggen's own metadata document (version 2): the CSV sidecar, and the `siggen:metadata` of a SigMF recording
-std::string SiggenMetadata(const GeneratedSignal &signal, const ExportFormat format) {
-    ValidateResult(signal, format);
+std::expected<std::string, std::string> SiggenMetadata(const GeneratedSignal &signal, const ExportFormat format) {
+    if (const auto validated = ValidateResult(signal, format); !validated.has_value()) {
+        return std::unexpected(validated.error());
+    }
     const auto &config = signal.Config;
     std::ostringstream out;
     out.imbue(std::locale::classic());
@@ -231,14 +241,21 @@ std::string JsonQuote(const std::string_view text) {
  * @param[in] format    Export format.
  * @return  For CSV, siggen's JSON sidecar (version 2). For SigMF, a SigMF 1.0.0 `.sigmf-meta` document whose
  *          `core:` fields describe the recording, with the generator preset under `siggen:preset` and siggen's
- *          sidecar under `siggen:metadata`. Numbers are written with max_digits10 in the classic locale.
- * @note    Throws std::invalid_argument when the signal or the format cannot be exported.
+ *          sidecar under `siggen:metadata`. Numbers are written with max_digits10 in the classic locale. An error
+ *          when the signal or the format cannot be exported.
  */
-std::string ExportMetadata(const GeneratedSignal &signal, const ExportFormat format) {
+std::expected<std::string, std::string> ExportMetadata(const GeneratedSignal &signal, const ExportFormat format) {
     if (format != ExportFormat::SigMF) {
         return SiggenMetadata(signal, format);
     }
     const auto detail = SiggenMetadata(signal, ExportFormat::SigMF);
+    if (!detail.has_value()) {
+        return std::unexpected(detail.error());
+    }
+    const auto preset = SerializePreset(signal.Config);
+    if (!preset.has_value()) {
+        return std::unexpected(preset.error());
+    }
     std::ostringstream out;
     out.imbue(std::locale::classic());
     out << std::setprecision(std::numeric_limits<double>::max_digits10)
@@ -246,8 +263,8 @@ std::string ExportMetadata(const GeneratedSignal &signal, const ExportFormat for
         << ",\n    \"core:version\": \"1.0.0\",\n    \"core:description\": "
         << JsonQuote(std::string("Synthetic ") + ModulationName(signal.Config.Modulation) +
                      " baseband signal from siggen")
-        << ",\n    \"core:recorder\": \"siggen\",\n    \"siggen:preset\": " << JsonQuote(SerializePreset(signal.Config))
-        << ",\n    \"siggen:metadata\": " << Trimmed(detail)
+        << ",\n    \"core:recorder\": \"siggen\",\n    \"siggen:preset\": " << JsonQuote(*preset)
+        << ",\n    \"siggen:metadata\": " << Trimmed(*detail)
         << "\n  },\n  \"captures\": [\n    {\"core:sample_start\": 0, \"core:frequency\": 0}\n  ],\n  "
            "\"annotations\": []\n}\n";
     return out.str();
@@ -259,16 +276,16 @@ std::string ExportMetadata(const GeneratedSignal &signal, const ExportFormat for
  * @param[in]  samples          Samples to write; all must be finite.
  * @param[in]  sample_rate_hz   Sample rate for the CSV time column; must be positive and finite.
  * @param[in]  format           CSV with a "time_s,i,q" header, or SigMF: interleaved float32 little-endian.
- * @note    Throws std::invalid_argument for a bad format, sample rate or a non-finite sample (samples before it are
- *          already written), and std::runtime_error when writing or flushing fails.
+ * @return  Nothing on success; an error for a bad format, sample rate or a non-finite sample (samples before it
+ *          are already written), or when writing or flushing fails.
  */
-void WriteSamples(std::ostream &stream, const std::span<const std::complex<float>> samples, const double sample_rate_hz,
-                  const ExportFormat format) {
+std::expected<void, std::string> WriteSamples(std::ostream &stream, const std::span<const std::complex<float>> samples,
+                                              const double sample_rate_hz, const ExportFormat format) {
     if (!IsSupported(format)) {
-        throw std::invalid_argument("Unsupported export format");
+        return std::unexpected(std::string("Unsupported export format"));
     }
     if (!std::isfinite(sample_rate_hz) || sample_rate_hz <= 0) {
-        throw std::invalid_argument("Sample rate must be positive and finite");
+        return std::unexpected(std::string("Sample rate must be positive and finite"));
     }
     stream.imbue(std::locale::classic());
     stream << std::setprecision(std::numeric_limits<double>::max_digits10);
@@ -277,7 +294,7 @@ void WriteSamples(std::ostream &stream, const std::span<const std::complex<float
     }
     for (std::size_t k = 0; k < samples.size(); ++k) {
         if (!std::isfinite(samples[k].real()) || !std::isfinite(samples[k].imag())) {
-            throw std::invalid_argument("Cannot export non-finite samples");
+            return std::unexpected(std::string("Cannot export non-finite samples"));
         }
         if (format == ExportFormat::CSV) {
             stream << k / sample_rate_hz << ',' << samples[k].real() << ',' << samples[k].imag() << '\n';
@@ -288,8 +305,9 @@ void WriteSamples(std::ostream &stream, const std::span<const std::complex<float
     }
     stream.flush();
     if (!stream) {
-        throw std::runtime_error("Sample write or flush failed");
+        return std::unexpected(std::string("Sample write or flush failed"));
     }
+    return {};
 }
 
 /**
@@ -297,11 +315,14 @@ void WriteSamples(std::ostream &stream, const std::span<const std::complex<float
  * @param[out] stream   Destination stream.
  * @param[in]  signal   Generated signal.
  * @param[in]  format   Sample file format.
- * @note    Throws std::invalid_argument when the signal cannot be exported, before anything is written.
+ * @return  Nothing on success; an error when the signal cannot be exported, before anything is written.
  */
-void WriteSamples(std::ostream &stream, const GeneratedSignal &signal, const ExportFormat format) {
-    ValidateResult(signal, format);
-    WriteSamples(stream, std::span<const std::complex<float>>(signal.Samples), signal.SampleRateHz, format);
+std::expected<void, std::string> WriteSamples(std::ostream &stream, const GeneratedSignal &signal,
+                                              const ExportFormat format) {
+    if (const auto validated = ValidateResult(signal, format); !validated.has_value()) {
+        return validated;
+    }
+    return WriteSamples(stream, std::span<const std::complex<float>>(signal.Samples), signal.SampleRateHz, format);
 }
 
 /**
@@ -310,30 +331,44 @@ void WriteSamples(std::ostream &stream, const GeneratedSignal &signal, const Exp
  * @param[in] signal        Generated signal.
  * @param[in] format        Sample file format.
  * @param[in] overwrite     Replaces existing files; otherwise refuses when either file exists.
- * @note    Throws std::invalid_argument for an invalid signal or an empty path, std::runtime_error when a file
- * exists and @p overwrite is false, and std::ios_base::failure when a file cannot be created or written.
+ * @return  Nothing on success; an error for an invalid signal or an empty path, when a file exists and
+ *          @p overwrite is false, or when a file cannot be created or written.
  */
-void ExportSignal(const std::filesystem::path &destination, const GeneratedSignal &signal, const ExportFormat format,
-                  const bool overwrite) {
+std::expected<void, std::string> ExportSignal(const std::filesystem::path &destination, const GeneratedSignal &signal,
+                                              const ExportFormat format, const bool overwrite) {
     const auto metadata = ExportMetadata(signal, format);
+    if (!metadata.has_value()) {
+        return std::unexpected(metadata.error());
+    }
     const auto sidecar = MetadataPath(destination);
     if (destination.empty()) {
-        throw std::invalid_argument("Export destination is empty");
+        return std::unexpected(std::string("Export destination is empty"));
     }
-    if (!overwrite && (std::filesystem::exists(destination) || std::filesystem::exists(sidecar))) {
-        throw std::runtime_error("Export destination or metadata already exists; confirm overwrite");
+    std::error_code ec;
+    if (!overwrite && (std::filesystem::exists(destination, ec) || std::filesystem::exists(sidecar, ec))) {
+        return std::unexpected(std::string("Export destination or metadata already exists; confirm overwrite"));
     }
     // Exclusive creation protects against files appearing after the UI existence check
     const auto mode = std::ios::binary | (overwrite ? std::ios::trunc : std::ios::noreplace);
     std::ofstream data_file, metadata_file;
-    data_file.exceptions(std::ios::badbit | std::ios::failbit);
-    metadata_file.exceptions(std::ios::badbit | std::ios::failbit);
     data_file.open(destination, mode);
+    if (!data_file) {
+        return std::unexpected("Cannot create export destination: " + destination.string());
+    }
     metadata_file.open(sidecar, mode);
-    WriteSamples(data_file, signal, format);
-    metadata_file << metadata;
+    if (!metadata_file) {
+        return std::unexpected("Cannot create metadata file: " + sidecar.string());
+    }
+    if (const auto written = WriteSamples(data_file, signal, format); !written.has_value()) {
+        return written;
+    }
+    metadata_file << *metadata;
     data_file.close();
     metadata_file.close();
+    if (data_file.fail() || metadata_file.fail()) {
+        return std::unexpected(std::string("Export write or close failed"));
+    }
+    return {};
 }
 
 } // namespace Core
