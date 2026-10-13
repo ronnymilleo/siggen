@@ -68,9 +68,9 @@ std::expected<void, std::string> AppendFrequencyTrack(PlotData &plot, const Core
     const auto samples_per_symbol = static_cast<std::size_t>(signal.Config.SamplesPerSymbol);
     const auto stride = std::max<std::size_t>(1, estimate.size() / limit);
     for (std::size_t n = 0; n < estimate.size(); n += stride) {
-        plot.FreqTime.push_back((static_cast<double>(n) + 0.5) / signal.SampleRateHz);
-        plot.FreqEstimate.push_back(estimate[n]);
-        plot.FreqNominal.push_back(
+        plot.FrequencyTime.push_back((static_cast<double>(n) + 0.5) / signal.SampleRateHz);
+        plot.FrequencyEstimate.push_back(estimate[n]);
+        plot.FrequencyNominal.push_back(
             signal.SymbolFrequenciesHz[std::min(n / samples_per_symbol, signal.SymbolFrequenciesHz.size() - 1)]);
     }
     return {};

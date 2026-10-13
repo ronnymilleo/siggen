@@ -124,11 +124,11 @@ void ViewsWindow::DrawFrequencyTab() {
     if (ImPlot::BeginPlot("Instantaneous frequency", ImVec2(-1, -1))) {
         ImPlot::SetupAxes("Time (s)", "Frequency (Hz)", ImPlotAxisFlags_AutoFit, ImPlotAxisFlags_AutoFit);
         ImPlot::SetNextLineStyle(InPhaseColor);
-        ImPlot::PlotLine("Estimate", plots.FreqTime.data(), plots.FreqEstimate.data(),
-                         static_cast<int>(plots.FreqTime.size()));
+        ImPlot::PlotLine("Estimate", plots.FrequencyTime.data(), plots.FrequencyEstimate.data(),
+                         static_cast<int>(plots.FrequencyTime.size()));
         ImPlot::SetNextLineStyle(QuadratureColor, 2.f);
-        ImPlot::PlotLine("Nominal tone", plots.FreqTime.data(), plots.FreqNominal.data(),
-                         static_cast<int>(plots.FreqTime.size()));
+        ImPlot::PlotLine("Nominal tone", plots.FrequencyTime.data(), plots.FrequencyNominal.data(),
+                         static_cast<int>(plots.FrequencyTime.size()));
         ImPlot::EndPlot();
     }
     ImGui::EndTabItem();

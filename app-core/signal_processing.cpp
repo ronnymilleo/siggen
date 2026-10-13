@@ -46,27 +46,29 @@ double RRCImpulse(double beta, double t) {
 
 /**
  * @brief   Designs a root-raised-cosine pulse-shaping filter.
- * @param[in] beta  Roll-off factor in [0,1].
- * @param[in] span  Filter length in symbols, at least 1.
- * @param[in] sps   Samples per symbol, at least 2; span * sps must be even.
- * @return  span * sps + 1 taps with unit energy, symmetric around the centre tap, or an error for
- *          out-of-range settings or when the tap count would exceed MaxSignalSamples.
+ * @param[in] roll_off            Roll-off factor in [0,1].
+ * @param[in] span_symbols        Filter length in symbols, at least 1.
+ * @param[in] samples_per_symbol  Samples per symbol, at least 2; span_symbols * samples_per_symbol must be even.
+ * @return  span_symbols * samples_per_symbol + 1 taps with unit energy, symmetric around the centre tap, or an
+ *          error for out-of-range settings or when the tap count would exceed MaxSignalSamples.
  */
-std::expected<std::vector<double>, std::string> RRCFilter(double beta, int span, int sps) {
-    if (!std::isfinite(beta) || beta < 0 || beta > 1 || span < 1 || sps < 2 ||
-        static_cast<std::size_t>(span) > (MaxSignalSamples - 1) / static_cast<std::size_t>(sps)) {
+std::expected<std::vector<double>, std::string> RRCFilter(double roll_off, int span_symbols, int samples_per_symbol) {
+    if (!std::isfinite(roll_off) || roll_off < 0 || roll_off > 1 || span_symbols < 1 || samples_per_symbol < 2 ||
+        static_cast<std::size_t>(span_symbols) >
+            (MaxSignalSamples - 1) / static_cast<std::size_t>(samples_per_symbol)) {
         return std::unexpected(
             std::string("RRC requires beta in [0,1], positive span, SPS >= 2 and bounded tap count"));
     }
-    const auto order = static_cast<std::size_t>(span) * static_cast<std::size_t>(sps);
+    const auto order = static_cast<std::size_t>(span_symbols) * static_cast<std::size_t>(samples_per_symbol);
     if (order % 2 != 0) {
         return std::unexpected(std::string("RRC filter order (span * SPS) must be even"));
     }
     std::vector<double> taps(order + 1);
     double energy = 0;
     for (std::size_t i = 0; i <= order; ++i) {
-        const double t = std::abs((static_cast<double>(i) - static_cast<double>(order) / 2) / sps);
-        const double tap = RRCImpulse(beta, t);
+        const double t = std::abs((static_cast<double>(i) - static_cast<double>(order) / 2) /
+                                  static_cast<double>(samples_per_symbol));
+        const double tap = RRCImpulse(roll_off, t);
         taps[i] = tap;
         energy += tap * tap;
     }

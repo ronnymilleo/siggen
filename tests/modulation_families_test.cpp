@@ -8,6 +8,7 @@
 #include "impairments.h"
 #include "iq_export.h"
 #include "measurements.h"
+#include "modulation_test_helpers.h"
 #include "preset.h"
 #include "signal_analysis.h"
 #include "test_support.h"
@@ -25,30 +26,9 @@ namespace Core {
 
 namespace {
 
-using Sym = std::complex<float>;
-
-// Bit label of value, most significant bit first
-std::string Label(unsigned value, int bits) {
-    std::string text;
-    for (int k = bits - 1; k >= 0; --k) {
-        text += ((value >> k) & 1u) ? '1' : '0';
-    }
-    return text;
-}
-
 void ExpectNear(Sym actual, Sym expected, float tolerance = 1e-6f) {
     EXPECT_NEAR(actual.real(), expected.real(), tolerance);
     EXPECT_NEAR(actual.imag(), expected.imag(), tolerance);
-}
-
-// Full constellation of a memoryless mapper, one point per bit label
-std::vector<Sym> Constellation(Modulation modulation) {
-    const int bits_per_symbol = BitsPerSymbol(modulation);
-    std::vector<Sym> points;
-    for (unsigned v = 0; v < (1u << bits_per_symbol); ++v) {
-        points.push_back(Unwrap(MapSymbols(modulation, Label(v, bits_per_symbol)))[0]);
-    }
-    return points;
 }
 
 double MeanEnergy(const std::vector<Sym> &points) {

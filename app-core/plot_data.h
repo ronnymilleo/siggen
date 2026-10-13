@@ -15,10 +15,10 @@
 namespace Core {
 
 /**
- * @struct  XYData
+ * @struct  XYSeries
  * @brief   Paired X and Y coordinates of a scatter plot.
  */
-struct XYData {
+struct XYSeries {
     std::vector<double> X, Y;
 };
 
@@ -28,9 +28,9 @@ struct XYData {
  */
 struct PlotData {
     std::vector<double> Time, I, Q;
-    XYData Mapped, Matched;
+    XYSeries Mapped, Matched;
     // FSK family: frequency estimate per sample pair against the nominal tone of each symbol
-    std::vector<double> FreqTime, FreqEstimate, FreqNominal;
+    std::vector<double> FrequencyTime, FrequencyEstimate, FrequencyNominal;
 };
 
 std::expected<PlotData, std::string> MakePlotData(const Core::GeneratedSignal &signal, std::size_t limit = 4096);

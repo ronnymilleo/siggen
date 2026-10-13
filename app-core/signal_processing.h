@@ -15,7 +15,7 @@ namespace Core {
 
 inline constexpr std::size_t MaxSignalSamples = 4 * 1024 * 1024;
 
-std::expected<std::vector<double>, std::string> RRCFilter(double beta, int span, int sps);
+std::expected<std::vector<double>, std::string> RRCFilter(double roll_off, int span_symbols, int samples_per_symbol);
 
 } // namespace Core
 
