@@ -37,6 +37,7 @@ private:
     void LoadAndSetIcon();
     void PollEvents();
     void NewFrame();
+    void UpdateWindowTitle();
     void EndFrame();
     void ShowErrorMessage(const std::string &title, const std::string &message);
 
@@ -47,6 +48,8 @@ private:
 
     // imgui.ini in the user's data folder; ImGui keeps only the pointer, so the path lives here
     std::string m_SettingsPath;
+    // Last title given to the window, so it is only set again when the document or its state changes
+    std::string m_WindowTitle;
 
     // Declared last so it is destroyed before the window and the ImGui context it draws with
     WindowManager m_WindowManager;

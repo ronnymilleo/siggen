@@ -271,7 +271,7 @@ GenerationConfig ParsePreset(const std::string_view text) {
  * @brief   Extracts the notes of a preset: the lines that start with '#'.
  * @param[in] text  Preset text.
  * @return  The notes without the marker (and one following space), joined by newlines.
- * @note    ParsePreset() ignores these lines; the guided presets in presets/ use them to carry a short lesson.
+ * @note    ParsePreset() ignores these lines; the guided presets in app-gui/examples/ use them to carry a short lesson.
  */
 std::string PresetNotes(const std::string_view text) {
     std::istringstream input{std::string(text)};

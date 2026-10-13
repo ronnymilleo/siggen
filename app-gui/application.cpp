@@ -10,6 +10,7 @@
 #include "implot.h"
 #include "theme.h"
 #include <SDL3/SDL.h>
+#include <format>
 #include <spdlog/spdlog.h>
 #include <stdexcept>
 #define STB_IMAGE_IMPLEMENTATION
@@ -67,10 +68,14 @@ int Application::Run() {
             NewFrame();
             m_WindowManager.Render();
             ImGui::Render();
+            UpdateWindowTitle();
             EndFrame();
         } catch (const std::exception &error) {
             // Keep running so the user can see the error and carry on
             ShowErrorMessage("Runtime Error", error.what());
+        }
+        if (m_WindowManager.IsQuitConfirmed()) {
+            m_IsOpen = false;
         }
     }
     spdlog::info("Application closing");
@@ -211,8 +216,25 @@ void Application::PollEvents() {
         const bool main_window_closed =
             event.type == SDL_EVENT_WINDOW_CLOSE_REQUESTED && event.window.windowID == SDL_GetWindowID(m_SDLWindow);
         if (event.type == SDL_EVENT_QUIT || main_window_closed) {
-            m_IsOpen = false;
+            // The window manager asks before unsaved changes are lost, and the loop stops once it confirms.
+            // Minimized windows draw no frames, so the window is restored for the question to show up
+            m_WindowManager.RequestQuit();
+            if (SDL_GetWindowFlags(m_SDLWindow) & SDL_WINDOW_MINIMIZED) {
+                SDL_RestoreWindow(m_SDLWindow);
+            }
         }
+    }
+}
+
+// The window title names the document, with an asterisk while it has unsaved changes, as editors do
+void Application::UpdateWindowTitle() {
+    const GeneratorSession &session = m_WindowManager.GetSession();
+    const std::string title =
+        std::format("{}{} - siggen", session.GetDocumentName().empty() ? "Untitled" : session.GetDocumentName(),
+                    session.IsModified() ? " *" : "");
+    if (title != m_WindowTitle) {
+        SDL_SetWindowTitle(m_SDLWindow, title.c_str());
+        m_WindowTitle = title;
     }
 }
 
@@ -258,6 +280,8 @@ void Application::EndFrame() {
  */
 void Application::ShowErrorMessage(const std::string &title, const std::string &message) {
     spdlog::error("{}: {}", title, message);
+    // A program started from a file manager or the Windows release build has no console to show stderr
+    SDL_ShowSimpleMessageBox(SDL_MESSAGEBOX_ERROR, "siggen", message.c_str(), m_SDLWindow);
 }
 
 } // namespace GUI

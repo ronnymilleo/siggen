@@ -4,10 +4,19 @@
 
 ## Presets
 
-The **Presets** section accepts a complete path (default `default.preset`). Save
-writes the versioned text format below. Load parses into a temporary configuration
-and applies it only after every field passes validation. Errors leave current
-settings and the previous result intact. Saving replaces the selected preset.
+The **File** menu opens and saves presets: *Open Preset...* (Ctrl+O) asks for a path,
+*Save Preset* (Ctrl+S) writes back to the path the settings came from, and *Save Preset
+As...* (Ctrl+Shift+S) asks for a new one. Save writes the versioned text format below.
+Load parses into a temporary configuration and applies it only after every field passes
+validation. Errors leave current settings and the previous result intact, and appear in
+the Signal Setup window. Saving replaces the selected preset. The window title names the
+document and gains an asterisk while the settings differ from it; quitting then asks
+before the changes are lost.
+
+The guided lessons ship inside the executable: **File > Examples** lists them, each with
+its lesson notes in a tooltip, and loading one shows the notes in Signal Setup. Their
+sources live in `app-gui/examples/` and are compiled in, so the binary needs no data files
+next to it.
 
 ```ini
 [IQ Generator Preset]

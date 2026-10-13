@@ -9,7 +9,7 @@ DBPSK, DQPSK, 8-PSK, 8-DPSK, 4-ASK, OOK, 4-PAM, 16/32/64/256-QAM, 2-FSK, 4-FSK, 
 and complex white Gaussian noise (WGN), with optional AWGN and simple channel
 impairments on linear signals; inspect waveforms, constellations, eye diagrams,
 a two-sided spectrum and measurements (PAPR, EVM, measured SNR); work through
-guided lesson presets; save presets; export single signals; and
+guided lesson examples from the File menu; save presets; export single signals; and
 export SigMF recordings, measure recordings with `siggen-cli analyze`, script it all from Python/NumPy, and generate swept fixed-length frame datasets (`siggen-cli batch`) for classifier
 training. This application generates complex baseband, not an RF carrier.
 

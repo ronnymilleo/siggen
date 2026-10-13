@@ -5,6 +5,7 @@
 add_library(siggen-gui-lib
         STATIC
             application.cpp
+            examples.cpp
             generator_session.cpp
             theme.cpp
             widgets.cpp
@@ -38,6 +39,22 @@ function(read_font_bytes font_file name)
 endfunction()
 read_font_bytes(${PROJECT_SOURCE_DIR}/assets/fonts/Inter-Regular.ttf INTER_FONT)
 configure_file(font_files.h.in ${CMAKE_CURRENT_BINARY_DIR}/generated/font_files.h @ONLY)
+
+# =============================================================================
+# Guided lesson presets
+# =============================================================================
+
+# Each example is compiled in as a string, so the binary needs no data files next to it. Editing or adding an
+# example reruns CMake on the next build
+file(GLOB EXAMPLE_FILES CONFIGURE_DEPENDS ${CMAKE_CURRENT_SOURCE_DIR}/examples/*.preset)
+set(EXAMPLE_FILE_ENTRIES "")
+foreach(example_file IN LISTS EXAMPLE_FILES)
+    get_filename_component(example_name ${example_file} NAME)
+    file(READ ${example_file} example_text)
+    string(APPEND EXAMPLE_FILE_ENTRIES "    {\"${example_name}\", R\"siggen(${example_text})siggen\"},\n")
+    set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS ${example_file})
+endforeach()
+configure_file(example_files.h.in ${CMAKE_CURRENT_BINARY_DIR}/generated/example_files.h @ONLY)
 
 # stb_image loads the window icon
 target_include_directories(siggen-gui-lib

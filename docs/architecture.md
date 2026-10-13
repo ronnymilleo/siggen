@@ -39,7 +39,9 @@ Core modules:
 - `app-core/generation_job.*`: owned worker and immutable completed snapshot; `app-core/ber_job.*` runs a BER
   sweep the same way, with cancellation and progress.
 - `app-core/plot_data.*`: plot-ready, reduced copies of a generated signal.
-- `presets/`: guided lesson presets (`NN-name.preset`, with `#` note lines).
+- `app-gui/examples/`: guided lesson presets (`NN-name.preset`, with `#` note lines), compiled into the
+  binary by `app-gui/CMakeLists.txt` as strings (`example_files.h`, generated); `examples.cpp` takes the
+  menu title from the first note line and the tooltip description from the rest.
 
 Command line, GUI and Python:
 
@@ -56,8 +58,9 @@ Command line, GUI and Python:
 - `app-gui/windows/`: dockable windows deriving from `AppWindow` that keep only
   view state: Signal Setup (`controls_window.*`), Signal Summary
   (`summary_window.*`) and Signal Views (`views_window.*`, plots, BER and image export).
-- `app-gui/window_manager.*`: owns the session and the windows, and builds the
-  default dock layout (also from View > Reset Layout).
+- `app-gui/window_manager.*`: owns the session and the windows, builds the default dock layout (also from
+  View > Reset Layout), and owns the File and View menus: preset open/save, the compiled-in examples, the
+  theme switch, the shortcuts, and the quit confirmation for unsaved settings.
 - `python/`: C interface (`csrc/siggen_c.*`), the `siggen` Python package, its tests and the notebooks. The
   `siggen_*` C functions are an ABI loaded with ctypes, so they keep C naming.
 

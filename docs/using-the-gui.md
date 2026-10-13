@@ -73,11 +73,15 @@ same steady-state symbols as the constellation.
 The **Spectrum** tab selects the Welch window: periodic Hann (default),
 Hamming, Blackman or Rectangular. Hann output is unchanged from earlier releases.
 
-`presets/` contains numbered guided lessons. Lines beginning with `#` after the
-preset header are notes: parsers ignore them and the GUI shows them after
-**Load Preset**, so a lesson can say what to look at (for example
-`presets/02-qpsk-snr-8db.preset`). Lessons 11–16 cover 2-FSK, MSK, DQPSK under a
-carrier offset, 4-PAM, 256-QAM and OOK; lessons 17–21 cover OQPSK, pi/4-DQPSK, 32-QAM, 8-DPSK and 4-ASK. Controls also have hover tooltips, and the symbol rate, SPS, pulse, roll-off, span and SNR controls have a **?** button that opens a longer "what is this?" panel (the SNR panel also shows your current SNR as Es/N0 and Eb/N0).
+The guided lessons are compiled into the executable: **File > Examples** lists them,
+each with its notes in a tooltip, and loading one replaces the settings and shows the
+notes in Signal Setup. Lines beginning with `#` after the preset header are notes:
+parsers ignore them (for example the second lesson, `02-qpsk-snr-8db.preset`). Lessons
+11–16 cover 2-FSK, MSK, DQPSK under a carrier offset, 4-PAM, 256-QAM and OOK; lessons
+17–21 cover OQPSK, pi/4-DQPSK, 32-QAM, 8-DPSK and 4-ASK. Your own presets open and save
+from the **File** menu (Ctrl+O, Ctrl+S, Ctrl+Shift+S); the window title names the
+document and marks unsaved changes with an asterisk, and quitting with unsaved changes
+asks first. Controls also have hover tooltips, and the symbol rate, SPS, pulse, roll-off, span and SNR controls have a **?** button that opens a longer "what is this?" panel (the SNR panel also shows your current SNR as Es/N0 and Eb/N0).
 
 ## Views and spectrum calibration
 

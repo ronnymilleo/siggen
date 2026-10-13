@@ -53,6 +53,11 @@ ControlsWindow::ControlsWindow(GeneratorSession &session)
 }
 
 void ControlsWindow::Draw() {
+    // A preset or example replaced the settings wholesale; the bit editor follows them
+    if (m_SettingsVersion != m_Session.GetSettingsVersion()) {
+        m_SettingsVersion = m_Session.GetSettingsVersion();
+        ResetBitInput();
+    }
     const auto &config = m_Session.GetConfig();
     ImGui::PushItemWidth(std::clamp(ImGui::GetContentRegionAvail().x * .5f, 150.f, 360.f));
     DrawModulationSelector();
@@ -68,7 +73,7 @@ void ControlsWindow::Draw() {
     }
     ImGui::PopItemWidth();
     DrawActions(validation.empty());
-    DrawPresets();
+    DrawPresetNotes();
 }
 
 void ControlsWindow::DrawModulationSelector() {
@@ -300,21 +305,9 @@ void ControlsWindow::DrawActions(bool settings_valid) {
 }
 
 /**
- * @brief   Draws the collapsible preset save/load controls and the notes of the last loaded preset.
+ * @brief   Draws the notes of the loaded preset or example, so the lesson text stays beside the settings.
  */
-void ControlsWindow::DrawPresets() {
-    if (ImGui::CollapsingHeader("Presets")) {
-        ImGui::InputText("Preset path", m_PresetPath, sizeof m_PresetPath);
-        Hint("Guided lessons ship in the presets/ folder, for example presets/01-qpsk-clean.preset. Loading one shows "
-             "its notes below.");
-        if (ImGui::Button("Save Preset")) {
-            m_Session.SavePreset(m_PresetPath);
-        }
-        ImGui::SameLine();
-        if (ImGui::Button("Load Preset") && m_Session.LoadPreset(m_PresetPath)) {
-            ResetBitInput();
-        }
-    }
+void ControlsWindow::DrawPresetNotes() {
     const auto &notes = m_Session.GetPresetNotes();
     if (!notes.empty()) {
         ImGui::SeparatorText("Preset notes");

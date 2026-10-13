@@ -41,7 +41,7 @@ target_include_directories(siggen-tests
 
 target_compile_definitions(siggen-tests
         PRIVATE
-            SIGGEN_PRESET_DIR="${PROJECT_SOURCE_DIR}/presets"
+            SIGGEN_PRESET_DIR="${PROJECT_SOURCE_DIR}/app-gui/examples"
 )
 
 target_link_libraries(siggen-tests

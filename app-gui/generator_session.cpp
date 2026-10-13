@@ -8,6 +8,7 @@
 #include "preset.h"
 #include <algorithm>
 #include <cmath>
+#include <filesystem>
 #include <spdlog/spdlog.h>
 #include <utility>
 
@@ -34,6 +35,7 @@ void LogGenerated(const Core::GeneratedSignal &result) {
  * @param[in] config  Initial settings.
  */
 GeneratorSession::GeneratorSession(Core::GenerationConfig config) : m_Config(std::move(config)) {
+    MarkClean();
 }
 
 /**
@@ -60,6 +62,9 @@ const Core::GenerationConfig &GeneratorSession::GetConfig() const {
 bool GeneratorSession::SavePreset(const std::string &path) {
     try {
         Core::SavePreset(path, m_Config);
+        m_DocumentPath = path;
+        m_DocumentName = std::filesystem::path(path).filename().string();
+        MarkClean();
         spdlog::info("Saved preset: {}", path);
         m_Error.clear();
         return true;
@@ -81,6 +86,10 @@ bool GeneratorSession::LoadPreset(const std::string &path) {
         auto loaded = Core::LoadPreset(path);
         m_Config = std::move(loaded);
         m_PresetNotes = Core::LoadPresetNotes(path);
+        m_DocumentPath = path;
+        m_DocumentName = std::filesystem::path(path).filename().string();
+        MarkClean();
+        ++m_SettingsVersion;
         spdlog::info("Loaded preset: {}", path);
         m_Error.clear();
         return true;
@@ -92,11 +101,78 @@ bool GeneratorSession::LoadPreset(const std::string &path) {
 }
 
 /**
- * @brief   Returns the notes of the last loaded preset.
+ * @brief   Replaces the settings with a preset read from text, as the compiled-in examples are.
+ * @param[in] text  Preset text, in the file format.
+ * @param[in] name  Name shown in the window title, such as the example title.
+ * @return  True on success; on failure the settings stay as they were, and the error is logged and kept for
+ *          GetError().
+ * @note    The document keeps no path, so saving asks for a destination.
+ */
+bool GeneratorSession::LoadPresetText(const std::string &text, const std::string &name) {
+    try {
+        m_Config = Core::ParsePreset(text);
+        m_PresetNotes = Core::PresetNotes(text);
+        m_DocumentPath.clear();
+        m_DocumentName = name;
+        MarkClean();
+        ++m_SettingsVersion;
+        spdlog::info("Loaded example: {}", name);
+        m_Error.clear();
+        return true;
+    } catch (const std::exception &error) {
+        spdlog::error("Example load failed: {}", error.what());
+        m_Error = error.what();
+        return false;
+    }
+}
+
+/**
+ * @brief   Returns the notes of the last loaded preset or example.
  * @return  The lesson notes, or an empty string when none was loaded or it had none.
  */
 const std::string &GeneratorSession::GetPresetNotes() const {
     return m_PresetNotes;
+}
+
+/**
+ * @brief   Tells whether the settings differ from the last preset loaded or saved.
+ * @return  True while there are unsaved changes; Update() refreshes it once per frame.
+ */
+bool GeneratorSession::IsModified() const {
+    return m_Modified;
+}
+
+/**
+ * @brief   Returns the name of the document the settings came from.
+ * @return  The preset file name or the example title; empty while untitled.
+ */
+const std::string &GeneratorSession::GetDocumentName() const {
+    return m_DocumentName;
+}
+
+/**
+ * @brief   Returns where Save writes the settings.
+ * @return  The path of the last preset loaded or saved; empty while the document has neither.
+ */
+const std::string &GeneratorSession::GetDocumentPath() const {
+    return m_DocumentPath;
+}
+
+/**
+ * @brief   Returns how many times the settings were replaced wholesale, by a load or an example.
+ * @return  The version; windows reload their edit buffers when it changes.
+ */
+std::size_t GeneratorSession::GetSettingsVersion() const {
+    return m_SettingsVersion;
+}
+
+void GeneratorSession::MarkClean() {
+    try {
+        m_CleanSettings = Core::SerializePreset(m_Config);
+    } catch (const std::exception &) {
+        m_CleanSettings.clear();
+    }
+    m_Modified = false;
 }
 
 /**
@@ -131,6 +207,12 @@ bool GeneratorSession::IsGenerating() const {
  *          generation keeps the previous result.
  */
 void GeneratorSession::Update() {
+    // Settings that do not serialize are invalid, so they never match the clean state and count as modified
+    try {
+        m_Modified = Core::SerializePreset(m_Config) != m_CleanSettings;
+    } catch (const std::exception &) {
+        m_Modified = true;
+    }
     if (m_BerJob.Poll()) {
         ++m_BerVersion;
         if (!m_BerJob.Error().empty()) {
