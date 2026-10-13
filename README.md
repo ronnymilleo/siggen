@@ -2,20 +2,24 @@
 
 [![Release](https://img.shields.io/github/v/release/ronnymilleo/siggen)](https://github.com/ronnymilleo/siggen/releases)
 [![Release Date](https://img.shields.io/github/release-date/ronnymilleo/siggen)](https://github.com/ronnymilleo/siggen/releases)
-[![Coverage Status](https://coveralls.io/repos/github/ronnymilleo/siggen/badge.svg?branch=dev/ronnymilleo/update_badges)](https://coveralls.io/github/ronnymilleo/siggen?branch=dev/ronnymilleo/update_badges)
+[![Coverage Status](https://coveralls.io/repos/github/ronnymilleo/siggen/badge.svg?branch=main)](https://coveralls.io/github/ronnymilleo/siggen?branch=main)
 [![CodeFactor](https://www.codefactor.io/repository/github/ronnymilleo/siggen/badge)](https://www.codefactor.io/repository/github/ronnymilleo/siggen)
 [![CI](https://github.com/ronnymilleo/siggen/actions/workflows/ci.yml/badge.svg)](https://github.com/ronnymilleo/siggen/actions/workflows/ci.yml)
 
-A C++23 signal generator with a Dear ImGui/ImPlot desktop application (the
-default executable, `siggen`) and a separate command-line tool (`siggen-cli`).
-Generate reproducible complex I/Q samples for BPSK, QPSK, OQPSK, pi/4-DQPSK,
-DBPSK, DQPSK, 8-PSK, 8-DPSK, 4-ASK, OOK, 4-PAM, 16/32/64/256-QAM, 2-FSK, 4-FSK, MSK,
-and complex white Gaussian noise (WGN), with optional AWGN and simple channel
-impairments on linear signals; inspect waveforms, constellations, eye diagrams,
-a two-sided spectrum and measurements (PAPR, EVM, measured SNR); work through
-guided lesson examples from the File menu; save presets; export single signals; and
-export SigMF recordings, measure recordings with `siggen-cli analyze`, script it all from Python/NumPy, and generate swept fixed-length frame datasets (`siggen-cli batch`) for classifier
-training. This application generates complex baseband, not an RF carrier.
+A C++23 signal generator that produces reproducible complex baseband I/Q samples (not an RF
+carrier). It ships as a Dear ImGui/ImPlot desktop application, `siggen`, and a separate
+command-line tool, `siggen-cli`.
+
+- **Waveforms**: BPSK, QPSK, OQPSK, pi/4-DQPSK, DBPSK, DQPSK, 8-PSK, 8-DPSK, 4-ASK, OOK, 4-PAM,
+  16/32/64/256-QAM, 2-FSK, 4-FSK, MSK and complex white Gaussian noise (WGN)
+- **Channel**: optional AWGN and simple impairments on linear signals (CFO, phase noise, IQ imbalance,
+  DC offset, quantization)
+- **Views**: waveform, constellation, eye diagram, two-sided spectrum, BER and a step-by-step pipeline,
+  with measurements such as PAPR, EVM and measured SNR
+- **Learning**: guided lesson examples from the File menu
+- **Export**: presets, CSV, binary and SigMF recordings, and plot images as PNG or SVG
+- **Analysis and datasets**: measure recordings with `siggen-cli analyze`, generate swept fixed-length
+  frame datasets for classifier training with `siggen-cli batch`, and script it all from Python/NumPy
 
 <div align="center">
   <img width="900" src="docs/images/gui-waveform.png" alt="Waveform tab showing the I and Q traces of a 16-QAM signal with AWGN" />
@@ -39,15 +43,31 @@ training. This application generates complex baseband, not an RF carrier.
 Prebuilt releases are published on [GitHub Releases](https://github.com/ronnymilleo/siggen/releases):
 
 - **Linux**: an AppImage that runs on distributions with glibc 2.39 or newer (Ubuntu 24.04, Fedora 40,
-  Arch); make it executable and run it. The Vulkan loader and the driver for your GPU come from the system
+  Arch); make it executable (`chmod +x siggen-*.AppImage`) and run it. The Vulkan loader and the driver
+  for your GPU come from the system
 - **macOS**: a disk image for Apple silicon, with `siggen.app` to drag into Applications. It needs
   macOS 26 or newer, and, being ad-hoc signed and not notarized, must be opened once through
   **System Settings > Privacy & Security** (or `xattr -d com.apple.quarantine /Applications/siggen.app`)
 - **Windows**: a zip to extract anywhere; `siggen.exe` and `siggen-cli.exe` need Windows 10 or newer and
   no runtime beyond what Windows ships
 
-Each release carries a `SHA256SUMS` file and a build attestation verifiable with
-`gh attestation verify <file> --repo ronnymilleo/siggen`.
+Each release carries a `SHA256SUMS` file (check a download with `sha256sum -c --ignore-missing SHA256SUMS`
+on Linux, `shasum -a 256 -c --ignore-missing SHA256SUMS` on macOS, or `certutil -hashfile <file> SHA256` on
+Windows) and a build attestation verifiable with `gh attestation verify <file> --repo ronnymilleo/siggen`.
+
+## Quick start
+
+`siggen` opens the desktop application. `siggen-cli` with no arguments writes the default BPSK signal
+to `signal.csv`, with its metadata in `signal.csv.json`; options select the waveform, the noise and the format:
+
+```sh
+siggen-cli --modulation qpsk --snr-db 10 --noise-seed 7 -o noisy.csv
+siggen-cli --modulation 64-QAM --symbols 512 --sps 4 --format sigmf
+siggen-cli --help
+```
+
+See [Command line, logging and batch datasets](docs/command-line.md) for every option. The macOS
+release carries only the desktop application; build from source for `siggen-cli` there.
 
 ## Build and test
 
@@ -61,10 +81,13 @@ On every system the build needs:
   spdlog, CLI11, stb and GoogleTest. SDL is compiled and linked statically with the project, so
   every platform carries the same version
 
-Clone with the submodules (`git clone --recurse-submodules <repository-url>`), or, on an existing
-clone, run `git submodule update --init --recursive`. The binaries land in `out/<build-type>/bin/`:
-the default executable `siggen` opens the desktop application, and `siggen-cli` is the command-line
-tool (for example `./out/debug/bin/siggen-cli --help`).
+Clone with the submodules, or, on an existing clone, run `git submodule update --init --recursive`:
+
+```sh
+git clone --recurse-submodules https://github.com/ronnymilleo/siggen.git
+```
+
+The binaries land in `out/<build-type>/bin/` (for example `./out/debug/bin/siggen-cli --help`).
 
 ### Linux
 
@@ -113,16 +136,13 @@ ctest --test-dir build --output-on-failure
 ./out/debug/bin/siggen.app/Contents/MacOS/siggen
 ```
 
-`packaging/macos/build.sh` builds a release bundle and a disk image of it, and `packaging/appimage/build.sh`
-builds the Linux AppImage inside an Ubuntu 24.04 container.
-
 ### Windows
 
 Build with Visual Studio 2026 (the "Desktop development with C++" workload, which brings CMake and
 Ninja), from a Developer PowerShell. The GUI renders with Direct3D 12, part of Windows, and SDL3
 comes from its submodule, so nothing else is needed:
 
-```
+```powershell
 cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Debug -DSIGGEN_BUILD_TESTS=ON
 cmake --build build
 ctest --test-dir build --output-on-failure
@@ -160,17 +180,27 @@ cmake -S . -B build-asan -G Ninja -DCMAKE_BUILD_TYPE=Debug -DSIGGEN_BUILD_GUI=OF
 cmake -S . -B build-lib -G Ninja -DSIGGEN_BUILD_GUI=OFF -DSIGGEN_BUILD_CLI=OFF
 ```
 
-Tests print failures on run. GoogleTest is included
-only when `SIGGEN_BUILD_TESTS=ON`; Threads is discovered only for the CLI, GUI, or tests.
-Unused SDL subsystems, tests and examples default off. GoogleMock and ImGui/ImPlot demo sources are excluded from default builds.
+### Build notes
 
-Executables are in `out/<build-type>/bin/` and libraries in `out/<build-type>/lib/`
-of the source tree, while the CMake cache and objects stay in the build directory
-(`build*` in `.gitignore`). `compile_commands.json` of the last build is copied to the
-repository root for editors and `clang-tidy`. In-source builds are rejected. If clang-format is
-available, building either executable first formats every project source
-(the `format` target), so commit the formatted files. Identifier naming is checked
-with `run-clang-tidy -p build '/(app-core|app-cli|app-gui|tests)/|/main\.cpp$'`.
+- Executables go to `out/<build-type>/bin/` and libraries to `out/<build-type>/lib/` of the source
+  tree, while the CMake cache and objects stay in the build directory (`build*` in `.gitignore`). A
+  build directory with another name than `build`, such as `build-asan`, writes to
+  `out/<build-type>-asan/`, so trees with the same build type do not overwrite each other.
+  In-source builds are rejected.
+- `compile_commands.json` of the last build is copied to the repository root for editors and `clang-tidy`.
+- If clang-format is available, building either executable first formats every project source
+  (the `format` target), so commit the formatted files. Identifier naming is checked with
+  `run-clang-tidy -p build '/(app-core|app-cli|app-gui|tests)/|/main\.cpp$'`.
+- GoogleTest is included only when `SIGGEN_BUILD_TESTS=ON`, and Threads is discovered only for the CLI,
+  the GUI or the tests. Unused SDL subsystems, its tests and examples, GoogleMock and the ImGui/ImPlot
+  demo sources are left out of the build.
+
+### Packaging
+
+`packaging/appimage/build.sh` builds the Linux AppImage inside an Ubuntu 24.04 container, and
+`packaging/macos/build.sh` builds a release bundle and a disk image of it. On Windows,
+`cmake --install build --prefix <folder>` lays out the folder the release zips. Pushing a `v*` tag runs
+the same steps in the release workflow and publishes the result on GitHub Releases.
 
 ## Documentation
 
