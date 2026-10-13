@@ -1,5 +1,3 @@
-import os
-import subprocess
 import tempfile
 import unittest
 from pathlib import Path
@@ -144,21 +142,60 @@ class FileTests(unittest.TestCase):
             with self.assertRaises(ValueError):
                 siggen.load(Path(tmp) / "missing.sigmf-meta")
 
-    @unittest.skipUnless(os.environ.get("SIGGEN_CLI"), "SIGGEN_CLI points at the siggen-cli executable")
-    def test_matches_the_command_line_bit_for_bit(self):
-        cases = [
-            (["--modulation", "QPSK", "--snr-db", "15"], dict(modulation="QPSK", snr_db=15)),
-            (["--modulation", "16-QAM", "--sps", "4", "--cfo-hz", "7", "--iq-gain-db", "1", "--snr-db", "off"],
-             dict(modulation="16-QAM", sps=4, cfo_hz=7, iq_gain_db=1, snr_db=None)),
-            (["--modulation", "2-FSK", "--tone-spacing-hz", "500", "--snr-db", "20"],
-             dict(modulation="2-FSK", tone_spacing_hz=500, snr_db=20)),
-        ]
+
+class BatchTests(unittest.TestCase):
+    def test_sweep_writes_counted_frames(self):
         with tempfile.TemporaryDirectory() as tmp:
-            for n, (cli_args, options) in enumerate(cases):
-                out = Path(tmp) / f"c{n}.sigmf-data"
-                subprocess.run([os.environ["SIGGEN_CLI"], *cli_args, "--format", "sigmf", "-o", str(out)], check=True,
-                               capture_output=True)
-                np.testing.assert_array_equal(siggen.load(out).samples, siggen.generate(**options).samples, str(cli_args))
+            out = Path(tmp) / "dataset"
+            # BPSK has two SNR points, WGN ignores the SNR axis: three points, three frames.
+            result = siggen.batch(out, modulations=["BPSK", "WGN"], seeds=[7], snrs_db=[0, 10], frame_size=64)
+            self.assertEqual((result.point_count, result.frame_count), (3, 3))
+            self.assertTrue((out / "manifest.jsonl").is_file())
+            for name in ("frame_000000_000000.sigmf-data", "frame_000000_000000.sigmf-meta",
+                         "frame_000002_000000.sigmf-data", "frame_000002_000000.sigmf-meta"):
+                self.assertTrue((out / name).is_file(), name)
+            self.assertEqual((out / "frame_000000_000000.sigmf-data").stat().st_size, 64 * 8)
+
+    def test_frame_reads_back_with_load(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            out = Path(tmp) / "dataset"
+            siggen.batch(out, modulations=["QPSK"], snrs_db=[10], frame_size=2048)
+            rx = siggen.load(out / "frame_000000_000000.sigmf-meta")
+            self.assertEqual(len(rx.samples), 2048)
+            self.assertGreater(rx.sample_rate, 0)
+            freq, density = rx.psd()
+            self.assertEqual(len(freq), len(density))
+
+    def test_existing_directory_is_rejected(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            out = Path(tmp) / "dataset"
+            siggen.batch(out, frame_size=64)
+            before = sorted(p.name for p in out.iterdir())
+            with self.assertRaises(ValueError):
+                siggen.batch(out, frame_size=64)
+            self.assertEqual(sorted(p.name for p in out.iterdir()), before)
+
+    def test_out_of_range_snr_is_rejected_before_any_output(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            out = Path(tmp) / "dataset"
+            with self.assertRaises(ValueError):
+                siggen.batch(out, snrs_db=[10, 4000], frame_size=64)
+            self.assertFalse(out.exists())
+
+    def test_invalid_input_creates_nothing(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            for kwargs in (dict(modulations=["not-a-modulation"]),
+                           dict(modulations=["BPSK", "BPSK"]),
+                           dict(seeds=[7, 7]),
+                           dict(frame_size=0),
+                           dict(frames_per_point=0),
+                           dict(gain=0, snrs_db=[10])):
+                out = Path(tmp) / f"rejected-{abs(hash(str(kwargs)))}"
+                with self.assertRaises((ValueError, TypeError)):
+                    siggen.batch(out, **kwargs)
+                self.assertFalse(out.exists(), str(kwargs))
+            with self.assertRaises(ValueError):
+                siggen.batch(Path(tmp) / "rejected-format", format="cf32")
 
 
 class BerTest(unittest.TestCase):

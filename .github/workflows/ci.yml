@@ -80,7 +80,7 @@ jobs:
       - name: Check naming
         run: >-
           run-clang-tidy -p build -quiet -j "$(nproc)" -warnings-as-errors='*'
-          '/(app-core|app-cli|app-gui|tests)/|/main\.cpp$'
+          '/(app-core|app-gui|tests)/|/main\.cpp$'
 
       - name: Compiler cache statistics
         run: ccache --show-stats
@@ -132,8 +132,14 @@ jobs:
       - name: Set up the MSVC environment
         uses: ilammy/msvc-dev-cmd@v1
 
+      # The Python package tests need NumPy for the interpreter CMake discovers
+      - name: Install NumPy
+        run: python -m pip install --upgrade numpy
+
       - name: Configure
-        run: cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Debug -DSIGGEN_BUILD_TESTS=ON
+        run: >-
+          cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Debug -DSIGGEN_BUILD_TESTS=ON
+          -DSIGGEN_BUILD_PYTHON=ON
 
       - name: Build
         run: cmake --build build
@@ -154,11 +160,53 @@ jobs:
         with:
           submodules: recursive
 
+      # The Python package tests need NumPy for the interpreter CMake discovers
+      - name: Install NumPy
+        run: python3 -m pip install --upgrade numpy
+
       - name: Configure
-        run: cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Debug -DSIGGEN_BUILD_TESTS=ON
+        run: >-
+          cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Debug -DSIGGEN_BUILD_TESTS=ON
+          -DSIGGEN_BUILD_PYTHON=ON
 
       - name: Build
         run: cmake --build build
 
       - name: Run tests
         run: ctest --test-dir build --output-on-failure
+
+  wheel:
+    # A light Linux-only check of the distributable Python wheel: build it with scikit-build-core, install it into
+    # a clean venv and run the package tests against the installed library, so a release wheel is verified and not
+    # just the source tree through PYTHONPATH
+    runs-on: ubuntu-latest
+    container: archlinux:latest
+    steps:
+      - name: Install build dependencies
+        run: pacman -Syu --noconfirm --needed git cmake ninja gcc python python-pip
+
+      - name: Check out the repository
+        uses: actions/checkout@v7
+        with:
+          submodules: recursive
+
+      - name: Trust the workspace
+        run: git config --global --add safe.directory "$GITHUB_WORKSPACE"
+
+      # scikit-build-core (pinned in pyproject.toml) builds the wheel in an isolated environment
+      - name: Build the wheel
+        run: |
+          python -m venv /tmp/buildenv
+          /tmp/buildenv/bin/pip install --upgrade pip build
+          /tmp/buildenv/bin/python -m build --wheel --outdir /tmp/wheelhouse
+
+      # Installing the wheel into a clean venv (with NumPy) and running the tests proves the shipped package and
+      # its bundled library work; running from a directory outside the source tree makes `import siggen` resolve
+      # to the installed wheel and not python/siggen
+      - name: Install into a clean venv and test
+        run: |
+          python -m venv /tmp/testenv
+          /tmp/testenv/bin/pip install --upgrade pip numpy /tmp/wheelhouse/siggen-*.whl
+          cp python/tests/test_siggen.py /tmp/test_siggen.py
+          cd /tmp
+          /tmp/testenv/bin/python -m unittest test_siggen -v

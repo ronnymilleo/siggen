@@ -14,11 +14,10 @@ license.
 | SDL 3 | zlib license | Sam Lantinga | https://github.com/libsdl-org/SDL |
 | stb (stb_image, stb_image_write) | MIT or CC0-1.0, at your option | Sean Barrett | https://github.com/nothings/stb |
 | spdlog | MIT | Gabi Melman | https://github.com/gabime/spdlog |
-| CLI11 | BSD 3-Clause | University of Cincinnati, Henry Schreiner | https://github.com/CLIUtils/CLI11 |
 | Inter | SIL Open Font License 1.1 | The Inter Project Authors | https://github.com/rsms/inter |
 
 Their license texts are in `vendor/imgui/LICENSE.txt`, `vendor/implot/LICENSE`, `vendor/json/LICENSE.MIT`,
-`vendor/SDL/LICENSE.txt`, `vendor/stb/LICENSE`, `vendor/spdlog/LICENSE`, `vendor/cli11/LICENSE` and
+`vendor/SDL/LICENSE.txt`, `vendor/stb/LICENSE`, `vendor/spdlog/LICENSE` and
 `assets/fonts/Inter-LICENSE.txt`, and are installed with the program under `share/doc/siggen/licenses/` (Linux),
 `licenses/` (the Windows zip) or `siggen.app/Contents/Resources/licenses/` (macOS).
 

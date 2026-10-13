@@ -4,22 +4,22 @@
 
 ## Architecture and validation
 
-The code is split into three static libraries and two executables:
+The code is split into two static libraries and one executable, plus an optional shared C library for
+Python:
 
 - `app-core/` → `siggen-core-lib`, namespace `Core`: generation, analysis and file
-  I/O, with no graphics or command-line dependency.
-- `app-cli/` → `siggen-cli-lib`, namespace `Console`: CLI11 parsing and
-  configuration resolution, behind the `siggen-cli` executable
-  (`app-cli/main.cpp`).
+  I/O, with no graphics dependency.
 - `app-gui/` → `siggen-gui-lib`, namespace `GUI`: the SDL3 window and GPU device, the ImGui
   layer, the `Application` main loop and the generator windows. Built only with
   `SIGGEN_BUILD_GUI=ON`.
 - `main.cpp` → `siggen`: opens the desktop application, which takes no arguments.
+- `python/csrc/` → `siggen_c`: a shared C ABI over `siggen-core-lib`, loaded by the `siggen` Python
+  package with ctypes. Built only with `SIGGEN_BUILD_PYTHON=ON`.
 
 Core modules:
 
 - `app-core/waveform.*`: waveform descriptor table (identifiers, families,
-  capabilities) shared by CLI, GUI, validation, serialization and analysis.
+  capabilities) shared by GUI, validation, serialization and analysis.
 - `app-core/generator.*`: configuration, validation, mapping and shaping.
 - `app-core/noise.*`: documented Box–Muller Gaussian source and complex WGN.
 - `app-core/batch.*`: fixed-length frame generation, seed derivation and the
@@ -29,13 +29,13 @@ Core modules:
 - `app-core/measurements.*`: power statistics (PAPR), EVM, measured SNR and eye traces.
 - `app-core/pipeline.*`: the staged signal (bits, symbols, zero-inserted, filtered, noisy) behind the Pipeline tab.
 - `app-core/demodulator.*`, `app-core/theory.*`, `app-core/ber.*`: the ideal reference receiver and its bit
-  errors, the textbook BER curves, and the Eb/N0 sweep behind `siggen-cli ber`, the BER tab and the Python `ber_curve`.
+  errors, the textbook BER curves, and the Eb/N0 sweep behind the BER tab and the Python `ber_curve`.
 - `app-core/impairments.*`: carrier offset, phase noise, IQ imbalance, DC offset and quantization.
 - `app-core/plot_export.*`: renderer that draws a `Figure` (panels, series, axes, legend) to SVG or PNG;
   `app-core/plot_figures.*` builds the figures from the plotted data.
 - `app-core/preset.*`, `app-core/iq_export.*`: validated file I/O (CSV, SigMF).
 - `app-core/recording.*`, `app-core/analysis.*`: recording import (SigMF; JSON via the vendored nlohmann/json)
-  and the report behind `siggen-cli analyze`.
+  and the analysis report behind the Python `siggen.load` measurements.
 - `app-core/generation_job.*`: owned worker and immutable completed snapshot; `app-core/ber_job.*` runs a BER
   sweep the same way, with cancellation and progress.
 - `app-core/plot_data.*`: plot-ready, reduced copies of a generated signal.
@@ -43,10 +43,8 @@ Core modules:
   binary by `app-gui/CMakeLists.txt` as strings (`example_files.h`, generated); `examples.cpp` takes the
   menu title from the first note line and the tooltip description from the rest.
 
-Command line, GUI and Python:
+GUI and Python:
 
-- `app-cli/command_line.*`, `app-cli/cli_config.*`: CLI parsing and
-  defaults → preset → explicit-option resolution, used by `app-cli/main.cpp`.
 - `app-gui/application.*`: owns the SDL3 window, the SDL GPU device, the ImGui contexts and the
   frame loop (`Init`, `Run`, `Shutdown`); `main.cpp` only drives it.
 - `app-gui/theme.*`: the color themes (ImGui and ImPlot styles), the bundled Inter font and the theme
@@ -64,10 +62,8 @@ Command line, GUI and Python:
 - `python/`: C interface (`csrc/siggen_c.*`), the `siggen` Python package, its tests and the notebooks. The
   `siggen_*` C functions are an ABI loaded with ctypes, so they keep C naming.
 
-CLI tests exercise argument validation, configuration precedence, family
-switching, incompatible-option rejection, batch resolution, and the real
-executable without a display, including default CSV export, metadata, overwrite
-protection, batch manifests, and log-level precedence.
+The Python package tests (`python/tests`, run as `Python.Package`) exercise generation, measurement,
+SigMF round trips, BER and batch datasets against the compiled `siggen_c` library.
 
 Tests combine analytical limits and independent fixtures with mapping/Gray
 adjacency for every constellation, deterministic bit vectors, shaping

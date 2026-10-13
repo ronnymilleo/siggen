@@ -1,0 +1,37 @@
+# Python wheel of the siggen library, built with scikit-build-core.
+#
+# The wheel ships the `siggen` Python package (python/siggen) plus the compiled `siggen_c` shared library that
+# it loads with ctypes. Because the package uses ctypes and not the CPython C API, the library is tagged
+# `py3-none-<platform>`: one wheel per platform, installable on any Python 3.10+. The desktop application and
+# its packs are built separately by CMake (SIGGEN_BUILD_GUI) and are not part of this wheel.
+
+[build-system]
+requires = ["scikit-build-core>=0.10"]
+build-backend = "scikit_build_core.build"
+
+[project]
+name = "siggen"
+dynamic = ["version"]
+description = "Complex baseband signal generator for communications: desktop application and Python package."
+readme = "README.md"
+requires-python = ">=3.10"
+license = { text = "GPL-3.0-or-later" }
+dependencies = ["numpy"]
+
+[tool.scikit-build]
+minimum-version = "0.10"
+# Build only the shared library the package loads; the GUI, the tests and the desktop install rules stay out.
+cmake.build-type = "Release"
+build.targets = ["siggen_c"]
+cmake.define = { SIGGEN_BUILD_GUI = false, SIGGEN_BUILD_TESTS = false, SIGGEN_BUILD_PYTHON = true }
+# ctypes wrapper, not a CPython extension: one wheel per platform for every Python 3.
+wheel.py-api = "py3"
+wheel.packages = ["python/siggen"]
+# The wheel carries the project license and the notices of what the shared library bundles (json, stb).
+wheel.license-files = ["LICENSE", "THIRD_PARTY_NOTICES.md", "vendor/json/LICENSE.MIT", "vendor/stb/LICENSE"]
+
+# The single source of the version is project(... VERSION ...) in the root CMakeLists.txt.
+[tool.scikit-build.metadata.version]
+provider = "scikit_build_core.metadata.regex"
+input = "CMakeLists.txt"
+regex = '^\s*VERSION\s+(?P<value>\d+\.\d+\.\d+)'

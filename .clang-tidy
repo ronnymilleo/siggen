@@ -1,5 +1,5 @@
 Checks: '-*,readability-identifier-naming'
-HeaderFilterRegex: '.*/(app-core|app-cli|app-gui)/.*'
+HeaderFilterRegex: '.*/(app-core|app-gui)/.*'
 CheckOptions:
   readability-identifier-naming.NamespaceCase: CamelCase
   readability-identifier-naming.ClassCase: CamelCase

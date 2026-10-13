@@ -8,7 +8,11 @@
 #ifdef __cplusplus
 extern "C" {
 #endif
+#ifdef _WIN32
+#define SIGGEN_API __declspec(dllexport)
+#else
 #define SIGGEN_API __attribute__((visibility("default")))
+#endif
 typedef struct siggen_signal siggen_signal;
 
 SIGGEN_API const char* siggen_version(void);
@@ -66,6 +70,15 @@ SIGGEN_API long siggen_psd(const float* interleaved, size_t n, double sample_rat
 
 // format: 0 CSV, 1 SigMF. Requires a signal that carries its configuration.
 SIGGEN_API int siggen_export(const siggen_signal* signal, const char* path, int format, int overwrite, char* error, size_t error_capacity);
+
+// Batch sweep from preset text into a new output directory (an existing one is rejected).
+// `waveforms` are waveform names (NULL/0 keeps the preset's modulation); `seeds` and `snrs_db` may be
+// NULL with count 0 (the preset's seed and noise setting then apply). format: 0 CSV, 1 SigMF.
+// Returns 0 and fills *points/*frames with the BatchSummary counts, or -1 on failure.
+SIGGEN_API int siggen_batch(const char* preset_text, const char* const* waveforms, size_t waveform_count,
+                            const unsigned int* seeds, size_t seed_count, const double* snrs_db, size_t snr_count,
+                            int frame_size, int frames_per_point, int format, const char* output_dir,
+                            size_t* points, size_t* frames, char* error, size_t error_capacity);
 #ifdef __cplusplus
 }
 #endif
