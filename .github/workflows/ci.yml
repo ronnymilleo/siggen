@@ -56,7 +56,7 @@ jobs:
       - name: Configure
         run: >-
           cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Debug -DSIGGEN_BUILD_TESTS=ON
-          -DSIGGEN_BUILD_PYTHON=ON $COMPILER_LAUNCHER
+          -DSIGGEN_BUILD_PYTHON=ON -DSIGGEN_ENABLE_COVERAGE=ON $COMPILER_LAUNCHER
 
       - name: Build
         run: cmake --build build
@@ -68,6 +68,13 @@ jobs:
 
       - name: Run tests
         run: ctest --test-dir build --output-on-failure
+
+      - name: Report coverage
+        run: |
+          find build -name "*.gcda" | while read -r gcda; do gcov -p -o "$gcda" "$gcda"; done > /dev/null 2>&1
+          curl -sL https://coveralls.io/coveralls-linux.tar.gz | tar -xz && ./coveralls
+        env:
+          COVERALLS_REPO_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
       # One clang-tidy per core, on the sources of the project only (the vendor libraries are in the database too)
       - name: Check naming

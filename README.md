@@ -1,5 +1,9 @@
 # Siggen
 
+[![Release](https://img.shields.io/github/v/release/ronnymilleo/siggen)](https://github.com/ronnymilleo/siggen/releases)
+[![Release Date](https://img.shields.io/github/release-date/ronnymilleo/siggen)](https://github.com/ronnymilleo/siggen/releases)
+[![Coverage Status](https://coveralls.io/repos/github/ronnymilleo/siggen/badge.svg?branch=dev/ronnymilleo/update_badges)](https://coveralls.io/github/ronnymilleo/siggen?branch=dev/ronnymilleo/update_badges)
+[![CodeFactor](https://www.codefactor.io/repository/github/ronnymilleo/siggen/badge)](https://www.codefactor.io/repository/github/ronnymilleo/siggen)
 [![CI](https://github.com/ronnymilleo/siggen/actions/workflows/ci.yml/badge.svg)](https://github.com/ronnymilleo/siggen/actions/workflows/ci.yml)
 
 A C++23 signal generator with a Dear ImGui/ImPlot desktop application (the
@@ -136,6 +140,7 @@ The build is shaped by cache options:
 | `SIGGEN_BUILD_TESTS` | `OFF` | Build the GoogleTest executables |
 | `SIGGEN_BUILD_PYTHON` | `OFF` | Build the `siggen_c` shared library used by the Python package |
 | `SIGGEN_ENABLE_WARNINGS` | `ON` | Enable project compiler warnings |
+| `SIGGEN_ENABLE_COVERAGE` | `OFF` | Enable compiler coverage instrumentation |
 | `SIGGEN_SANITIZER` | `none` | `none`, `address-undefined`, or `thread` (Linux with GCC or Clang) |
 
 Common configurations:
