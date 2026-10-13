@@ -351,21 +351,35 @@ std::expected<void, std::string> ExportSignal(const std::filesystem::path &desti
     // Exclusive creation protects against files appearing after the UI existence check
     const auto mode = std::ios::binary | (overwrite ? std::ios::trunc : std::ios::noreplace);
     std::ofstream data_file, metadata_file;
+    const auto cleanup = [&] {
+        data_file.close();
+        metadata_file.close();
+        if (!overwrite) {
+            std::filesystem::remove(destination, ec);
+            std::filesystem::remove(sidecar, ec);
+        }
+    };
     data_file.open(destination, mode);
     if (!data_file) {
         return std::unexpected("Cannot create export destination: " + destination.string());
     }
     metadata_file.open(sidecar, mode);
     if (!metadata_file) {
+        cleanup();
         return std::unexpected("Cannot create metadata file: " + sidecar.string());
     }
     if (const auto written = WriteSamples(data_file, signal, format); !written.has_value()) {
+        cleanup();
         return written;
     }
     metadata_file << *metadata;
     data_file.close();
     metadata_file.close();
     if (data_file.fail() || metadata_file.fail()) {
+        if (!overwrite) {
+            std::filesystem::remove(destination, ec);
+            std::filesystem::remove(sidecar, ec);
+        }
         return std::unexpected(std::string("Export write or close failed"));
     }
     return {};

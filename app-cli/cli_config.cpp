@@ -336,7 +336,7 @@ void ApplyImpairments(const CLI::App &source, const CommandLine &cli, Core::Gene
  */
 std::expected<Core::GenerationConfig, std::string> ResolveBase(const CLI::App &source, const CommandLine &cli,
                                                                bool for_batch) {
-    const auto base = LoadPresetAndModulation(source, cli);
+    auto base = LoadPresetAndModulation(source, cli);
     if (!base.has_value()) {
         return std::unexpected(base.error());
     }

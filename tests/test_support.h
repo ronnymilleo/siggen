@@ -25,4 +25,14 @@ template <class T> T Unwrap(std::expected<T, std::string> result) {
     return std::move(*result);
 }
 
+/**
+ * @brief   Unwraps an expected void result, recording a test failure with the message on error.
+ * @param[in] result  The result to unwrap.
+ */
+inline void Unwrap(const std::expected<void, std::string> &result) {
+    if (!result.has_value()) {
+        ADD_FAILURE() << "Unexpected error: " << result.error();
+    }
+}
+
 #endif // SIGGEN_TEST_SUPPORT_H

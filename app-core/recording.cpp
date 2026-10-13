@@ -208,7 +208,7 @@ std::optional<GeneratedSignal> SignalFromRecording(const Recording &recording) {
     if (!recording.Config || recording.Frame) {
         return std::nullopt;
     }
-    const auto generated = Generate(*recording.Config);
+    auto generated = Generate(*recording.Config);
     if (!generated.has_value() || generated->Samples.size() != recording.Samples.size()) {
         return std::nullopt;
     }

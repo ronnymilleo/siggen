@@ -35,7 +35,7 @@ constexpr std::uint32_t StreamTagData = 1;
 constexpr std::uint32_t StreamTagNoise = 2;
 constexpr std::uint32_t StreamTagImpairment = 3;
 
-constexpr std::size_t MaxFrameSymbols = 65536;
+constexpr std::size_t MaxFrameSymbols = MaxSymbolCount;
 
 /**
  * @struct  FrameLocation

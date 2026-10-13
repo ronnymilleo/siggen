@@ -16,8 +16,9 @@
 
 namespace Core {
 
-// Explicit-count limit: eight bits per symbol (256-QAM) at up to 65536 symbols
-inline constexpr std::size_t MaxExplicitBits = 65536 * 8;
+// Explicit-count limit: eight bits per symbol (256-QAM) at up to MaxSymbolCount symbols
+inline constexpr int MaxSymbolCount = 65536;
+inline constexpr std::size_t MaxExplicitBits = static_cast<std::size_t>(MaxSymbolCount) * 8;
 
 /**
  * @struct  NoiseSourceSettings

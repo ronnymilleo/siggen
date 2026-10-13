@@ -950,6 +950,9 @@ std::expected<void, std::string> ExportFigure(const std::filesystem::path &desti
     file.write(reinterpret_cast<const char *>(bytes.data()), static_cast<std::streamsize>(bytes.size()));
     file.close();
     if (file.fail()) {
+        if (!overwrite) {
+            std::filesystem::remove(destination, ec);
+        }
         return std::unexpected("Failed writing image file: " + destination.string());
     }
     return {};

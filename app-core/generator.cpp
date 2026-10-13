@@ -74,7 +74,7 @@ std::expected<void, std::string> ValidateCommonSettings(const GenerationConfig &
 
 std::expected<void, std::string> ValidateTimingAndPulse(const GenerationConfig &config,
                                                         const WaveformDescriptor &descriptor) {
-    if (config.SymbolCount < 1 || config.SymbolCount > 65536) {
+    if (config.SymbolCount < 1 || config.SymbolCount > MaxSymbolCount) {
         return std::unexpected(std::string("Symbol count must be 1–65536"));
     }
     if (config.SamplesPerSymbol < 1 || config.SamplesPerSymbol > 32) {
@@ -559,7 +559,7 @@ std::expected<std::vector<std::complex<float>>, std::string> MapSymbols(Modulati
         return std::unexpected(std::string("Only linear waveforms have a symbol mapping"));
     }
     const auto bits_per_symbol = static_cast<std::size_t>(descriptor->BitsPerSymbol);
-    if (bits.size() > 65536 * bits_per_symbol || bits.size() % bits_per_symbol ||
+    if (bits.size() > static_cast<std::size_t>(MaxSymbolCount) * bits_per_symbol || bits.size() % bits_per_symbol ||
         bits.find_first_not_of("01") != std::string::npos) {
         return std::unexpected(std::string("Invalid mapper bit input"));
     }
