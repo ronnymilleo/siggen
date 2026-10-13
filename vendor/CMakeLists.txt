@@ -12,21 +12,6 @@ set(SPDLOG_INSTALL OFF CACHE BOOL "Install spdlog")
 add_subdirectory(spdlog)
 
 # =============================================================================
-# CLI11
-# =============================================================================
-
-set(CLI11_BUILD_DOCS OFF CACHE BOOL "Build CLI11 documentation")
-set(CLI11_BUILD_TESTS OFF CACHE BOOL "Build CLI11 tests")
-set(CLI11_BUILD_EXAMPLES OFF CACHE BOOL "Build CLI11 examples")
-set(CLI11_INSTALL OFF CACHE BOOL "Install CLI11")
-add_subdirectory(cli11)
-
-# CLI-only builds never discover or compile graphics dependencies.
-if(NOT SIGGEN_BUILD_GUI)
-    return()
-endif()
-
-# =============================================================================
 # SDL
 # =============================================================================
 

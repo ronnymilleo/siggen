@@ -22,7 +22,7 @@ first symbol of a scored range has no decision. Decided labels are compared with
 bits, giving the bit errors, the bit error rate (BER), and the symbol error rate (SER).
 
 Available for every linear waveform. FSK, MSK and noise sources have no reference receiver yet, so
-`siggen-cli ber` rejects them and the GUI hides the BER tab.
+`siggen.ber_curve` rejects them and the GUI hides the BER tab.
 
 Because there is no carrier recovery, a **carrier offset breaks coherent schemes at every
 Eb/N0**: the constellation rotates and the decisions spin through all quadrants (BER about
@@ -41,7 +41,7 @@ Es/N0 = SNR + 10 log10(SPS)          Eb/N0 = Es/N0 - 10 log10(bits per symbol)
 SNR_dB = Eb/N0_dB + 10 log10(bits per symbol / SPS)
 ```
 
-(see [Noise, SNR and channel impairments](noise-and-impairments.md)). `siggen-cli ber`, the GUI
+(see [Noise, SNR and channel impairments](noise-and-impairments.md)). The GUI
 and `siggen.ber_curve` apply this for you.
 
 ## Theory curves
@@ -76,11 +76,9 @@ a point with 100 errors is good to about 10 %.
 
   ![BER tab: measured 16-QAM against the theory curve, with the displayed signal marked](images/gui-ber.png)
 
-- **`siggen-cli ber`**: the same sweep from the command line ([Command line](command-line.md)).
-- **`siggen-cli analyze`**: bit errors, BER, measured Eb/N0 and theoretical BER for a recording
-  made by siggen, including the interior of batch frames ([Analysis, SigMF and Python](analysis-and-python.md)).
 - **Python**: `Signal.bit_errors()`, `siggen.theoretical_ber()` and `siggen.ber_curve()`, with a
-  notebook that reproduces the curves.
+  notebook that reproduces the curves. `siggen.load()` reads a recording made by siggen and reports its
+  bit errors, BER, measured Eb/N0 and theoretical BER ([Analysis, SigMF and Python](analysis-and-python.md)).
 
 Sweeps are reproducible: the data, noise and impairment seeds of every block derive from the
 configured seeds, the point index and the block index.

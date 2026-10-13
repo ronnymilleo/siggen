@@ -670,6 +670,36 @@ std::expected<FrameResult, std::string> GenerateFrame(const GenerationConfig &ba
     return frame;
 }
 
+std::expected<GenerationConfig, std::string> PrepareBatchBase(GenerationConfig config,
+                                                              const std::vector<Modulation> &waveforms) {
+    bool has_linear = false;
+    if (waveforms.empty()) {
+        has_linear = WaveformFamily(config.Modulation) != Family::Noise;
+    } else {
+        for (const auto waveform : waveforms) {
+            if (!IsValid(waveform)) {
+                return std::unexpected(std::string("Unsupported modulation"));
+            }
+            has_linear |= WaveformFamily(waveform) != Family::Noise;
+        }
+    }
+    // Only the preset's active family supplies settings; the other family starts from defaults.
+    const auto source_noise = config.NoiseSource;
+    if (WaveformFamily(config.Modulation) == Family::Noise) {
+        SelectWaveform(config, Modulation::BPSK);
+        config.NoiseSource = source_noise;
+        if (!has_linear) {
+            config.Modulation = Modulation::WGN;
+        }
+    } else {
+        config.NoiseSource = NoiseSourceSettings{};
+    }
+    if (const auto validated = Validate(config); !validated.has_value()) {
+        return std::unexpected(validated.error());
+    }
+    return config;
+}
+
 /**
  * @brief   Validates a complete sweep, including checked size arithmetic, before any output is created.
  * @param[in] request   Batch request.

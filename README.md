@@ -7,8 +7,8 @@
 [![CI](https://github.com/ronnymilleo/siggen/actions/workflows/ci.yml/badge.svg)](https://github.com/ronnymilleo/siggen/actions/workflows/ci.yml)
 
 A C++23 signal generator that produces reproducible complex baseband I/Q samples (not an RF
-carrier). It ships as a Dear ImGui/ImPlot desktop application, `siggen`, and a separate
-command-line tool, `siggen-cli`.
+carrier). It ships as a Dear ImGui/ImPlot desktop application, `siggen`, and a Python package,
+`siggen`, that scripts the same library.
 
 - **Waveforms**: BPSK, QPSK, OQPSK, pi/4-DQPSK, DBPSK, DQPSK, 8-PSK, 8-DPSK, 4-ASK, OOK, 4-PAM,
   16/32/64/256-QAM, 2-FSK, 4-FSK, MSK and complex white Gaussian noise (WGN)
@@ -18,8 +18,8 @@ command-line tool, `siggen-cli`.
   with measurements such as PAPR, EVM and measured SNR
 - **Learning**: guided lesson examples from the File menu
 - **Export**: presets, CSV, binary and SigMF recordings, and plot images as PNG or SVG
-- **Analysis and datasets**: measure recordings with `siggen-cli analyze`, generate swept fixed-length
-  frame datasets for classifier training with `siggen-cli batch`, and script it all from Python/NumPy
+- **Analysis and datasets**: measure recordings, generate swept fixed-length frame datasets for
+  classifier training, and sweep BER, all scriptable from Python/NumPy
 
 <div align="center">
   <img width="900" src="docs/images/gui-waveform.png" alt="Waveform tab showing the I and Q traces of a 16-QAM signal with AWGN" />
@@ -48,8 +48,11 @@ Prebuilt releases are published on [GitHub Releases](https://github.com/ronnymil
 - **macOS**: a disk image for Apple silicon, with `siggen.app` to drag into Applications. It needs
   macOS 26 or newer, and, being ad-hoc signed and not notarized, must be opened once through
   **System Settings > Privacy & Security** (or `xattr -d com.apple.quarantine /Applications/siggen.app`)
-- **Windows**: a zip to extract anywhere; `siggen.exe` and `siggen-cli.exe` need Windows 10 or newer and
-  no runtime beyond what Windows ships
+- **Windows**: a zip to extract anywhere; `siggen.exe` needs Windows 10 or newer and no runtime beyond
+  what Windows ships
+- **Python**: a `siggen-*.whl` per platform (Linux `manylinux_2_39_x86_64`, macOS `macosx_26_0_arm64`,
+  Windows `win_amd64`), installable with `pip install siggen-*.whl` on Python 3.10 or newer; it needs
+  only NumPy at run time
 
 Each release carries a `SHA256SUMS` file (check a download with `sha256sum -c --ignore-missing SHA256SUMS`
 on Linux, `shasum -a 256 -c --ignore-missing SHA256SUMS` on macOS, or `certutil -hashfile <file> SHA256` on
@@ -57,17 +60,28 @@ Windows) and a build attestation verifiable with `gh attestation verify <file> -
 
 ## Quick start
 
-`siggen` opens the desktop application. `siggen-cli` with no arguments writes the default BPSK signal
-to `signal.csv`, with its metadata in `signal.csv.json`; options select the waveform, the noise and the format:
+`siggen` opens the desktop application. The Python package generates, measures, sweeps BER and writes
+datasets from the same library:
 
 ```sh
-siggen-cli --modulation qpsk --snr-db 10 --noise-seed 7 -o noisy.csv
-siggen-cli --modulation 64-QAM --symbols 512 --sps 4 --format sigmf
-siggen-cli --help
+pip install siggen-*.whl        # from a release, on Python 3.10+
 ```
 
-See [Command line, logging and batch datasets](docs/command-line.md) for every option. The macOS
-release carries only the desktop application; build from source for `siggen-cli` there.
+```python
+import siggen
+
+tx = siggen.generate(modulation="16-QAM", sps=8, snr_db=20)
+tx.samples                      # complex64 NumPy array
+tx.symbol_accuracy().evm_percent
+
+# A swept fixed-length frame dataset for classifier training
+siggen.batch("dataset", modulations=["BPSK", "QPSK", "16-QAM"], seeds=[42, 43],
+             snrs_db=[-10, 0, 10], frame_size=2048, frames_per_point=100)
+```
+
+See [Analysis, SigMF and Python](docs/analysis-and-python.md) for the full Python API and batch
+datasets. To build the library from source instead of installing a wheel, see
+[Build and test](#build-and-test).
 
 ## Build and test
 
@@ -78,7 +92,7 @@ On every system the build needs:
   probes for it); tested with GCC 16, Apple Clang 21 and Visual Studio 2026
 - Ninja (or another CMake generator)
 - Git, for the submodules in `vendor/`: SDL3, Dear ImGui (`docking` branch), ImPlot, nlohmann/json,
-  spdlog, CLI11, stb and GoogleTest. SDL is compiled and linked statically with the project, so
+  spdlog, stb and GoogleTest. SDL is compiled and linked statically with the project, so
   every platform carries the same version
 
 Clone with the submodules, or, on an existing clone, run `git submodule update --init --recursive`:
@@ -87,7 +101,7 @@ Clone with the submodules, or, on an existing clone, run `git submodule update -
 git clone --recurse-submodules https://github.com/ronnymilleo/siggen.git
 ```
 
-The binaries land in `out/<build-type>/bin/` (for example `./out/debug/bin/siggen-cli --help`).
+The binaries land in `out/<build-type>/bin/` (for example `./out/debug/bin/siggen`).
 
 ### Linux
 
@@ -156,7 +170,6 @@ The build is shaped by cache options:
 | Option | Default | Effect |
 |---|---|---|
 | `SIGGEN_BUILD_GUI` | `ON` | Build the `siggen` desktop application and its library |
-| `SIGGEN_BUILD_CLI` | `ON` | Build the `siggen-cli` command-line tool and its library |
 | `SIGGEN_BUILD_TESTS` | `OFF` | Build the GoogleTest executables |
 | `SIGGEN_BUILD_PYTHON` | `OFF` | Build the `siggen_c` shared library used by the Python package |
 | `SIGGEN_ENABLE_WARNINGS` | `ON` | Enable project compiler warnings |
@@ -166,18 +179,19 @@ The build is shaped by cache options:
 Common configurations:
 
 ```sh
-# Release build of the GUI and the CLI
+# Release build of the GUI
 cmake -S . -B build-release -G Ninja -DCMAKE_BUILD_TYPE=Release
 
-# Headless: CLI and tests only, no graphics dependencies at all (also the sanitizer configuration)
-cmake -S . -B build-headless -G Ninja -DCMAKE_BUILD_TYPE=Debug -DSIGGEN_BUILD_GUI=OFF -DSIGGEN_BUILD_TESTS=ON
+# Headless: tests and the Python library only, no graphics dependencies at all (also the sanitizer configuration)
+cmake -S . -B build-headless -G Ninja -DCMAKE_BUILD_TYPE=Debug -DSIGGEN_BUILD_GUI=OFF \
+  -DSIGGEN_BUILD_TESTS=ON -DSIGGEN_BUILD_PYTHON=ON
 
 # Address + undefined-behavior sanitizers on the headless tests
 cmake -S . -B build-asan -G Ninja -DCMAKE_BUILD_TYPE=Debug -DSIGGEN_BUILD_GUI=OFF \
   -DSIGGEN_BUILD_TESTS=ON -DSIGGEN_SANITIZER=address-undefined
 
-# Library only (no executables): needs just the stb and json submodules
-cmake -S . -B build-lib -G Ninja -DSIGGEN_BUILD_GUI=OFF -DSIGGEN_BUILD_CLI=OFF
+# Python library only (no executables, no tests): needs just the stb and json submodules
+cmake -S . -B build-lib -G Ninja -DSIGGEN_BUILD_GUI=OFF -DSIGGEN_BUILD_PYTHON=ON
 ```
 
 ### Build notes
@@ -188,32 +202,34 @@ cmake -S . -B build-lib -G Ninja -DSIGGEN_BUILD_GUI=OFF -DSIGGEN_BUILD_CLI=OFF
   `out/<build-type>-asan/`, so trees with the same build type do not overwrite each other.
   In-source builds are rejected.
 - `compile_commands.json` of the last build is copied to the repository root for editors and `clang-tidy`.
-- If clang-format is available, building either executable first formats every project source
+- If clang-format is available, building the executable first formats every project source
   (the `format` target), so commit the formatted files. Identifier naming is checked with
-  `run-clang-tidy -p build '/(app-core|app-cli|app-gui|tests)/|/main\.cpp$'`.
-- GoogleTest is included only when `SIGGEN_BUILD_TESTS=ON`, and Threads is discovered only for the CLI,
-  the GUI or the tests. Unused SDL subsystems, its tests and examples, GoogleMock and the ImGui/ImPlot
+  `run-clang-tidy -p build '/(app-core|app-gui|tests)/|/main\.cpp$'`.
+- GoogleTest is included only when `SIGGEN_BUILD_TESTS=ON`, and Threads is discovered only for the GUI
+  or the tests. Unused SDL subsystems, its tests and examples, GoogleMock and the ImGui/ImPlot
   demo sources are left out of the build.
+- The Python wheel is built separately with `pip wheel .` or `python -m build` (scikit-build-core,
+  see `pyproject.toml`); it compiles only `siggen_c` with `SIGGEN_BUILD_GUI=OFF`.
 
 ### Packaging
 
 `packaging/appimage/build.sh` builds the Linux AppImage inside an Ubuntu 24.04 container, and
 `packaging/macos/build.sh` builds a release bundle and a disk image of it. On Windows,
-`cmake --install build --prefix <folder>` lays out the folder the release zips. Pushing a `v*` tag runs
-the same steps in the release workflow and publishes the result on GitHub Releases.
+`cmake --install build --prefix <folder>` lays out the folder the release zips. The Python wheel of each
+platform is built with scikit-build-core (see `pyproject.toml`). Pushing a `v*` tag runs the same steps in
+the release workflow and publishes the packs and the wheels on GitHub Releases.
 
 ## Documentation
 
 Everything else lives in [docs/](docs/):
 
-- [Command line, logging and batch datasets](docs/command-line.md): `siggen-cli` options, presets on the command line, log levels and `siggen-cli batch`.
 - [Using the GUI](docs/using-the-gui.md): controls, measurements, the eye diagram, spectral windows, the Pipeline tab, views and spectrum calibration, and exporting plot images as PNG or SVG.
 - [Modulations, mapping and reproducibility](docs/modulations.md): every mapping (PSK, QAM, PAM, ASK, differential schemes, OQPSK, FSK/MSK), seeds and bit order.
 - [Noise, SNR and channel impairments](docs/noise-and-impairments.md): AWGN, SNR vs Es/N0 vs Eb/N0, CFO, phase noise, IQ imbalance, DC offset and quantization.
 - [Pulse gain, length and timing](docs/signal-timing.md): amplitude gain, filter length, delay and sample counts.
 - [Presets and I/Q export](docs/presets-and-export.md): guided lessons, preset format, CSV, binary and SigMF export and metadata.
-- [Bit error rate and the reference receiver](docs/ber-and-receiver.md): the ideal receiver, BER against Eb/N0 with theory, `siggen-cli ber`, the BER tab and the Python API.
-- [Analysis, SigMF and Python](docs/analysis-and-python.md): `siggen-cli analyze`, reading recordings, the NumPy-based Python package and the notebooks.
+- [Bit error rate and the reference receiver](docs/ber-and-receiver.md): the ideal receiver, BER against Eb/N0 with theory, the BER tab and the Python API.
+- [Analysis, SigMF and Python](docs/analysis-and-python.md): reading recordings, batch datasets, the NumPy-based Python package and the notebooks.
 - [Architecture and validation](docs/architecture.md): source layout, tests and sanitizer workflows.
 
 ## License

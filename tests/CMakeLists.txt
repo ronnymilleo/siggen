@@ -55,34 +55,6 @@ siggen_target_options(siggen-tests)
 gtest_discover_tests(siggen-tests DISCOVERY_MODE PRE_TEST)
 
 # =============================================================================
-# Command line tests
-# =============================================================================
-
-if(SIGGEN_BUILD_CLI)
-    add_executable(siggen-cli-tests
-                cli_config_test.cpp
-                command_line_test.cpp
-    )
-
-    target_link_libraries(siggen-cli-tests
-            PRIVATE
-                siggen-cli-lib
-                GTest::gtest_main
-    )
-
-    siggen_target_options(siggen-cli-tests)
-    gtest_discover_tests(siggen-cli-tests DISCOVERY_MODE PRE_TEST)
-
-    # Runs the real executable end to end, without a display
-    add_test(NAME CLI.EndToEnd
-            COMMAND ${CMAKE_COMMAND}
-                -DEXECUTABLE=$<TARGET_FILE:siggen-cli>
-                -DWORK_DIR=${CMAKE_CURRENT_BINARY_DIR}/cli-integration
-                -P ${CMAKE_CURRENT_SOURCE_DIR}/cli_integration.cmake
-    )
-endif()
-
-# =============================================================================
 # GUI tests (need a display for the rendering checks)
 # =============================================================================
 

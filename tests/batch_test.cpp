@@ -52,6 +52,42 @@ std::vector<std::string> ReadLines(const std::filesystem::path &path) {
 
 } // namespace
 
+TEST(Batch, PrepareBatchBaseResetsTheInactiveFamily) {
+    // A linear preset keeps its own settings and drops the dormant noise-source settings.
+    GenerationConfig linear;
+    linear.NoiseSource.NoisePower = 7;
+    linear.NoiseSource.SampleCount = 999;
+    const auto from_linear = Unwrap(PrepareBatchBase(linear, {Modulation::BPSK, Modulation::WGN}));
+    EXPECT_EQ(from_linear.NoiseSource, NoiseSourceSettings{});
+    EXPECT_EQ(from_linear.Modulation, Modulation::BPSK);
+
+    // A noise preset in a mixed sweep keeps its noise-source settings and becomes a linear default.
+    GenerationConfig noise;
+    noise.Modulation = Modulation::WGN;
+    noise.NoiseSource.NoisePower = 3;
+    noise.NoiseSource.SampleCount = 512;
+    const auto mixed = Unwrap(PrepareBatchBase(noise, {Modulation::BPSK, Modulation::WGN}));
+    EXPECT_EQ(mixed.Modulation, Modulation::BPSK);
+    EXPECT_DOUBLE_EQ(mixed.NoiseSource.NoisePower, 3);
+    EXPECT_EQ(mixed.NoiseSource.SampleCount, 512);
+
+    // A noise preset with only noise waveforms stays WGN.
+    const auto only_noise = Unwrap(PrepareBatchBase(noise, {Modulation::WGN}));
+    EXPECT_EQ(only_noise.Modulation, Modulation::WGN);
+    EXPECT_DOUBLE_EQ(only_noise.NoiseSource.NoisePower, 3);
+
+    // An empty waveform list falls back to the preset's own family.
+    const auto empty_noise = Unwrap(PrepareBatchBase(noise, {}));
+    EXPECT_EQ(empty_noise.Modulation, Modulation::WGN);
+    GenerationConfig empty_linear;
+    empty_linear.Modulation = Modulation::QPSK;
+    empty_linear.NoiseSource.NoisePower = 5;
+    EXPECT_EQ(Unwrap(PrepareBatchBase(empty_linear, {})).NoiseSource, NoiseSourceSettings{});
+
+    // An unsupported waveform is rejected.
+    EXPECT_FALSE(PrepareBatchBase(linear, {static_cast<Modulation>(99)}).has_value());
+}
+
 TEST(Batch, SeedDerivationDeterministicAndSnrIndependent) {
     const auto data = DeriveDataSeed(42, Modulation::BPSK, 3);
     EXPECT_EQ(data, DeriveDataSeed(42, Modulation::BPSK, 3));

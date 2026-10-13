@@ -17,7 +17,7 @@ endif()
 set(CMAKE_OSX_DEPLOYMENT_TARGET 26.0 CACHE STRING "Oldest macOS the program runs on")
 
 project(siggen
-    VERSION 0.5.0
+    VERSION 0.6.0
     LANGUAGES CXX
 )
 
@@ -26,7 +26,6 @@ project(siggen
 # =============================================================================
 
 option(SIGGEN_BUILD_GUI "Build the ImGui desktop application" ON)
-option(SIGGEN_BUILD_CLI "Build the command-line tool" ON)
 option(SIGGEN_BUILD_TESTS "Build the tests" OFF)
 option(SIGGEN_ENABLE_WARNINGS "Enable project compiler warnings" ON)
 option(SIGGEN_ENABLE_COVERAGE "Enable compiler coverage instrumentation" OFF)
@@ -68,8 +67,6 @@ if(CLANG_FORMAT)
     file(GLOB_RECURSE ALL_SOURCE_FILES
             ${CMAKE_CURRENT_SOURCE_DIR}/app-core/*.cpp
             ${CMAKE_CURRENT_SOURCE_DIR}/app-core/*.h
-            ${CMAKE_CURRENT_SOURCE_DIR}/app-cli/*.cpp
-            ${CMAKE_CURRENT_SOURCE_DIR}/app-cli/*.h
             ${CMAKE_CURRENT_SOURCE_DIR}/app-gui/*.cpp
             ${CMAKE_CURRENT_SOURCE_DIR}/app-gui/*.h
             ${CMAKE_CURRENT_SOURCE_DIR}/tests/*.cpp
@@ -101,37 +98,23 @@ endfunction()
 
 siggen_require_submodule(stb stb_image_write.h)
 siggen_require_submodule(json include/nlohmann/json.hpp)
-if(SIGGEN_BUILD_GUI OR SIGGEN_BUILD_CLI OR SIGGEN_BUILD_TESTS)
+if(SIGGEN_BUILD_GUI OR SIGGEN_BUILD_TESTS)
     find_package(Threads REQUIRED)
 endif()
-if(SIGGEN_BUILD_GUI OR SIGGEN_BUILD_CLI)
-    siggen_require_submodule(spdlog CMakeLists.txt)
-    siggen_require_submodule(cli11 CMakeLists.txt)
-endif()
 if(SIGGEN_BUILD_GUI)
+    siggen_require_submodule(spdlog CMakeLists.txt)
     siggen_require_submodule(SDL CMakeLists.txt)
     siggen_require_submodule(imgui imgui.cpp)
     siggen_require_submodule(implot implot.cpp)
     siggen_require_submodule(stb stb_image.h)
 endif()
 
-if(SIGGEN_BUILD_GUI OR SIGGEN_BUILD_CLI)
+if(SIGGEN_BUILD_GUI)
     add_subdirectory(vendor)
 endif()
 add_subdirectory(app-core)
-if(SIGGEN_BUILD_CLI)
-    add_subdirectory(app-cli)
-endif()
 if(SIGGEN_BUILD_GUI)
     add_subdirectory(app-gui)
-endif()
-
-if(SIGGEN_BUILD_CLI)
-    add_executable(siggen-cli app-cli/main.cpp)
-    target_link_libraries(siggen-cli PRIVATE siggen-cli-lib spdlog::spdlog)
-    target_compile_definitions(siggen-cli PRIVATE SIGGEN_VERSION="${PROJECT_VERSION}")
-    siggen_target_options(siggen-cli)
-    add_dependencies(siggen-cli format)
 endif()
 
 if(SIGGEN_BUILD_GUI)
@@ -210,8 +193,6 @@ add_custom_target(copy_compile_commands
 
 if(SIGGEN_BUILD_GUI)
     add_dependencies(siggen copy_compile_commands)
-elseif(SIGGEN_BUILD_CLI)
-    add_dependencies(siggen-cli copy_compile_commands)
 endif()
 
 # =============================================================================
@@ -226,9 +207,6 @@ if(WIN32)
     if(SIGGEN_BUILD_GUI)
         install(TARGETS siggen RUNTIME DESTINATION .)
         install(FILES assets/icon.png DESTINATION assets)
-    endif()
-    if(SIGGEN_BUILD_CLI)
-        install(TARGETS siggen-cli RUNTIME DESTINATION .)
     endif()
 elseif(APPLE)
     set(SIGGEN_DOC_DIR siggen.app/Contents/Resources)
@@ -245,22 +223,18 @@ else()
         install(FILES assets/icon.png RENAME siggen.png
                 DESTINATION ${CMAKE_INSTALL_DATADIR}/icons/hicolor/256x256/apps)
     endif()
-    if(SIGGEN_BUILD_CLI)
-        install(TARGETS siggen-cli RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR})
-    endif()
 endif()
-install(FILES LICENSE README.md THIRD_PARTY_NOTICES.md DESTINATION ${SIGGEN_DOC_DIR})
-install(FILES vendor/json/LICENSE.MIT RENAME json-LICENSE.txt DESTINATION ${SIGGEN_DOC_DIR}/licenses)
-install(FILES vendor/stb/LICENSE RENAME stb-LICENSE.txt DESTINATION ${SIGGEN_DOC_DIR}/licenses)
+# The desktop packs carry the licenses of everything the program bundles. The Python wheel is built with
+# SIGGEN_BUILD_GUI=OFF and gets its licenses through scikit-build-core's wheel.license-files instead.
 if(SIGGEN_BUILD_GUI)
+    install(FILES LICENSE README.md THIRD_PARTY_NOTICES.md DESTINATION ${SIGGEN_DOC_DIR})
+    install(FILES vendor/json/LICENSE.MIT RENAME json-LICENSE.txt DESTINATION ${SIGGEN_DOC_DIR}/licenses)
+    install(FILES vendor/stb/LICENSE RENAME stb-LICENSE.txt DESTINATION ${SIGGEN_DOC_DIR}/licenses)
     install(FILES vendor/imgui/LICENSE.txt RENAME imgui-LICENSE.txt DESTINATION ${SIGGEN_DOC_DIR}/licenses)
     install(FILES vendor/implot/LICENSE RENAME implot-LICENSE.txt DESTINATION ${SIGGEN_DOC_DIR}/licenses)
     install(FILES vendor/SDL/LICENSE.txt RENAME SDL-LICENSE.txt DESTINATION ${SIGGEN_DOC_DIR}/licenses)
     install(FILES assets/fonts/Inter-LICENSE.txt DESTINATION ${SIGGEN_DOC_DIR}/licenses)
-endif()
-if(SIGGEN_BUILD_GUI OR SIGGEN_BUILD_CLI)
     install(FILES vendor/spdlog/LICENSE RENAME spdlog-LICENSE.txt DESTINATION ${SIGGEN_DOC_DIR}/licenses)
-    install(FILES vendor/cli11/LICENSE RENAME cli11-LICENSE.txt DESTINATION ${SIGGEN_DOC_DIR}/licenses)
 endif()
 
 # =============================================================================
@@ -273,7 +247,7 @@ message(STATUS "Project:      ${PROJECT_NAME}")
 message(STATUS "Version:      ${PROJECT_VERSION}")
 message(STATUS "Build type:   ${CMAKE_BUILD_TYPE}")
 message(STATUS "Compiler:     ${CMAKE_CXX_COMPILER_ID} ${CMAKE_CXX_COMPILER_VERSION}")
-message(STATUS "Executables:  GUI=${SIGGEN_BUILD_GUI} CLI=${SIGGEN_BUILD_CLI}")
+message(STATUS "Executables:  GUI=${SIGGEN_BUILD_GUI}")
 message(STATUS "Tests:        ${SIGGEN_BUILD_TESTS}")
 message(STATUS "Python:       ${SIGGEN_BUILD_PYTHON}")
 message(STATUS "Sanitizer:    ${SIGGEN_SANITIZER}")

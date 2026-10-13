@@ -1,4 +1,5 @@
 #include "siggen_c.h"
+#include "batch.h"
 #include "ber.h"
 #include "demodulator.h"
 #include "generator.h"
@@ -308,6 +309,58 @@ int siggen_export(const siggen_signal* s, const char* path, int format, int over
             set_error(error, error_capacity, exported.error());
             return -1;
         }
+        return 0;
+    });
+}
+
+int siggen_batch(const char* preset_text, const char* const* waveforms, std::size_t waveform_count,
+                 const unsigned int* seeds, std::size_t seed_count, const double* snrs_db, std::size_t snr_count,
+                 int frame_size, int frames_per_point, int format, const char* output_dir, std::size_t* points,
+                 std::size_t* frames, char* error, std::size_t error_capacity) {
+    return guarded(error, error_capacity, -1, [&] {
+        const auto config = Core::ParsePreset(preset_text ? preset_text : "");
+        if (!config.has_value()) {
+            set_error(error, error_capacity, config.error());
+            return -1;
+        }
+        std::vector<Core::Modulation> swept;
+        swept.reserve(waveform_count);
+        for (std::size_t k = 0; k < waveform_count; ++k) {
+            Core::Modulation modulation;
+            const char* name = waveforms ? waveforms[k] : nullptr;
+            if (!Core::ParseModulation(name ? name : "", modulation)) {
+                set_error(error, error_capacity, std::string("Unknown waveform: ") + (name ? name : ""));
+                return -1;
+            }
+            swept.push_back(modulation);
+        }
+        const auto base = Core::PrepareBatchBase(*config, swept);
+        if (!base.has_value()) {
+            set_error(error, error_capacity, base.error());
+            return -1;
+        }
+        if (format < 0 || format > 1) {
+            set_error(error, error_capacity, "format must be 0 (csv) or 1 (sigmf)");
+            return -1;
+        }
+        Core::BatchRequest request;
+        request.Base = *base;
+        request.Waveforms = std::move(swept);
+        if (seeds && seed_count > 0)
+            request.Seeds.assign(seeds, seeds + seed_count);
+        if (snrs_db && snr_count > 0)
+            request.SnrsDb.assign(snrs_db, snrs_db + snr_count);
+        request.FrameSize = frame_size;
+        request.FramesPerPoint = frames_per_point;
+        request.Format = format == 0 ? Core::ExportFormat::CSV : Core::ExportFormat::SigMF;
+        request.OutputDir = output_dir ? output_dir : "";
+        const auto summary = Core::RunBatch(request);
+        if (!summary.has_value()) {
+            set_error(error, error_capacity, summary.error());
+            return -1;
+        }
+        if (points) *points = summary->PointCount;
+        if (frames) *frames = summary->FrameCount;
         return 0;
     });
 }
