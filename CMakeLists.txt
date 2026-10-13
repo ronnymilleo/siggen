@@ -12,6 +12,10 @@ if(CMAKE_SOURCE_DIR STREQUAL CMAKE_BINARY_DIR)
     message(FATAL_ERROR "In-source builds are unsupported. Use cmake -S . -B build -G Ninja.")
 endif()
 
+# The numeric parsing uses std::from_chars on doubles, which the C++ library of macOS has from version 26. Only
+# read on macOS, and set before project() so the compiler checks are made for it
+set(CMAKE_OSX_DEPLOYMENT_TARGET 26.0 CACHE STRING "Oldest macOS the program runs on")
+
 project(siggen
     VERSION 0.5.0
     LANGUAGES CXX
@@ -28,6 +32,10 @@ option(SIGGEN_ENABLE_WARNINGS "Enable project compiler warnings" ON)
 option(SIGGEN_BUILD_PYTHON "Build the shared library used by the Python package" OFF)
 
 set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
+# The C++ runtime is linked statically, so the Windows zip of a release runs without the Visual C++ redistributable
+if(MSVC)
+    set(CMAKE_MSVC_RUNTIME_LIBRARY "MultiThreaded$<$<CONFIG:Debug>:Debug>")
+endif()
 # Executables and libraries go to out/<build-type>/ of the source tree, like imcsim, independent of the
 # build directory that holds the CMake cache and the object files. A tree whose folder is not the documented
 # plain "build" writes to out/<build-type>-<tree>/ instead, so trees that share a build type (sanitizers,
@@ -148,6 +156,16 @@ if(SIGGEN_BUILD_GUI)
         if(MSVC)
             target_link_options(siggen PRIVATE $<$<NOT:$<CONFIG:Debug>>:/SUBSYSTEM:WINDOWS /ENTRY:mainCRTStartup>)
         endif()
+    elseif(APPLE)
+        # An application bundle, siggen.app, with the icon packaging/macos/make_icns.py writes from assets/
+        set_source_files_properties(packaging/macos/siggen.icns PROPERTIES MACOSX_PACKAGE_LOCATION Resources)
+        target_sources(siggen PRIVATE packaging/macos/siggen.icns)
+        set_target_properties(siggen PROPERTIES
+                MACOSX_BUNDLE TRUE
+                MACOSX_BUNDLE_INFO_PLIST ${CMAKE_CURRENT_SOURCE_DIR}/packaging/macos/Info.plist.in
+                MACOSX_BUNDLE_GUI_IDENTIFIER io.github.ronnymilleo.siggen
+                MACOSX_BUNDLE_BUNDLE_VERSION ${PROJECT_VERSION}
+                MACOSX_BUNDLE_SHORT_VERSION_STRING ${PROJECT_VERSION})
     endif()
 endif()
 
@@ -193,6 +211,55 @@ if(SIGGEN_BUILD_GUI)
     add_dependencies(siggen copy_compile_commands)
 elseif(SIGGEN_BUILD_CLI)
     add_dependencies(siggen-cli copy_compile_commands)
+endif()
+
+# =============================================================================
+# Installation
+# =============================================================================
+
+# Windows gets a folder to unzip anywhere, macOS the application bundle, and Linux the standard layout, with the
+# desktop entry and the icon. All carry the licenses of what the program includes. The window icon, assets/icon.png,
+# travels with the program: the GUI looks for it next to the executable and in ../share/siggen/assets
+if(WIN32)
+    set(SIGGEN_DOC_DIR .)
+    if(SIGGEN_BUILD_GUI)
+        install(TARGETS siggen RUNTIME DESTINATION .)
+        install(FILES assets/icon.png DESTINATION assets)
+    endif()
+    if(SIGGEN_BUILD_CLI)
+        install(TARGETS siggen-cli RUNTIME DESTINATION .)
+    endif()
+elseif(APPLE)
+    set(SIGGEN_DOC_DIR siggen.app/Contents/Resources)
+    if(SIGGEN_BUILD_GUI)
+        install(TARGETS siggen BUNDLE DESTINATION .)
+    endif()
+else()
+    include(GNUInstallDirs)
+    set(SIGGEN_DOC_DIR ${CMAKE_INSTALL_DOCDIR})
+    if(SIGGEN_BUILD_GUI)
+        install(TARGETS siggen RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR})
+        install(FILES assets/icon.png DESTINATION ${CMAKE_INSTALL_DATADIR}/siggen/assets)
+        install(FILES packaging/siggen.desktop DESTINATION ${CMAKE_INSTALL_DATADIR}/applications)
+        install(FILES assets/icon.png RENAME siggen.png
+                DESTINATION ${CMAKE_INSTALL_DATADIR}/icons/hicolor/256x256/apps)
+    endif()
+    if(SIGGEN_BUILD_CLI)
+        install(TARGETS siggen-cli RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR})
+    endif()
+endif()
+install(FILES LICENSE README.md THIRD_PARTY_NOTICES.md DESTINATION ${SIGGEN_DOC_DIR})
+install(FILES vendor/json/LICENSE.MIT RENAME json-LICENSE.txt DESTINATION ${SIGGEN_DOC_DIR}/licenses)
+install(FILES vendor/stb/LICENSE RENAME stb-LICENSE.txt DESTINATION ${SIGGEN_DOC_DIR}/licenses)
+if(SIGGEN_BUILD_GUI)
+    install(FILES vendor/imgui/LICENSE.txt RENAME imgui-LICENSE.txt DESTINATION ${SIGGEN_DOC_DIR}/licenses)
+    install(FILES vendor/implot/LICENSE RENAME implot-LICENSE.txt DESTINATION ${SIGGEN_DOC_DIR}/licenses)
+    install(FILES vendor/SDL/LICENSE.txt RENAME SDL-LICENSE.txt DESTINATION ${SIGGEN_DOC_DIR}/licenses)
+    install(FILES assets/fonts/Inter-LICENSE.txt DESTINATION ${SIGGEN_DOC_DIR}/licenses)
+endif()
+if(SIGGEN_BUILD_GUI OR SIGGEN_BUILD_CLI)
+    install(FILES vendor/spdlog/LICENSE RENAME spdlog-LICENSE.txt DESTINATION ${SIGGEN_DOC_DIR}/licenses)
+    install(FILES vendor/cli11/LICENSE RENAME cli11-LICENSE.txt DESTINATION ${SIGGEN_DOC_DIR}/licenses)
 endif()
 
 # =============================================================================

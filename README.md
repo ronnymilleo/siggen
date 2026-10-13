@@ -30,6 +30,21 @@ training. This application generates complex baseband, not an RF carrier.
   <p align="center"><em>Pipeline - bits to transmitted samples, step by step</em></p>
 </div>
 
+## Install
+
+Prebuilt releases are published on [GitHub Releases](https://github.com/ronnymilleo/siggen/releases):
+
+- **Linux**: an AppImage that runs on distributions with glibc 2.39 or newer (Ubuntu 24.04, Fedora 40,
+  Arch); make it executable and run it. The Vulkan loader and the driver for your GPU come from the system
+- **macOS**: a disk image for Apple silicon, with `siggen.app` to drag into Applications. It needs
+  macOS 26 or newer, and, being ad-hoc signed and not notarized, must be opened once through
+  **System Settings > Privacy & Security** (or `xattr -d com.apple.quarantine /Applications/siggen.app`)
+- **Windows**: a zip to extract anywhere; `siggen.exe` and `siggen-cli.exe` need Windows 10 or newer and
+  no runtime beyond what Windows ships
+
+Each release carries a `SHA256SUMS` file and a build attestation verifiable with
+`gh attestation verify <file> --repo ronnymilleo/siggen`.
+
 ## Build and test
 
 On every system the build needs:
@@ -81,17 +96,21 @@ ctest --test-dir build --output-on-failure
 
 ### macOS
 
-The GUI renders with Metal, part of macOS. Install the Xcode Command Line Tools
-(`xcode-select --install`) — recent enough that the C++ library provides `std::ios::noreplace`,
-which the configure step probes — then, with [Homebrew](https://brew.sh):
+The GUI renders with Metal, part of macOS, and builds as an application bundle (`siggen.app`). The C++
+library provides `std::from_chars` for doubles only from macOS 26, which the project pins as its deployment
+target, so the build needs the Xcode 26 Command Line Tools (`xcode-select --install`) or newer; then, with
+[Homebrew](https://brew.sh):
 
 ```sh
 brew install cmake ninja
 cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Debug -DSIGGEN_BUILD_TESTS=ON
 cmake --build build
 ctest --test-dir build --output-on-failure
-./out/debug/bin/siggen
+./out/debug/bin/siggen.app/Contents/MacOS/siggen
 ```
+
+`packaging/macos/build.sh` builds a release bundle and a disk image of it, and `packaging/appimage/build.sh`
+builds the Linux AppImage inside an Ubuntu 24.04 container.
 
 ### Windows
 

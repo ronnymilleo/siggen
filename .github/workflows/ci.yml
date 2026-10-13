@@ -135,8 +135,9 @@ jobs:
         run: ctest --test-dir build --output-on-failure
 
   macos:
-    # macos-latest is an Apple silicon image with the current Xcode; SDL3 comes from its vendor submodule
-    runs-on: macos-latest
+    # macos-26 is an Apple silicon image with Xcode 26, whose SDK the macOS 26 deployment target of the project
+    # needs; SDL3 comes from its vendor submodule
+    runs-on: macos-26
     steps:
       - name: Install build dependencies
         run: brew install cmake ninja

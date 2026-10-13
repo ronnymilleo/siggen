@@ -1,70 +1,29 @@
-# Build artifacts and directories
+# Build trees and their outputs
 build*
 cmake-build*
 out/
-debug/
-release/
-Debug/
-Release/
+# ...but not the packaging build scripts, matched by the build* pattern above
+!packaging/**/build.sh
 
-# CMake files
-CMakeCache.txt
-CMakeFiles/
-CMakeScripts/
-Testing/
-Makefile
-cmake_install.cmake
-install_manifest.txt
-CTestTestfile.cmake
-_deps/
-CMakeUserPresets.json
-
-# C/C++ compiled files
-*.o
-*.obj
-*.a
-*.lib
-*.so
-*.so.*
-*.dylib
-*.out
-*.app
-
-# Precompiled headers
-*.gch
-*.pch
-
-# Debug files
-*.dSYM/
-*.su
-*.idb
-*.pdb
-*.ilk
-*.map
-*.exp
-*.dwo
-
-# Dependencies
-*.d
-
-# Project specific
-.vs/
+# Editors, IDEs and local state
 .idea/
+.vs/
 .cache/
 .ccache/
-.nest/
-.venv/
 compile_commands.json
 imgui.ini
-*.log
-*.tmp
-*.bak
 
-# Local agent instructions
+# Local agent instructions and task data
 /AGENTS.md
 /CLAUDE.md
+.nest/
 
 # Python
+.venv/
 __pycache__/
 *.pyc
 .ipynb_checkpoints/
+
+# Presets written by the program, except the compiled-in examples
+*.preset
+!app-gui/examples/*.preset

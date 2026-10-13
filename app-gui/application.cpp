@@ -11,8 +11,11 @@
 #include "implot.h"
 #include "theme.h"
 #include <SDL3/SDL.h>
+#include <filesystem>
 #include <format>
 #include <spdlog/spdlog.h>
+#include <string>
+#include <vector>
 #define STB_IMAGE_IMPLEMENTATION
 #include "stb_image.h"
 
@@ -26,6 +29,27 @@ constexpr bool GPUDebugMode = false;
 #else
 constexpr bool GPUDebugMode = true;
 #endif
+
+/**
+ * @brief   Locates assets/icon.png: next to the executable (build tree, Windows zip, macOS bundle), in the shared
+ *          data folder of an installation (Linux, AppImage) or, failing those, in the working directory.
+ * @return  The first candidate that exists, or the working-directory relative path.
+ */
+std::string FindWindowIcon() {
+    std::vector<std::string> candidates;
+    // In SDL3 this is a cached path that must not be freed
+    if (const char *base = SDL_GetBasePath(); base != nullptr) {
+        candidates.push_back(std::string(base) + "assets/icon.png");
+        candidates.push_back(std::string(base) + "../share/siggen/assets/icon.png");
+    }
+    candidates.emplace_back("assets/icon.png");
+    for (const auto &path : candidates) {
+        if (std::filesystem::exists(path)) {
+            return path;
+        }
+    }
+    return candidates.back();
+}
 
 } // namespace
 
@@ -176,11 +200,11 @@ int Application::CreateGPUDevice() {
 }
 
 /**
- * @brief   Sets the window icon from assets/icon.png, relative to the working directory.
+ * @brief   Sets the window icon from assets/icon.png, located by FindWindowIcon().
  * @note    A missing icon only logs a warning.
  */
 void Application::LoadAndSetIcon() {
-    const std::string icon_path = "assets/icon.png";
+    const std::string icon_path = FindWindowIcon();
     int width = 0;
     int height = 0;
     int channels = 0;
