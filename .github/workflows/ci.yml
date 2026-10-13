@@ -162,7 +162,10 @@ jobs:
 
       # The Python package tests need NumPy for the interpreter CMake discovers
       - name: Install NumPy
-        run: python3 -m pip install --upgrade numpy
+        run: |
+          python3 -m venv /tmp/buildenv
+          source /tmp/buildenv/bin/activate
+          python3 -m pip install --upgrade numpy
 
       - name: Configure
         run: >-
